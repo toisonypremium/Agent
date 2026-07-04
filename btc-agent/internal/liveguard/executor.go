@@ -3,7 +3,9 @@ package liveguard
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"btc-agent/internal/config"
@@ -17,6 +19,8 @@ const (
 	LiveOrderBlocked   = "LIVE_ORDER_BLOCKED"
 	LiveOrderRejected  = "LIVE_ORDER_REJECTED"
 )
+
+var lastClientOrderIDNano int64
 
 type HaltReader interface {
 	IsHalted() (bool, error)
@@ -165,7 +169,20 @@ func clientOrderID(symbol string, canary bool) string {
 	if canary {
 		prefix = "btccanary"
 	}
-	return fmt.Sprintf("%s%s%d", prefix, s, time.Now().Unix())
+	return fmt.Sprintf("%s%s%s", prefix, s, nextClientOrderIDSuffix())
+}
+
+func nextClientOrderIDSuffix() string {
+	now := time.Now().UnixNano()
+	for {
+		prev := atomic.LoadInt64(&lastClientOrderIDNano)
+		if now <= prev {
+			now = prev + 1
+		}
+		if atomic.CompareAndSwapInt64(&lastClientOrderIDNano, prev, now) {
+			return strconv.FormatInt(now, 36)
+		}
+	}
 }
 
 func autoOrderBlockers(cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition, haltReader HaltReader) []string {

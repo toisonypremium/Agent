@@ -253,6 +253,23 @@ func TestExecuteAutoProofOrderBlocksWhenHaltReaderErrorsOrNil(t *testing.T) {
 	}
 }
 
+func TestClientOrderIDUniqueAndWithinOKXLimit(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 100; i++ {
+		id := clientOrderID("RENDERUSDT", true)
+		if seen[id] {
+			t.Fatalf("duplicate client order ID: %s", id)
+		}
+		seen[id] = true
+		if len(id) > 32 {
+			t.Fatalf("client order ID too long: len=%d id=%s", len(id), id)
+		}
+		if !strings.HasPrefix(id, "btccanaryrenderusdt") {
+			t.Fatalf("bad canary prefix: %s", id)
+		}
+	}
+}
+
 func TestExecuteManualProofOrderCanaryPrefix(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	cfg.Live.CanaryMode = true

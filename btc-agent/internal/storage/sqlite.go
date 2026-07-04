@@ -44,7 +44,8 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS live_order_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, status TEXT, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_fills(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, filled_quantity REAL, avg_price REAL, fee REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_positions(symbol TEXT PRIMARY KEY, inst_id TEXT, quantity REAL, avg_entry_price REAL, cost_basis REAL, fee_total REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
-		`CREATE TABLE IF NOT EXISTS live_position_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, delta_quantity REAL, fill_price REAL, notional_delta REAL, fee_delta REAL, fee_currency TEXT, position_qty REAL, avg_entry_price REAL, status TEXT, payload_json TEXT);`}
+		`CREATE TABLE IF NOT EXISTS live_position_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, delta_quantity REAL, fill_price REAL, notional_delta REAL, fee_delta REAL, fee_currency TEXT, position_qty REAL, avg_entry_price REAL, status TEXT, payload_json TEXT);`,
+		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {
 			return err
@@ -391,4 +392,25 @@ func mergeFeeCurrency(existing, incoming string) string {
 		return existing
 	}
 	return "MIXED"
+}
+
+func (d *DB) SetHaltStatus(halted bool) error {
+	val := "false"
+	if halted {
+		val = "true"
+	}
+	_, err := d.Exec(`INSERT OR REPLACE INTO operator_settings(key, value) VALUES('halted', ?)`, val)
+	return err
+}
+
+func (d *DB) IsHalted() (bool, error) {
+	var val string
+	err := d.QueryRow(`SELECT value FROM operator_settings WHERE key='halted'`).Scan(&val)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return true, err // Safe default on database errors
+	}
+	return val == "true", nil
 }

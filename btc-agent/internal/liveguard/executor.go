@@ -18,6 +18,10 @@ const (
 	LiveOrderRejected  = "LIVE_ORDER_REJECTED"
 )
 
+type HaltReader interface {
+	IsHalted() (bool, error)
+}
+
 type OrderPlacer interface {
 	PlaceSpotLimitOrder(ctx context.Context, req live.LimitOrderRequest) (live.OrderResult, error)
 }
@@ -33,9 +37,9 @@ type ExecutionResult struct {
 	Summary     string           `json:"summary"`
 }
 
-func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof, confirm string, placer OrderPlacer) ExecutionResult {
+func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof, confirm string, placer OrderPlacer, haltReader HaltReader) ExecutionResult {
 	result := ExecutionResult{GeneratedAt: time.Now(), Status: LiveOrderBlocked, ProofStatus: proof.Status, Candidate: proof.Candidate, Preflight: proof.Preflight}
-	reasons := manualOrderBlockers(cfg, proof, confirm, placer)
+	reasons := manualOrderBlockers(cfg, proof, confirm, placer, haltReader)
 	if len(reasons) > 0 {
 		result.Reasons = reasons
 		result.Summary = LiveOrderBlocked + ": " + strings.Join(reasons, "; ")
@@ -62,9 +66,9 @@ func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof
 	return result
 }
 
-func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition) ExecutionResult {
+func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition, haltReader HaltReader) ExecutionResult {
 	result := ExecutionResult{GeneratedAt: time.Now(), Status: LiveOrderBlocked, ProofStatus: proof.Status, Candidate: proof.Candidate, Preflight: proof.Preflight}
-	reasons := autoOrderBlockers(cfg, proof, placer, openOrders, positions)
+	reasons := autoOrderBlockers(cfg, proof, placer, openOrders, positions, haltReader)
 	if len(reasons) > 0 {
 		result.Reasons = reasons
 		result.Summary = LiveOrderBlocked + ": " + strings.Join(reasons, "; ")
@@ -91,8 +95,19 @@ func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, 
 	return result
 }
 
-func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer OrderPlacer) []string {
+func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer OrderPlacer, haltReader HaltReader) []string {
 	reasons := []string{}
+	halted := true
+	var err error
+	if haltReader != nil {
+		halted, err = haltReader.IsHalted()
+		if err != nil {
+			halted = true
+		}
+	}
+	if halted {
+		reasons = append(reasons, "operator halt active")
+	}
 	if confirm != ManualLiveConfirmPhrase {
 		reasons = append(reasons, "confirm phrase required")
 	}
@@ -149,8 +164,19 @@ func clientOrderID(symbol string) string {
 	return fmt.Sprintf("btcagent%s%d", s, time.Now().Unix())
 }
 
-func autoOrderBlockers(cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition) []string {
+func autoOrderBlockers(cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition, haltReader HaltReader) []string {
 	reasons := []string{}
+	halted := true
+	var err error
+	if haltReader != nil {
+		halted, err = haltReader.IsHalted()
+		if err != nil {
+			halted = true
+		}
+	}
+	if halted {
+		reasons = append(reasons, "operator halt active")
+	}
 	if !cfg.Live.AutoExecute {
 		reasons = append(reasons, "live.auto_execute=false")
 	}

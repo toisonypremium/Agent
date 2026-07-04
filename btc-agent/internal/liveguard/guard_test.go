@@ -122,6 +122,21 @@ func TestBuildProofReadyCapsNotional(t *testing.T) {
 	}
 }
 
+func TestBuildProofReadyCanaryModeScalesNotional(t *testing.T) {
+	cfg := liveTestConfig(t)
+	cfg.Live.CanaryMode = true
+	cfg.Live.CanaryMaxNotionalUSDT = 2.0
+	cfg.Live.MaxOrderNotionalUSDT = 10.0
+	plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 50, Quantity: 0.5}}}}}
+	got := BuildProof(cfg, plan)
+	if got.Status != ReadyForManualLiveProofOrder {
+		t.Fatalf("unexpected proof status: %+v", got)
+	}
+	if got.Candidate.Notional != 2.0 || got.Candidate.Quantity != 0.02 || !got.Candidate.Canary {
+		t.Fatalf("canary scaling failed in BuildProof: %+v", got.Candidate)
+	}
+}
+
 func liveTestConfig(t *testing.T) config.Config {
 	t.Helper()
 	t.Setenv("OKX_API_KEY", "set")

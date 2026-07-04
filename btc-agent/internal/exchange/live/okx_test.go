@@ -119,7 +119,7 @@ func TestParseOKXOrderStatus(t *testing.T) {
 			t.Fatalf("status[%d]=%s want %s", i, got[i].Status, status)
 		}
 	}
-	if got[1].FilledQuantity != 0.01 || got[1].AccumulatedFillSz != 0.01 || got[1].AvgPrice != 1999 || got[1].Fee != -0.001 || got[1].FeeCurrency != "USDT" {
+	if got[1].FilledQuantity != 0.01 || got[1].AccumulatedFillSz != 0.01 || got[1].AvgPrice != 1999 || got[1].Fee != -0.001 || got[1].FeeCurrency != "USDT" || got[1].UpdatedAt != 1700000000 {
 		t.Fatalf("bad parsed fills: %+v", got[1])
 	}
 }

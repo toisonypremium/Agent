@@ -80,6 +80,7 @@ live:
   min_account_free_usdt: 20
   require_post_only: true
   require_manual_confirm: true
+  auto_execute: false
   proof_only: true
 
 execution:

@@ -62,6 +62,35 @@ func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof
 	return result
 }
 
+func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition) ExecutionResult {
+	result := ExecutionResult{GeneratedAt: time.Now(), Status: LiveOrderBlocked, ProofStatus: proof.Status, Candidate: proof.Candidate, Preflight: proof.Preflight}
+	reasons := autoOrderBlockers(cfg, proof, placer, openOrders, positions)
+	if len(reasons) > 0 {
+		result.Reasons = reasons
+		result.Summary = LiveOrderBlocked + ": " + strings.Join(reasons, "; ")
+		return result
+	}
+	req := live.LimitOrderRequest{
+		InstID:        proof.Preflight.InstID,
+		Side:          strings.ToLower(proof.Candidate.Side),
+		Price:         proof.Candidate.Price,
+		Quantity:      proof.Candidate.Quantity,
+		PostOnly:      proof.Candidate.PostOnly,
+		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
+	}
+	order, err := placer.PlaceSpotLimitOrder(ctx, req)
+	result.Order = order
+	if err != nil {
+		result.Status = LiveOrderRejected
+		result.Reasons = []string{err.Error()}
+		result.Summary = LiveOrderRejected + ": " + err.Error()
+		return result
+	}
+	result.Status = LiveOrderSubmitted
+	result.Summary = fmt.Sprintf("%s: %s order_id=%s client_order_id=%s", LiveOrderSubmitted, order.InstID, order.OrderID, order.ClientOrderID)
+	return result
+}
+
 func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer OrderPlacer) []string {
 	reasons := []string{}
 	if confirm != ManualLiveConfirmPhrase {
@@ -118,4 +147,92 @@ func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer 
 func clientOrderID(symbol string) string {
 	s := strings.ToLower(strings.ReplaceAll(symbol, "-", ""))
 	return fmt.Sprintf("btcagent%s%d", s, time.Now().Unix())
+}
+
+func autoOrderBlockers(cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition) []string {
+	reasons := []string{}
+	if !cfg.Live.AutoExecute {
+		reasons = append(reasons, "live.auto_execute=false")
+	}
+	if cfg.Live.RequireManualConfirm {
+		reasons = append(reasons, "live.require_manual_confirm=true")
+	}
+	if !cfg.Live.Enabled {
+		reasons = append(reasons, "live.enabled=false")
+	}
+	if cfg.Live.ProofOnly {
+		reasons = append(reasons, "live.proof_only=true")
+	}
+	if !cfg.Execution.RealTradingEnabled {
+		reasons = append(reasons, "execution.real_trading_enabled=false")
+	}
+	if !cfg.Risk.NoFutures || !cfg.Risk.NoLeverage || !cfg.Risk.SpotLimitOnly {
+		reasons = append(reasons, "risk flags must enforce no futures/no leverage/spot limit only")
+	}
+	if len(openOrders) > 0 {
+		reasons = append(reasons, "open live order exists; reconcile/fill it before auto execution")
+	}
+	proofReady := proof.Status == ReadyForManualLiveProofOrder
+	if !proofReady {
+		reasons = append(reasons, "proof not ready: "+proof.Status)
+	}
+	if !proof.Account.AuthOK || !proof.Account.BalanceOK {
+		reasons = append(reasons, "account check not pass")
+	}
+	if proofReady {
+		if !proof.Preflight.Pass {
+			reasons = append(reasons, "preflight not pass")
+		}
+		if proof.Candidate.Side != "BUY" {
+			reasons = append(reasons, "candidate side must be BUY")
+		}
+		if strings.ToLower(proof.Candidate.Type) != "limit" {
+			reasons = append(reasons, "candidate type must be limit")
+		}
+		if cfg.Live.RequirePostOnly && !proof.Candidate.PostOnly {
+			reasons = append(reasons, "candidate post_only required")
+		}
+		if cfg.Live.MaxOrderNotionalUSDT > 0 && proof.Candidate.Notional > cfg.Live.MaxOrderNotionalUSDT+1e-9 {
+			reasons = append(reasons, "candidate notional above live max")
+		}
+		if proof.Preflight.InstID == "" {
+			reasons = append(reasons, "preflight inst_id required")
+		}
+		if !livePositionBudgetOK(cfg, proof.Candidate, positions) {
+			reasons = append(reasons, "candidate would exceed configured live position budget")
+		}
+	}
+	if placer == nil {
+		reasons = append(reasons, "order placer unavailable")
+	}
+	return uniqueStrings(reasons)
+}
+
+func livePositionBudgetOK(cfg config.Config, candidate CandidateOrder, positions []live.LivePosition) bool {
+	if candidate.Symbol == "" || candidate.Notional <= 0 {
+		return false
+	}
+	allocation := cfg.Portfolio.Allocation[strings.ToUpper(candidate.Symbol)]
+	if allocation <= 0 || cfg.Portfolio.TotalCapital <= 0 {
+		return false
+	}
+	budget := cfg.Portfolio.TotalCapital * allocation * cfg.Risk.MaxTotalDeploymentPerCycle
+	if cfg.Risk.MaxSingleAssetDeployment > 0 {
+		maxSingle := cfg.Portfolio.TotalCapital * cfg.Risk.MaxSingleAssetDeployment
+		if budget > maxSingle {
+			budget = maxSingle
+		}
+	}
+	if budget <= 0 {
+		return false
+	}
+	current := 0.0
+	want := strings.ToUpper(candidate.Symbol)
+	for _, pos := range positions {
+		if strings.EqualFold(pos.Symbol, want) {
+			current = pos.CostBasis
+			break
+		}
+	}
+	return current+candidate.Notional <= budget+1e-9
 }

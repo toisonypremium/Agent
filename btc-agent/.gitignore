@@ -1,0 +1,7 @@
+config.yaml
+data/*.db
+data/*.db-*
+bin/
+*.log
+.env
+secrets.env

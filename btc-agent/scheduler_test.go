@@ -62,9 +62,14 @@ func TestGetNextRunTime(t *testing.T) {
 
 	t.Run("invalid daily run time format", func(t *testing.T) {
 		now := time.Now()
-		_, err := getNextRunTime("invalid", time.UTC, now)
-		if err == nil {
-			t.Error("expected error for invalid format")
+		invalid := []string{"invalid", "25:00", "08:99", "8", "8:00", "08:0", "aa:00"}
+		for _, value := range invalid {
+			t.Run(value, func(t *testing.T) {
+				_, err := getNextRunTime(value, time.UTC, now)
+				if err == nil {
+					t.Error("expected error for invalid format")
+				}
+			})
 		}
 	})
 }

@@ -91,6 +91,29 @@ func TestValidateReconcileIntervalMinutes(t *testing.T) {
 	}
 }
 
+func TestValidateDailyRunTime(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.App.DailyRunTime = "08:00"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+
+	cfg.App.DailyRunTime = ""
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("empty daily run time should stay valid: %v", err)
+	}
+
+	for _, value := range []string{"invalid", "25:00", "08:99", "8", "8:00", "08:0"} {
+		t.Run(value, func(t *testing.T) {
+			cfg := validTestConfig()
+			cfg.App.DailyRunTime = value
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestValidateMaintenanceAllowsZeroDefaults(t *testing.T) {
 	cfg := validTestConfig()
 	if err := cfg.Validate(); err != nil {
@@ -112,6 +135,30 @@ func TestValidateMaintenanceRejectsNegativeValues(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := validTestConfig()
 			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateMaintenanceSchedulerTime(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Maintenance.SchedulerEnabled = true
+	cfg.Maintenance.SchedulerTime = "03:30"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+
+	cfg.Maintenance.SchedulerTime = ""
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("empty scheduler time should stay valid: %v", err)
+	}
+
+	for _, value := range []string{"invalid", "25:00", "08:99", "8", "8:00", "08:0"} {
+		t.Run(value, func(t *testing.T) {
+			cfg := validTestConfig()
+			cfg.Maintenance.SchedulerTime = value
 			if err := cfg.Validate(); err == nil {
 				t.Fatal("expected validation error")
 			}

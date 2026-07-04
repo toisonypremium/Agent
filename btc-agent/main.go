@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
@@ -84,13 +85,15 @@ func run(ctx context.Context, args []string) error {
 		return runExecuteLiveProofOrder(ctx, cfg, db, argValue(args, "--confirm"))
 	case "reconcile-live-orders":
 		return runReconcileLiveOrders(ctx, cfg, db)
+	case "live-positions":
+		return runLivePositions(cfg, db)
 	default:
 		return usage()
 	}
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|reconcile-live-orders|status> --config config.yaml")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|reconcile-live-orders|live-positions|status> --config config.yaml")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -603,6 +606,7 @@ func runReconcileLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 		result = liveguard.ReconcileOrders(ctx, client, open)
 	}
 
+	ledgerReport := liveguard.LiveLedgerReport{GeneratedAt: time.Now(), ManualCheckRequired: []string{}, Events: []live.LivePositionEvent{}}
 	for _, o := range result.Orders {
 		if o.Status != live.StatusUnknownNeedsManualCheck {
 			if err := db.SaveLiveOrderStatus(o); err != nil {
@@ -612,7 +616,17 @@ func runReconcileLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 		if err := db.SaveLiveOrderEvent(o); err != nil {
 			return fmt.Errorf("save live order event %s/%s: %w", o.ClientOrderID, o.OrderID, err)
 		}
+		if err := applyLedgerUpdate(db, o, &ledgerReport); err != nil {
+			return err
+		}
 	}
+
+	positions, err := db.LivePositions()
+	if err != nil {
+		return fmt.Errorf("load live positions: %w", err)
+	}
+	ledgerReport.Positions = positions
+	ledgerReport.Summary = liveguard.LiveLedgerSummary(ledgerReport)
 
 	if err := saveJSONFile("reports", "live_reconcile_latest.json", result); err != nil {
 		return err
@@ -626,12 +640,89 @@ func runReconcileLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 		return err
 	}
 
+	if err := writeLivePositionReport(ledgerReport); err != nil {
+		return err
+	}
+
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
-		_ = notify.Telegram(ctx, firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")), firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")), md)
+		_ = notify.Telegram(ctx, firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")), firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")), md+"\n"+livePositionMarkdown(ledgerReport))
 	}
 
 	fmt.Println(md)
+	fmt.Println(livePositionMarkdown(ledgerReport))
 	return nil
+}
+
+func applyLedgerUpdate(db *storage.DB, status live.OrderStatus, report *liveguard.LiveLedgerReport) error {
+	if status.Status == live.StatusUnknownNeedsManualCheck {
+		report.ManualCheckRequired = append(report.ManualCheckRequired, fmt.Sprintf("%s/%s status unknown", status.ClientOrderID, status.OrderID))
+		return nil
+	}
+	if status.ClientOrderID == "" && status.OrderID == "" {
+		report.ManualCheckRequired = append(report.ManualCheckRequired, fmt.Sprintf("%s missing order identifiers", status.InstID))
+		return nil
+	}
+	previous, _, err := db.LiveFillSnapshot(status.ClientOrderID, status.OrderID)
+	if err != nil {
+		return fmt.Errorf("load live fill snapshot %s/%s: %w", status.ClientOrderID, status.OrderID, err)
+	}
+	event, ok, err := liveguard.BuildPositionEvent(previous, status, time.Now())
+	if err != nil {
+		report.ManualCheckRequired = append(report.ManualCheckRequired, err.Error())
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	position, err := db.ApplyLivePositionEvent(event)
+	if err != nil {
+		report.ManualCheckRequired = append(report.ManualCheckRequired, err.Error())
+		return nil
+	}
+	event.PositionQty = position.Quantity
+	event.AvgEntryPrice = position.AvgEntryPrice
+	if err := db.SaveLivePositionEvent(event); err != nil {
+		return fmt.Errorf("save live position event %s/%s: %w", event.ClientOrderID, event.OrderID, err)
+	}
+	snapshot := liveguard.FillSnapshotFromStatus(status)
+	if snapshot.ClientOrderID == "" {
+		snapshot.ClientOrderID = previous.ClientOrderID
+	}
+	if snapshot.ClientOrderID == "" {
+		report.ManualCheckRequired = append(report.ManualCheckRequired, fmt.Sprintf("%s/%s missing client_order_id for fill snapshot", status.InstID, status.OrderID))
+		return nil
+	}
+	if err := db.SaveLiveFillSnapshot(snapshot); err != nil {
+		return fmt.Errorf("save live fill snapshot %s/%s: %w", snapshot.ClientOrderID, snapshot.OrderID, err)
+	}
+	report.Events = append(report.Events, event)
+	report.Updated++
+	return nil
+}
+
+func runLivePositions(cfg config.Config, db *storage.DB) error {
+	positions, err := db.LivePositions()
+	if err != nil {
+		return fmt.Errorf("load live positions: %w", err)
+	}
+	report := liveguard.LiveLedgerReport{GeneratedAt: time.Now(), Positions: positions, Events: []live.LivePositionEvent{}, ManualCheckRequired: []string{}}
+	report.Summary = liveguard.LiveLedgerSummary(report)
+	if err := writeLivePositionReport(report); err != nil {
+		return err
+	}
+	md := livePositionMarkdown(report)
+	fmt.Println(md)
+	return nil
+}
+
+func writeLivePositionReport(report liveguard.LiveLedgerReport) error {
+	if err := saveJSONFile("reports", "live_position_latest.json", report); err != nil {
+		return err
+	}
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join("reports", "live_position_latest.md"), []byte(livePositionMarkdown(report)), 0600)
 }
 
 func reconcileMarkdown(result liveguard.ReconcileResult) string {
@@ -643,6 +734,32 @@ func reconcileMarkdown(result liveguard.ReconcileResult) string {
 		for _, o := range result.Orders {
 			md += fmt.Sprintf("- %s: clOrdId=%s ordId=%s status=%s px=%.2f qty=%.4f avgPx=%.2f\n",
 				o.InstID, o.ClientOrderID, o.OrderID, o.Status, o.Price, o.Quantity, o.AvgPrice)
+		}
+	}
+	return md
+}
+
+func livePositionMarkdown(result liveguard.LiveLedgerReport) string {
+	md := fmt.Sprintf("LIVE POSITION LEDGER\n\nGenerated: %s\nSummary: %s\nLedger updates: %d | Manual checks: %d\n\n", result.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"), result.Summary, result.Updated, len(result.ManualCheckRequired))
+	md += "No order was placed.\n"
+	if len(result.Positions) == 0 {
+		md += "No live positions recorded.\n"
+	} else {
+		md += "\nPositions:\n"
+		for _, p := range result.Positions {
+			md += fmt.Sprintf("- %s: qty=%.8f avg_entry=%.8f cost=%.2f fee_total=%.8f fee_ccy=%s\n", p.Symbol, p.Quantity, p.AvgEntryPrice, p.CostBasis, p.FeeTotal, p.FeeCurrency)
+		}
+	}
+	if len(result.Events) > 0 {
+		md += "\nNew ledger events:\n"
+		for _, e := range result.Events {
+			md += fmt.Sprintf("- %s: order=%s delta_qty=%.8f fill_price=%.8f fee_delta=%.8f status=%s\n", e.Symbol, firstNonEmpty(e.ClientOrderID, e.OrderID), e.DeltaQuantity, e.FillPrice, e.FeeDelta, e.Status)
+		}
+	}
+	if len(result.ManualCheckRequired) > 0 {
+		md += "\nManual check required:\n"
+		for _, item := range result.ManualCheckRequired {
+			md += "- " + item + "\n"
 		}
 	}
 	return md

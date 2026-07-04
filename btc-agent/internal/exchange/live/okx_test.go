@@ -100,7 +100,7 @@ func TestRedact(t *testing.T) {
 func TestParseOKXOrderStatus(t *testing.T) {
 	data := []byte(`{"code":"0","msg":"","data":[
 		{"instId":"ETH-USDT","ordId":"1","clOrdId":"c1","state":"live","side":"buy","ordType":"limit","px":"2000.5","sz":"0.01","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000000"},
-		{"instId":"ETH-USDT","ordId":"2","clOrdId":"c2","state":"partially_filled","side":"buy","ordType":"limit","px":"2000","sz":"0.02","accFillSz":"0.01","avgPx":"1999","fee":"-0.001","uTime":"1700000000001"},
+		{"instId":"ETH-USDT","ordId":"2","clOrdId":"c2","state":"partially_filled","side":"buy","ordType":"limit","px":"2000","sz":"0.02","accFillSz":"0.01","avgPx":"1999","fee":"-0.001","feeCcy":"USDT","uTime":"1700000000001"},
 		{"instId":"ETH-USDT","ordId":"3","clOrdId":"c3","state":"filled","side":"buy","ordType":"limit","px":"2000","sz":"0.03","accFillSz":"0.03","avgPx":"1998","fee":"-0.002","uTime":"1700000000002"},
 		{"instId":"ETH-USDT","ordId":"4","clOrdId":"c4","state":"canceled","side":"buy","ordType":"limit","px":"2000","sz":"0.04","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000003"},
 		{"instId":"ETH-USDT","ordId":"5","clOrdId":"c5","state":"rejected","side":"buy","ordType":"limit","px":"2000","sz":"0.05","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000004"},
@@ -119,7 +119,7 @@ func TestParseOKXOrderStatus(t *testing.T) {
 			t.Fatalf("status[%d]=%s want %s", i, got[i].Status, status)
 		}
 	}
-	if got[1].FilledQuantity != 0.01 || got[1].AccumulatedFillSz != 0.01 || got[1].AvgPrice != 1999 || got[1].Fee != -0.001 {
+	if got[1].FilledQuantity != 0.01 || got[1].AccumulatedFillSz != 0.01 || got[1].AvgPrice != 1999 || got[1].Fee != -0.001 || got[1].FeeCurrency != "USDT" {
 		t.Fatalf("bad parsed fills: %+v", got[1])
 	}
 }

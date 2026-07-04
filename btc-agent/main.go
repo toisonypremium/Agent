@@ -85,6 +85,12 @@ func run(ctx context.Context, args []string) error {
 		return runExecuteLiveProofOrder(ctx, cfg, db, argValue(args, "--confirm"))
 	case "auto-live-order":
 		return runAutoLiveOrder(ctx, cfg, db)
+	case "operator-halt":
+		return runOperatorHalt(db)
+	case "operator-resume":
+		return runOperatorResume(db)
+	case "operator-status":
+		return runOperatorStatus(db)
 	case "reconcile-live-orders":
 		return runReconcileLiveOrders(ctx, cfg, db)
 	case "live-positions":
@@ -95,7 +101,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|reconcile-live-orders|live-positions|status> --config config.yaml")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|status> --config config.yaml")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -441,7 +447,7 @@ func runExecuteLiveProofOrder(ctx context.Context, cfg config.Config, db *storag
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
 		_ = notify.Telegram(ctx, firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")), firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")), liveOrderAttemptText(proof))
 	}
-	result := liveguard.ExecuteManualProofOrder(ctx, cfg, proof, confirm, placer)
+	result := liveguard.ExecuteManualProofOrder(ctx, cfg, proof, confirm, placer, db)
 	if result.Status == liveguard.LiveOrderSubmitted {
 		if err := db.SaveLiveOrderFromParams(
 			result.Order.ClientOrderID,
@@ -506,7 +512,7 @@ func runAutoLiveOrder(ctx context.Context, cfg config.Config, db *storage.DB) er
 		placer = client
 	}
 	proof := liveguard.BuildProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
-	result := liveguard.ExecuteAutoProofOrder(ctx, cfg, proof, placer, open, positions)
+	result := liveguard.ExecuteAutoProofOrder(ctx, cfg, proof, placer, open, positions, db)
 	if result.Status == liveguard.LiveOrderSubmitted {
 		if err := db.SaveLiveOrderFromParams(
 			result.Order.ClientOrderID,
@@ -629,7 +635,13 @@ func formatStatus(db *storage.DB) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	halted, _ := db.IsHalted()
+	haltStr := "INACTIVE"
+	if halted {
+		haltStr = "ACTIVE"
+	}
 	out := fmt.Sprintf(`BTC Agent Status
+- Operator halt: %s
 - BTC: %s | permission %s
 - Trend score: %.1f
 - Risk: %s | falling knife %s | FOMO %s
@@ -647,7 +659,7 @@ Flow
 
 Agent 2
 - State: %s
-`, analysis.MarketRegime, analysis.ActionPermission, analysis.TrendScore, analysis.RiskLevel, analysis.FallingKnifeRisk, analysis.FomoRisk, analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High, analysis.DeepSupportZone.Low, analysis.DeepSupportZone.High, analysis.ResistanceZone.Low, analysis.ResistanceZone.High, analysis.AccumulationZone.Low, analysis.AccumulationZone.High, analysis.InvalidationZone.Low, analysis.InvalidationZone.High, analysis.Flow.Bias, analysis.Flow.Score, analysis.Flow.Daily.SweepLow, analysis.Flow.Daily.ReclaimSupport, analysis.Flow.Daily.Absorption, analysis.Flow.Daily.FailedBreakout, analysis.Flow.Daily.Distribution, analysis.Flow.FourHour.SweepLow, analysis.Flow.FourHour.ReclaimSupport, analysis.Flow.FourHour.Absorption, analysis.Flow.FourHour.FailedBreakout, analysis.Flow.FourHour.Distribution, analysis.Flow.Summary, plan.State)
+`, haltStr, analysis.MarketRegime, analysis.ActionPermission, analysis.TrendScore, analysis.RiskLevel, analysis.FallingKnifeRisk, analysis.FomoRisk, analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High, analysis.DeepSupportZone.Low, analysis.DeepSupportZone.High, analysis.ResistanceZone.Low, analysis.ResistanceZone.High, analysis.AccumulationZone.Low, analysis.AccumulationZone.High, analysis.InvalidationZone.Low, analysis.InvalidationZone.High, analysis.Flow.Bias, analysis.Flow.Score, analysis.Flow.Daily.SweepLow, analysis.Flow.Daily.ReclaimSupport, analysis.Flow.Daily.Absorption, analysis.Flow.Daily.FailedBreakout, analysis.Flow.Daily.Distribution, analysis.Flow.FourHour.SweepLow, analysis.Flow.FourHour.ReclaimSupport, analysis.Flow.FourHour.Absorption, analysis.Flow.FourHour.FailedBreakout, analysis.Flow.FourHour.Distribution, analysis.Flow.Summary, plan.State)
 	if len(plan.Rotation) > 0 {
 		out += "- Asset ranking:\n"
 		for _, r := range plan.Rotation {
@@ -849,4 +861,33 @@ func livePositionMarkdown(result liveguard.LiveLedgerReport) string {
 		}
 	}
 	return md
+}
+
+func runOperatorHalt(db *storage.DB) error {
+	if err := db.SetHaltStatus(true); err != nil {
+		return fmt.Errorf("set halt status: %w", err)
+	}
+	fmt.Println("Operator halt: ACTIVE (Live trading halted)")
+	return nil
+}
+
+func runOperatorResume(db *storage.DB) error {
+	if err := db.SetHaltStatus(false); err != nil {
+		return fmt.Errorf("clear halt status: %w", err)
+	}
+	fmt.Println("Operator halt: INACTIVE (Live trading resumed)")
+	return nil
+}
+
+func runOperatorStatus(db *storage.DB) error {
+	halted, err := db.IsHalted()
+	if err != nil {
+		return fmt.Errorf("read halt status: %w", err)
+	}
+	status := "INACTIVE"
+	if halted {
+		status = "ACTIVE (trading halted)"
+	}
+	fmt.Printf("Operator halt: %s\n", status)
+	return nil
 }

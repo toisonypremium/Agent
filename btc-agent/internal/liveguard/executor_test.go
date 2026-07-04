@@ -2,6 +2,7 @@ package liveguard
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,6 +10,15 @@ import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange/live"
 )
+
+type fakeHaltReader struct {
+	halted bool
+	err    error
+}
+
+func (f fakeHaltReader) IsHalted() (bool, error) {
+	return f.halted, f.err
+}
 
 type fakeOrderPlacer struct {
 	result live.OrderResult
@@ -26,7 +36,7 @@ func (f *fakeOrderPlacer) PlaceSpotLimitOrder(ctx context.Context, req live.Limi
 func TestExecuteManualProofOrderBlocksWithoutConfirm(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	placer := &fakeOrderPlacer{}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, "wrong", placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, "wrong", placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -36,7 +46,7 @@ func TestExecuteManualProofOrderBlocksProofNotReady(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	proof.Status = NotReadyNoDeterministicOrder
 	placer := &fakeOrderPlacer{}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -46,7 +56,7 @@ func TestExecuteManualProofOrderBlocksRealTradingFalse(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	cfg.Execution.RealTradingEnabled = false
 	placer := &fakeOrderPlacer{}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -56,7 +66,7 @@ func TestExecuteManualProofOrderBlocksProofOnly(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	cfg.Live.ProofOnly = true
 	placer := &fakeOrderPlacer{}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -66,7 +76,7 @@ func TestExecuteManualProofOrderBlocksBadPreflight(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	proof.Preflight.Pass = false
 	placer := &fakeOrderPlacer{}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -76,7 +86,7 @@ func TestExecuteManualProofOrderBlocksMarketCandidate(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	proof.Candidate.Type = "market"
 	placer := &fakeOrderPlacer{}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -85,7 +95,7 @@ func TestExecuteManualProofOrderBlocksMarketCandidate(t *testing.T) {
 func TestExecuteManualProofOrderSubmits(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer)
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderSubmitted || !placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -99,7 +109,7 @@ func TestExecuteManualProofOrderNoSecretLeak(t *testing.T) {
 	secret := "supersecret"
 	proof.Status = NotReadyNoDeterministicOrder
 	proof.Summary = secret
-	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, &fakeOrderPlacer{})
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, &fakeOrderPlacer{}, fakeHaltReader{halted: false})
 	if strings.Contains(got.Summary, secret) || strings.Contains(strings.Join(got.Reasons, " "), secret) {
 		t.Fatalf("secret leaked: %+v", got)
 	}
@@ -109,7 +119,7 @@ func TestExecuteAutoProofOrderBlocksWhenDisabled(t *testing.T) {
 	cfg, proof := autoExecutableConfigAndProof()
 	cfg.Live.AutoExecute = false
 	placer := &fakeOrderPlacer{}
-	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil)
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -119,7 +129,7 @@ func TestExecuteAutoProofOrderBlocksOpenLiveOrder(t *testing.T) {
 	cfg, proof := autoExecutableConfigAndProof()
 	placer := &fakeOrderPlacer{}
 	open := []live.OrderStatus{{InstID: "ETH-USDT", ClientOrderID: "existing", Status: live.StatusLiveOpen}}
-	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, open, nil)
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, open, nil, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -132,7 +142,7 @@ func TestExecuteAutoProofOrderBlocksBudgetExceeded(t *testing.T) {
 	cfg, proof := autoExecutableConfigAndProof()
 	placer := &fakeOrderPlacer{}
 	positions := []live.LivePosition{{Symbol: "ETHUSDT", CostBasis: 244}}
-	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, positions)
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, positions, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderBlocked || placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -144,7 +154,7 @@ func TestExecuteAutoProofOrderBlocksBudgetExceeded(t *testing.T) {
 func TestExecuteAutoProofOrderSubmits(t *testing.T) {
 	cfg, proof := autoExecutableConfigAndProof()
 	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
-	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil)
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderSubmitted || !placer.called {
 		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
 	}
@@ -183,4 +193,62 @@ func autoExecutableConfigAndProof() (config.Config, Proof) {
 	cfg.Risk.MaxTotalDeploymentPerCycle = 0.70
 	cfg.Risk.MaxSingleAssetDeployment = 0.45
 	return cfg, proof
+}
+
+func TestExecuteManualProofOrderBlocksWhenHalted(t *testing.T) {
+	cfg, proof := executableConfigAndProof()
+	placer := &fakeOrderPlacer{}
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: true})
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result when halted: %+v called=%v", got, placer.called)
+	}
+	if !strings.Contains(strings.Join(got.Reasons, " "), "operator halt active") {
+		t.Fatalf("expected operator halt active blocker, got: %+v", got.Reasons)
+	}
+}
+
+func TestExecuteAutoProofOrderBlocksWhenHalted(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	placer := &fakeOrderPlacer{}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: true})
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result when halted: %+v called=%v", got, placer.called)
+	}
+	if !strings.Contains(strings.Join(got.Reasons, " "), "operator halt active") {
+		t.Fatalf("expected operator halt active blocker, got: %+v", got.Reasons)
+	}
+}
+
+func TestExecuteManualProofOrderBlocksWhenHaltReaderErrorsOrNil(t *testing.T) {
+	cfg, proof := executableConfigAndProof()
+	placer := &fakeOrderPlacer{}
+
+	// Nil haltReader
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, nil)
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result with nil reader: %+v", got)
+	}
+
+	// Error haltReader
+	got2 := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{err: fmt.Errorf("db error")})
+	if got2.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result with error reader: %+v", got2)
+	}
+}
+
+func TestExecuteAutoProofOrderBlocksWhenHaltReaderErrorsOrNil(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	placer := &fakeOrderPlacer{}
+
+	// Nil haltReader
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, nil)
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result with nil reader: %+v", got)
+	}
+
+	// Error haltReader
+	got2 := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{err: fmt.Errorf("db error")})
+	if got2.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result with error reader: %+v", got2)
+	}
 }

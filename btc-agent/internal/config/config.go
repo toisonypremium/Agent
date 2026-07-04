@@ -11,9 +11,10 @@ import (
 
 type Config struct {
 	App struct {
-		Mode         string `yaml:"mode"`
-		Timezone     string `yaml:"timezone"`
-		DailyRunTime string `yaml:"daily_run_time"`
+		Mode                     string `yaml:"mode"`
+		Timezone                 string `yaml:"timezone"`
+		DailyRunTime             string `yaml:"daily_run_time"`
+		ReconcileIntervalMinutes int    `yaml:"reconcile_interval_minutes"`
 	} `yaml:"app"`
 	Storage struct {
 		Path string `yaml:"path"`
@@ -118,6 +119,9 @@ func (c Config) Validate() error {
 	}
 	if c.App.Mode != "paper" && c.App.Mode != "report" && c.App.Mode != "live" {
 		return errors.New("app.mode must be paper, report, or live")
+	}
+	if c.App.ReconcileIntervalMinutes < 0 {
+		return errors.New("app.reconcile_interval_minutes cannot be negative")
 	}
 	if c.Execution.RealTradingEnabled {
 		if !c.Live.Enabled || c.Live.ProofOnly {

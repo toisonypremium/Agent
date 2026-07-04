@@ -66,7 +66,7 @@ Report starts with `BTC DAILY MARKET BRIEF` and includes: quick conclusion, mult
 
 `status` prints the latest regime, permission, risk, zones, liquidity flow, Agent 2 state, per-asset plan, and open paper order count.
 
-`maintenance` prunes old report rows, old live event rows, closed paper-order history over the configured cap, and old unprotected files in `reports/`. It does not prune candles, live orders, fills, positions, or operator halt settings.
+`maintenance` prunes old report rows, old live event rows, closed paper-order history over the configured cap, and old unprotected files in `reports/`. Scheduler can run the same cleanup automatically when `maintenance.enabled` and `maintenance.scheduler_enabled` are true. It does not prune candles, live orders, fills, positions, or operator halt settings.
 
 ## Backtest + Flow Audit
 

@@ -37,12 +37,28 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 	log.Printf("[Scheduler] Live order reconciliation interval: %v (Live enabled: %v)", reconcileInterval, cfg.Live.Enabled)
 
+	maintenanceEnabled := cfg.Maintenance.Enabled && cfg.Maintenance.SchedulerEnabled
+	maintenanceTime := cfg.Maintenance.SchedulerTime
+	if maintenanceTime == "" {
+		maintenanceTime = "03:30"
+	}
+	log.Printf("[Scheduler] Maintenance schedule: %s (enabled: %v)", maintenanceTime, maintenanceEnabled)
+
 	// Calculate initial next daily run time
 	nextDaily, err := getNextRunTime(dailyTime, loc, time.Now().In(loc))
 	if err != nil {
 		return err
 	}
 	log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
+
+	var nextMaintenance time.Time
+	if maintenanceEnabled {
+		nextMaintenance, err = getNextRunTime(maintenanceTime, loc, time.Now().In(loc))
+		if err != nil {
+			return err
+		}
+		log.Printf("[Scheduler] Next scheduled maintenance run: %s", nextMaintenance.Format("2006-01-02 15:04:05 MST"))
+	}
 
 	// Setup OS signal handling for graceful shutdown
 	shutdownCtx, cancel := context.WithCancel(ctx)
@@ -82,6 +98,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		waitUntil := nextDaily
 		if cfg.Live.Enabled && nextReconcile.Before(waitUntil) {
 			waitUntil = nextReconcile
+		}
+		if maintenanceEnabled && nextMaintenance.Before(waitUntil) {
+			waitUntil = nextMaintenance
 		}
 		wait := time.Until(waitUntil)
 		if wait < 0 {
@@ -123,12 +142,43 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			}
 			nextReconcile = time.Now().Add(reconcileInterval)
 		}
+
+		if maintenanceEnabled && !time.Now().Before(nextMaintenance) {
+			log.Println("[Scheduler] Triggering scheduled maintenance...")
+			if err := runMaintenance(cfg, db); err != nil {
+				log.Printf("[Scheduler] Maintenance error: %v", err)
+			}
+			now = time.Now().In(loc)
+			nextMaintenance, err = getNextRunTime(maintenanceTime, loc, now)
+			if err != nil {
+				log.Printf("[Scheduler] Error calculating next maintenance run time: %v", err)
+				nextMaintenance = now.Add(24 * time.Hour)
+			}
+			log.Printf("[Scheduler] Next scheduled maintenance run: %s", nextMaintenance.Format("2006-01-02 15:04:05 MST"))
+		}
 	}
 }
 
+func parseClockTime(value string) (int, int, error) {
+	if len(value) != 5 || value[2] != ':' {
+		return 0, 0, fmt.Errorf("invalid clock time %q", value)
+	}
+	for _, i := range []int{0, 1, 3, 4} {
+		if value[i] < '0' || value[i] > '9' {
+			return 0, 0, fmt.Errorf("invalid clock time %q", value)
+		}
+	}
+	hour := int(value[0]-'0')*10 + int(value[1]-'0')
+	min := int(value[3]-'0')*10 + int(value[4]-'0')
+	if hour > 23 || min > 59 {
+		return 0, 0, fmt.Errorf("invalid clock time %q", value)
+	}
+	return hour, min, nil
+}
+
 func getNextRunTime(dailyRunTime string, loc *time.Location, now time.Time) (time.Time, error) {
-	var hour, min int
-	if _, err := fmt.Sscanf(dailyRunTime, "%d:%d", &hour, &min); err != nil {
+	hour, min, err := parseClockTime(dailyRunTime)
+	if err != nil {
 		return time.Time{}, fmt.Errorf("parse daily_run_time %q: %w", dailyRunTime, err)
 	}
 	t := time.Date(now.Year(), now.Month(), now.Day(), hour, min, 0, 0, loc)

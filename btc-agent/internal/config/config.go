@@ -141,7 +141,7 @@ func (c Config) Validate() error {
 	if !c.Execution.PaperTrading && !c.Execution.RealTradingEnabled {
 		return errors.New("paper_trading or real_trading_enabled must be true")
 	}
-	if c.Live.CanaryMode {
+	if c.Live.CanaryMode && (c.Live.Enabled || c.Execution.RealTradingEnabled) {
 		if c.Live.CanaryMaxNotionalUSDT <= 0 {
 			return errors.New("live canary_max_notional_usdt must be positive when canary_mode is enabled")
 		}

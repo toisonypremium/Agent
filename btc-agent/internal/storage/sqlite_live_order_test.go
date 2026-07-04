@@ -108,13 +108,13 @@ func TestHaltStatusStorage(t *testing.T) {
 	}
 	defer db.Close()
 
-	// 1. Default should be false
+	// 1. Default should fail closed to halted=true
 	halted, err := db.IsHalted()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if halted {
-		t.Fatal("expected default halt status to be false")
+	if !halted {
+		t.Fatal("expected default halt status to be true")
 	}
 
 	// 2. Set to true

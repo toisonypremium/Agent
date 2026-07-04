@@ -88,6 +88,18 @@ func TestLiveLedgerRejectsNegativeSpotPosition(t *testing.T) {
 	}
 }
 
+func TestSaveLiveFillSnapshotRequiresClientOrderID(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if err := db.SaveLiveFillSnapshot(live.LiveFillSnapshot{OrderID: "o1", InstID: "ETH-USDT", Symbol: "ETHUSDT", Side: "BUY", FilledQuantity: 0.01}); err == nil {
+		t.Fatal("expected missing client_order_id rejection")
+	}
+}
+
 func TestLiveLedgerFeeCurrencyMixed(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
 	if err != nil {

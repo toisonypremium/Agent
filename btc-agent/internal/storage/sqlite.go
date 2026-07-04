@@ -45,7 +45,8 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS live_fills(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, filled_quantity REAL, avg_price REAL, fee REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_positions(symbol TEXT PRIMARY KEY, inst_id TEXT, quantity REAL, avg_entry_price REAL, cost_basis REAL, fee_total REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_position_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, delta_quantity REAL, fill_price REAL, notional_delta REAL, fee_delta REAL, fee_currency TEXT, position_qty REAL, avg_entry_price REAL, status TEXT, payload_json TEXT);`,
-		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`}
+		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`,
+		`INSERT OR IGNORE INTO operator_settings(key, value) VALUES('halted', 'true');`}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {
 			return err
@@ -260,6 +261,9 @@ func (d *DB) LiveFillSnapshot(clientOrderID, orderID string) (live.LiveFillSnaps
 }
 
 func (d *DB) SaveLiveFillSnapshot(fill live.LiveFillSnapshot) error {
+	if fill.ClientOrderID == "" {
+		return fmt.Errorf("live fill snapshot client_order_id required")
+	}
 	b, _ := json.Marshal(fill)
 	_, err := d.Exec(`INSERT OR REPLACE INTO live_fills(client_order_id, order_id, inst_id, symbol, side, filled_quantity, avg_price, fee, fee_currency, updated_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, fill.ClientOrderID, fill.OrderID, fill.InstID, fill.Symbol, strings.ToUpper(fill.Side), fill.FilledQuantity, fill.AvgPrice, fill.Fee, strings.ToUpper(fill.FeeCurrency), fill.UpdatedAt, string(b))
 	return err
@@ -407,7 +411,7 @@ func (d *DB) IsHalted() (bool, error) {
 	var val string
 	err := d.QueryRow(`SELECT value FROM operator_settings WHERE key='halted'`).Scan(&val)
 	if err == sql.ErrNoRows {
-		return false, nil
+		return true, nil
 	}
 	if err != nil {
 		return true, err // Safe default on database errors

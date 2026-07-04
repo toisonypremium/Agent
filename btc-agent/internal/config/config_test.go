@@ -43,6 +43,7 @@ func TestValidateAutoLiveTradingRejectsManualConfirm(t *testing.T) {
 
 func TestValidateCanaryModeValid(t *testing.T) {
 	cfg := validTestConfig()
+	cfg.Live.Enabled = true
 	cfg.Live.CanaryMode = true
 	cfg.Live.CanaryMaxNotionalUSDT = 2.0
 	cfg.Live.MaxOrderNotionalUSDT = 10.0
@@ -53,6 +54,7 @@ func TestValidateCanaryModeValid(t *testing.T) {
 
 func TestValidateCanaryModeRejectsZeroOrNegativeMaxNotional(t *testing.T) {
 	cfg := validTestConfig()
+	cfg.Live.Enabled = true
 	cfg.Live.CanaryMode = true
 
 	cfg.Live.CanaryMaxNotionalUSDT = 0
@@ -68,6 +70,7 @@ func TestValidateCanaryModeRejectsZeroOrNegativeMaxNotional(t *testing.T) {
 
 func TestValidateCanaryModeRejectsExceedingMaxOrderNotional(t *testing.T) {
 	cfg := validTestConfig()
+	cfg.Live.Enabled = true
 	cfg.Live.CanaryMode = true
 	cfg.Live.CanaryMaxNotionalUSDT = 15.0
 	cfg.Live.MaxOrderNotionalUSDT = 10.0

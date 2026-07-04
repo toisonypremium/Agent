@@ -50,10 +50,14 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(sigChan)
 	go func() {
-		sig := <-sigChan
-		log.Printf("[Scheduler] Received signal %v, shutting down scheduler gracefully...", sig)
-		cancel()
+		select {
+		case sig := <-sigChan:
+			log.Printf("[Scheduler] Received signal %v, shutting down scheduler gracefully...", sig)
+			cancel()
+		case <-shutdownCtx.Done():
+		}
 	}()
 
 	// Execute runDaily immediately if requested
@@ -64,52 +68,60 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 	}
 
-	// Track last reconciliation execution time
-	// Run reconciliation once on start if live is enabled
-	var lastReconcile time.Time
+	// Run reconciliation once on start if live is enabled, then schedule future ticks.
+	var nextReconcile time.Time
 	if cfg.Live.Enabled {
 		log.Println("[Scheduler] Executing initial live order reconciliation...")
 		if err := runReconcileLiveOrders(shutdownCtx, cfg, db); err != nil {
 			log.Printf("[Scheduler] Initial reconciliation error: %v", err)
 		}
-		lastReconcile = time.Now()
+		nextReconcile = time.Now().Add(reconcileInterval)
 	}
 
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
-
 	for {
+		waitUntil := nextDaily
+		if cfg.Live.Enabled && nextReconcile.Before(waitUntil) {
+			waitUntil = nextReconcile
+		}
+		wait := time.Until(waitUntil)
+		if wait < 0 {
+			wait = 0
+		}
+		timer := time.NewTimer(wait)
 		select {
 		case <-shutdownCtx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 			log.Println("[Scheduler] Stopped.")
 			return nil
-		case <-ticker.C:
-			now := time.Now().In(loc)
+		case <-timer.C:
+		}
 
-			// Check if it's time for daily run
-			if now.After(nextDaily) {
-				log.Printf("[Scheduler] Triggering scheduled daily run at %s...", now.Format("15:04:05 MST"))
-				if err := runDaily(shutdownCtx, cfg, db); err != nil {
-					log.Printf("[Scheduler] Daily run error: %v", err)
-				}
-				// Calculate next daily run time
-				nextDaily, err = getNextRunTime(dailyTime, loc, now)
-				if err != nil {
-					log.Printf("[Scheduler] Error calculating next run time: %v", err)
-					// Fallback to 24 hours from now
-					nextDaily = now.Add(24 * time.Hour)
-				}
-				log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
+		now := time.Now().In(loc)
+		if !now.Before(nextDaily) {
+			log.Printf("[Scheduler] Triggering scheduled daily run at %s...", now.Format("15:04:05 MST"))
+			if err := runDaily(shutdownCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Daily run error: %v", err)
 			}
+			now = time.Now().In(loc)
+			nextDaily, err = getNextRunTime(dailyTime, loc, now)
+			if err != nil {
+				log.Printf("[Scheduler] Error calculating next run time: %v", err)
+				nextDaily = now.Add(24 * time.Hour)
+			}
+			log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
+		}
 
-			// Check if it's time for live order reconciliation
-			if cfg.Live.Enabled && time.Since(lastReconcile) >= reconcileInterval {
-				log.Println("[Scheduler] Triggering scheduled live order reconciliation...")
-				if err := runReconcileLiveOrders(shutdownCtx, cfg, db); err != nil {
-					log.Printf("[Scheduler] Reconciliation error: %v", err)
-				}
-				lastReconcile = time.Now()
+		if cfg.Live.Enabled && !time.Now().Before(nextReconcile) {
+			log.Println("[Scheduler] Triggering scheduled live order reconciliation...")
+			if err := runReconcileLiveOrders(shutdownCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Reconciliation error: %v", err)
 			}
+			nextReconcile = time.Now().Add(reconcileInterval)
 		}
 	}
 }

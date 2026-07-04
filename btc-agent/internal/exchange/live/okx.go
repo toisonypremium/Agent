@@ -285,6 +285,15 @@ func parseOrderResult(data []byte, instID string) (OrderResult, error) {
 	return result, nil
 }
 
+func normalizeOKXUnixTime(v int64) int64 {
+	// OKX REST fields such as uTime are milliseconds since Unix epoch.
+	// Local storage uses Unix seconds for *_at columns.
+	if v > 9999999999 {
+		return v / 1000
+	}
+	return v
+}
+
 func formatNumber(v float64) string {
 	return strconv.FormatFloat(v, 'f', -1, 64)
 }
@@ -398,6 +407,7 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 	out := []OrderStatus{}
 	for _, item := range raw.Data {
 		uTime, _ := strconv.ParseInt(item.UTime, 10, 64)
+		uTime = normalizeOKXUnixTime(uTime)
 
 		status := StatusUnknownNeedsManualCheck
 		switch strings.ToLower(item.State) {

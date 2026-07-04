@@ -95,13 +95,15 @@ func run(ctx context.Context, args []string) error {
 		return runReconcileLiveOrders(ctx, cfg, db)
 	case "live-positions":
 		return runLivePositions(cfg, db)
+	case "scheduler":
+		return runScheduler(ctx, cfg, db, hasFlag(args, "--run-now"))
 	default:
 		return usage()
 	}
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|status> --config config.yaml")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|status|scheduler> --config config.yaml [--run-now]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -628,6 +630,15 @@ func argValue(args []string, key string) string {
 		}
 	}
 	return ""
+}
+
+func hasFlag(args []string, flag string) bool {
+	for _, arg := range args {
+		if arg == flag {
+			return true
+		}
+	}
+	return false
 }
 
 func firstNonEmpty(values ...string) string {

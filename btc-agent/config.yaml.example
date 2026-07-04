@@ -2,6 +2,7 @@ app:
   mode: "paper"
   timezone: "Asia/Ho_Chi_Minh"
   daily_run_time: "08:00"
+  reconcile_interval_minutes: 15
 
 storage:
   path: "data/btc_agent.db"

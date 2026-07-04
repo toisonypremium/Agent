@@ -91,6 +91,34 @@ func TestValidateReconcileIntervalMinutes(t *testing.T) {
 	}
 }
 
+func TestValidateMaintenanceAllowsZeroDefaults(t *testing.T) {
+	cfg := validTestConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateMaintenanceRejectsNegativeValues(t *testing.T) {
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"report retention", func(cfg *Config) { cfg.Maintenance.ReportRetentionDays = -1 }},
+		{"event retention", func(cfg *Config) { cfg.Maintenance.EventRetentionDays = -1 }},
+		{"max report files", func(cfg *Config) { cfg.Maintenance.MaxReportFiles = -1 }},
+		{"max closed paper orders", func(cfg *Config) { cfg.Maintenance.MaxClosedPaperOrders = -1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func validTestConfig() Config {
 	var cfg Config
 	cfg.App.Mode = "live"

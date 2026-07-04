@@ -33,6 +33,7 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent export-training --config config.yaml
 ./bin/btc-agent eval-ai --config config.yaml
 ./bin/btc-agent live-proof --config config.yaml
+./bin/btc-agent maintenance --config config.yaml
 ```
 
 ## Telegram/ntfy
@@ -64,6 +65,8 @@ reports/latest.json
 Report starts with `BTC DAILY MARKET BRIEF` and includes: quick conclusion, multi-timeframe analysis, zones, risks, MM/liquidity flow, Agent 2 plan, scenarios, action conclusion.
 
 `status` prints the latest regime, permission, risk, zones, liquidity flow, Agent 2 state, per-asset plan, and open paper order count.
+
+`maintenance` prunes old report rows, old live event rows, closed paper-order history over the configured cap, and old unprotected files in `reports/`. It does not prune candles, live orders, fills, positions, or operator halt settings.
 
 ## Backtest + Flow Audit
 

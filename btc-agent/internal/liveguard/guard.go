@@ -33,6 +33,7 @@ type CandidateOrder struct {
 	Notional float64 `json:"notional"`
 	PostOnly bool    `json:"post_only"`
 	Source   string  `json:"source"`
+	Canary   bool    `json:"canary,omitempty"`
 }
 
 type AccountCheck struct {
@@ -132,6 +133,9 @@ func firstCandidate(cfg config.Config, plan agent2.Plan) (CandidateOrder, bool) 
 		if cap := cfg.Live.MaxOrderNotionalUSDT; cap > 0 && notional > cap {
 			notional = cap
 		}
+		if cfg.Live.CanaryMode && cfg.Live.CanaryMaxNotionalUSDT > 0 && notional > cfg.Live.CanaryMaxNotionalUSDT {
+			notional = cfg.Live.CanaryMaxNotionalUSDT
+		}
 		qty := 0.0
 		if layer.Price > 0 {
 			qty = notional / layer.Price
@@ -139,7 +143,7 @@ func firstCandidate(cfg config.Config, plan agent2.Plan) (CandidateOrder, bool) 
 		if layer.Price <= 0 || qty <= 0 || notional <= 0 {
 			return CandidateOrder{}, false
 		}
-		return CandidateOrder{Symbol: asset.Symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: "deterministic_agent2_layer_1"}, true
+		return CandidateOrder{Symbol: asset.Symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: "deterministic_agent2_layer_1", Canary: cfg.Live.CanaryMode}, true
 	}
 	return CandidateOrder{}, false
 }

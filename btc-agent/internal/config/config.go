@@ -75,17 +75,19 @@ type Config struct {
 		TelegramEnabled bool    `yaml:"telegram_enabled"`
 	} `yaml:"ai"`
 	Live struct {
-		Enabled              bool    `yaml:"enabled"`
-		Exchange             string  `yaml:"exchange"`
-		APIKeyEnv            string  `yaml:"api_key_env"`
-		APISecretEnv         string  `yaml:"api_secret_env"`
-		APIPassphraseEnv     string  `yaml:"api_passphrase_env"`
-		MaxOrderNotionalUSDT float64 `yaml:"max_order_notional_usdt"`
-		MinAccountFreeUSDT   float64 `yaml:"min_account_free_usdt"`
-		RequirePostOnly      bool    `yaml:"require_post_only"`
-		RequireManualConfirm bool    `yaml:"require_manual_confirm"`
-		AutoExecute          bool    `yaml:"auto_execute"`
-		ProofOnly            bool    `yaml:"proof_only"`
+		Enabled               bool    `yaml:"enabled"`
+		Exchange              string  `yaml:"exchange"`
+		APIKeyEnv             string  `yaml:"api_key_env"`
+		APISecretEnv          string  `yaml:"api_secret_env"`
+		APIPassphraseEnv      string  `yaml:"api_passphrase_env"`
+		MaxOrderNotionalUSDT  float64 `yaml:"max_order_notional_usdt"`
+		MinAccountFreeUSDT    float64 `yaml:"min_account_free_usdt"`
+		RequirePostOnly       bool    `yaml:"require_post_only"`
+		RequireManualConfirm  bool    `yaml:"require_manual_confirm"`
+		AutoExecute           bool    `yaml:"auto_execute"`
+		CanaryMode            bool    `yaml:"canary_mode"`
+		CanaryMaxNotionalUSDT float64 `yaml:"canary_max_notional_usdt"`
+		ProofOnly             bool    `yaml:"proof_only"`
 	} `yaml:"live"`
 	Execution struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
@@ -134,6 +136,14 @@ func (c Config) Validate() error {
 	}
 	if !c.Execution.PaperTrading && !c.Execution.RealTradingEnabled {
 		return errors.New("paper_trading or real_trading_enabled must be true")
+	}
+	if c.Live.CanaryMode {
+		if c.Live.CanaryMaxNotionalUSDT <= 0 {
+			return errors.New("live canary_max_notional_usdt must be positive when canary_mode is enabled")
+		}
+		if c.Live.CanaryMaxNotionalUSDT > c.Live.MaxOrderNotionalUSDT {
+			return fmt.Errorf("live canary_max_notional_usdt (%.2f) cannot exceed max_order_notional_usdt (%.2f)", c.Live.CanaryMaxNotionalUSDT, c.Live.MaxOrderNotionalUSDT)
+		}
 	}
 	if !c.Risk.NoFutures || !c.Risk.NoLeverage || !c.Risk.SpotLimitOnly {
 		return errors.New("risk flags must enforce no futures, no leverage, spot limit only")

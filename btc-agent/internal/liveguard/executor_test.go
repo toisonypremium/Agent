@@ -252,3 +252,39 @@ func TestExecuteAutoProofOrderBlocksWhenHaltReaderErrorsOrNil(t *testing.T) {
 		t.Fatalf("unexpected result with error reader: %+v", got2)
 	}
 }
+
+func TestExecuteManualProofOrderCanaryPrefix(t *testing.T) {
+	cfg, proof := executableConfigAndProof()
+	cfg.Live.CanaryMode = true
+	cfg.Live.CanaryMaxNotionalUSDT = 2.0
+	proof.Candidate.Canary = true
+	proof.Candidate.Notional = 2.0
+	proof.Preflight.Canary = true
+	proof.Preflight.Notional = 2.0
+	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
+	if got.Status != LiveOrderSubmitted || !placer.called {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if !strings.HasPrefix(placer.req.ClientOrderID, "btccanary") {
+		t.Fatalf("expected client order ID to start with btccanary, got: %s", placer.req.ClientOrderID)
+	}
+}
+
+func TestExecuteAutoProofOrderCanaryPrefix(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	cfg.Live.CanaryMode = true
+	cfg.Live.CanaryMaxNotionalUSDT = 2.0
+	proof.Candidate.Canary = true
+	proof.Candidate.Notional = 2.0
+	proof.Preflight.Canary = true
+	proof.Preflight.Notional = 2.0
+	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
+	if got.Status != LiveOrderSubmitted || !placer.called {
+		t.Fatalf("unexpected result: %+v", got)
+	}
+	if !strings.HasPrefix(placer.req.ClientOrderID, "btccanary") {
+		t.Fatalf("expected client order ID to start with btccanary, got: %s", placer.req.ClientOrderID)
+	}
+}

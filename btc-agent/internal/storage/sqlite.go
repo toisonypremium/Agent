@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"btc-agent/internal/agent1"
@@ -40,7 +41,10 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, type TEXT, content TEXT);`,
 		`CREATE TABLE IF NOT EXISTS performance_reviews(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_orders(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, type TEXT, price REAL, quantity REAL, notional REAL, status TEXT, submitted_at INTEGER, updated_at INTEGER, payload_json TEXT);`,
-		`CREATE TABLE IF NOT EXISTS live_order_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, status TEXT, payload_json TEXT);`}
+		`CREATE TABLE IF NOT EXISTS live_order_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, status TEXT, payload_json TEXT);`,
+		`CREATE TABLE IF NOT EXISTS live_fills(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, filled_quantity REAL, avg_price REAL, fee REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
+		`CREATE TABLE IF NOT EXISTS live_positions(symbol TEXT PRIMARY KEY, inst_id TEXT, quantity REAL, avg_entry_price REAL, cost_basis REAL, fee_total REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
+		`CREATE TABLE IF NOT EXISTS live_position_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, delta_quantity REAL, fill_price REAL, notional_delta REAL, fee_delta REAL, fee_currency TEXT, position_qty REAL, avg_entry_price REAL, status TEXT, payload_json TEXT);`}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {
 			return err
@@ -233,4 +237,158 @@ func (d *DB) SaveLiveOrderEvent(o live.OrderStatus) error {
 		now, o.ClientOrderID, o.OrderID, o.Status, string(b),
 	)
 	return err
+}
+
+func (d *DB) LiveFillSnapshot(clientOrderID, orderID string) (live.LiveFillSnapshot, bool, error) {
+	var fill live.LiveFillSnapshot
+	var err error
+	if clientOrderID != "" {
+		err = d.QueryRow(`SELECT client_order_id, order_id, inst_id, symbol, side, filled_quantity, avg_price, fee, fee_currency, updated_at FROM live_fills WHERE client_order_id=?`, clientOrderID).Scan(&fill.ClientOrderID, &fill.OrderID, &fill.InstID, &fill.Symbol, &fill.Side, &fill.FilledQuantity, &fill.AvgPrice, &fill.Fee, &fill.FeeCurrency, &fill.UpdatedAt)
+	} else if orderID != "" {
+		err = d.QueryRow(`SELECT client_order_id, order_id, inst_id, symbol, side, filled_quantity, avg_price, fee, fee_currency, updated_at FROM live_fills WHERE order_id=?`, orderID).Scan(&fill.ClientOrderID, &fill.OrderID, &fill.InstID, &fill.Symbol, &fill.Side, &fill.FilledQuantity, &fill.AvgPrice, &fill.Fee, &fill.FeeCurrency, &fill.UpdatedAt)
+	} else {
+		return live.LiveFillSnapshot{}, false, nil
+	}
+	if err == sql.ErrNoRows {
+		return live.LiveFillSnapshot{}, false, nil
+	}
+	if err != nil {
+		return live.LiveFillSnapshot{}, false, err
+	}
+	return fill, true, nil
+}
+
+func (d *DB) SaveLiveFillSnapshot(fill live.LiveFillSnapshot) error {
+	b, _ := json.Marshal(fill)
+	_, err := d.Exec(`INSERT OR REPLACE INTO live_fills(client_order_id, order_id, inst_id, symbol, side, filled_quantity, avg_price, fee, fee_currency, updated_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, fill.ClientOrderID, fill.OrderID, fill.InstID, fill.Symbol, strings.ToUpper(fill.Side), fill.FilledQuantity, fill.AvgPrice, fill.Fee, strings.ToUpper(fill.FeeCurrency), fill.UpdatedAt, string(b))
+	return err
+}
+
+func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosition, error) {
+	if event.Symbol == "" {
+		event.Symbol = live.InternalSymbol(event.InstID)
+	}
+	event.Side = strings.ToUpper(event.Side)
+	event.FeeCurrency = strings.ToUpper(event.FeeCurrency)
+	if event.Symbol == "" {
+		return live.LivePosition{}, fmt.Errorf("live position event symbol required")
+	}
+	if event.DeltaQuantity <= 0 {
+		return live.LivePosition{}, fmt.Errorf("live position event delta quantity must be positive")
+	}
+	if event.FillPrice <= 0 {
+		return live.LivePosition{}, fmt.Errorf("live position event fill price must be positive")
+	}
+
+	tx, err := d.Begin()
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	defer tx.Rollback()
+
+	pos, found, err := livePositionBySymbol(tx, event.Symbol)
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	if !found {
+		pos = live.LivePosition{Symbol: event.Symbol, InstID: event.InstID}
+	}
+	if pos.InstID == "" {
+		pos.InstID = event.InstID
+	}
+
+	switch event.Side {
+	case "BUY":
+		pos.Quantity += event.DeltaQuantity
+		pos.CostBasis += event.NotionalDelta
+	case "SELL":
+		if pos.Quantity+1e-12 < event.DeltaQuantity {
+			return live.LivePosition{}, fmt.Errorf("sell delta %.12f exceeds live position %.12f for %s", event.DeltaQuantity, pos.Quantity, event.Symbol)
+		}
+		avgCost := 0.0
+		if pos.Quantity > 0 {
+			avgCost = pos.CostBasis / pos.Quantity
+		}
+		pos.Quantity -= event.DeltaQuantity
+		pos.CostBasis -= avgCost * event.DeltaQuantity
+		if pos.Quantity < 1e-12 {
+			pos.Quantity = 0
+			pos.CostBasis = 0
+		}
+	default:
+		return live.LivePosition{}, fmt.Errorf("unsupported live position side %q", event.Side)
+	}
+	if pos.Quantity > 0 {
+		pos.AvgEntryPrice = pos.CostBasis / pos.Quantity
+	} else {
+		pos.AvgEntryPrice = 0
+	}
+	pos.FeeTotal += event.FeeDelta
+	pos.FeeCurrency = mergeFeeCurrency(pos.FeeCurrency, event.FeeCurrency)
+	if event.Timestamp > 0 {
+		pos.UpdatedAt = event.Timestamp
+	} else {
+		pos.UpdatedAt = time.Now().Unix()
+	}
+
+	b, _ := json.Marshal(pos)
+	_, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, string(b))
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return live.LivePosition{}, err
+	}
+	event.PositionQty = pos.Quantity
+	event.AvgEntryPrice = pos.AvgEntryPrice
+	return pos, nil
+}
+
+func livePositionBySymbol(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, symbol string) (live.LivePosition, bool, error) {
+	var pos live.LivePosition
+	err := q.QueryRow(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at FROM live_positions WHERE symbol=?`, symbol).Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt)
+	if err == sql.ErrNoRows {
+		return live.LivePosition{}, false, nil
+	}
+	if err != nil {
+		return live.LivePosition{}, false, err
+	}
+	return pos, true, nil
+}
+
+func (d *DB) SaveLivePositionEvent(event live.LivePositionEvent) error {
+	b, _ := json.Marshal(event)
+	_, err := d.Exec(`INSERT INTO live_position_events(timestamp, client_order_id, order_id, inst_id, symbol, side, delta_quantity, fill_price, notional_delta, fee_delta, fee_currency, position_qty, avg_entry_price, status, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, strings.ToUpper(event.Side), event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, strings.ToUpper(event.FeeCurrency), event.PositionQty, event.AvgEntryPrice, event.Status, string(b))
+	return err
+}
+
+func (d *DB) LivePositions() ([]live.LivePosition, error) {
+	rows, err := d.Query(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at FROM live_positions ORDER BY symbol`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []live.LivePosition{}
+	for rows.Next() {
+		var pos live.LivePosition
+		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pos)
+	}
+	return out, rows.Err()
+}
+
+func mergeFeeCurrency(existing, incoming string) string {
+	existing = strings.ToUpper(existing)
+	incoming = strings.ToUpper(incoming)
+	if existing == "" {
+		return incoming
+	}
+	if incoming == "" || incoming == existing {
+		return existing
+	}
+	return "MIXED"
 }

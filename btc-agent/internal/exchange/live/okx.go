@@ -385,6 +385,7 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 			AccFillSz string `json:"accFillSz"`
 			AvgPx     string `json:"avgPx"`
 			Fee       string `json:"fee"`
+			FeeCcy    string `json:"feeCcy"`
 			UTime     string `json:"uTime"`
 		} `json:"data"`
 	}
@@ -426,6 +427,7 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 			AvgPrice:          firstParseFloat(item.AvgPx),
 			AccumulatedFillSz: firstParseFloat(item.AccFillSz),
 			Fee:               firstParseFloat(item.Fee),
+			FeeCurrency:       strings.ToUpper(item.FeeCcy),
 			UpdatedAt:         uTime,
 		})
 	}

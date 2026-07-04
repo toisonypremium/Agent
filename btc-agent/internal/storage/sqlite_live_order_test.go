@@ -100,3 +100,44 @@ func TestSaveLiveOrderStatusCanMatchByOrderID(t *testing.T) {
 		t.Fatalf("status=%s want %s", savedStatus, live.StatusCanceled)
 	}
 }
+
+func TestHaltStatusStorage(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// 1. Default should be false
+	halted, err := db.IsHalted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if halted {
+		t.Fatal("expected default halt status to be false")
+	}
+
+	// 2. Set to true
+	if err := db.SetHaltStatus(true); err != nil {
+		t.Fatal(err)
+	}
+	halted, err = db.IsHalted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !halted {
+		t.Fatal("expected halt status to be true after setting to true")
+	}
+
+	// 3. Set back to false
+	if err := db.SetHaltStatus(false); err != nil {
+		t.Fatal(err)
+	}
+	halted, err = db.IsHalted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if halted {
+		t.Fatal("expected halt status to be false after resetting to false")
+	}
+}

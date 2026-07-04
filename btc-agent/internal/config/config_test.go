@@ -76,6 +76,18 @@ func TestValidateCanaryModeRejectsExceedingMaxOrderNotional(t *testing.T) {
 	}
 }
 
+func TestValidateReconcileIntervalMinutes(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.App.ReconcileIntervalMinutes = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for negative reconcile interval")
+	}
+	cfg.App.ReconcileIntervalMinutes = 15
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
 func validTestConfig() Config {
 	var cfg Config
 	cfg.App.Mode = "live"

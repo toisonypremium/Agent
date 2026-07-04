@@ -51,7 +51,7 @@ func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof
 		Price:         proof.Candidate.Price,
 		Quantity:      proof.Candidate.Quantity,
 		PostOnly:      proof.Candidate.PostOnly,
-		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
+		ClientOrderID: clientOrderID(proof.Candidate.Symbol, cfg.Live.CanaryMode),
 	}
 	order, err := placer.PlaceSpotLimitOrder(ctx, req)
 	result.Order = order
@@ -80,7 +80,7 @@ func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, 
 		Price:         proof.Candidate.Price,
 		Quantity:      proof.Candidate.Quantity,
 		PostOnly:      proof.Candidate.PostOnly,
-		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
+		ClientOrderID: clientOrderID(proof.Candidate.Symbol, cfg.Live.CanaryMode),
 	}
 	order, err := placer.PlaceSpotLimitOrder(ctx, req)
 	result.Order = order
@@ -159,9 +159,13 @@ func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer 
 	return uniqueStrings(reasons)
 }
 
-func clientOrderID(symbol string) string {
+func clientOrderID(symbol string, canary bool) string {
 	s := strings.ToLower(strings.ReplaceAll(symbol, "-", ""))
-	return fmt.Sprintf("btcagent%s%d", s, time.Now().Unix())
+	prefix := "btcagent"
+	if canary {
+		prefix = "btccanary"
+	}
+	return fmt.Sprintf("%s%s%d", prefix, s, time.Now().Unix())
 }
 
 func autoOrderBlockers(cfg config.Config, proof Proof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition, haltReader HaltReader) []string {

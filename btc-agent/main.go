@@ -83,6 +83,8 @@ func run(ctx context.Context, args []string) error {
 		return runLiveProof(ctx, cfg, db)
 	case "execute-live-proof-order":
 		return runExecuteLiveProofOrder(ctx, cfg, db, argValue(args, "--confirm"))
+	case "auto-live-order":
+		return runAutoLiveOrder(ctx, cfg, db)
 	case "reconcile-live-orders":
 		return runReconcileLiveOrders(ctx, cfg, db)
 	case "live-positions":
@@ -93,7 +95,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|reconcile-live-orders|live-positions|status> --config config.yaml")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|reconcile-live-orders|live-positions|status> --config config.yaml")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -481,8 +483,92 @@ func runExecuteLiveProofOrder(ctx context.Context, cfg config.Config, db *storag
 	return nil
 }
 
+func runAutoLiveOrder(ctx context.Context, cfg config.Config, db *storage.DB) error {
+	p, err := db.LatestPlan()
+	if err != nil {
+		return fmt.Errorf("load latest plan: %w", err)
+	}
+	open, err := db.OpenLiveOrders()
+	if err != nil {
+		return fmt.Errorf("load open live orders: %w", err)
+	}
+	positions, err := db.LivePositions()
+	if err != nil {
+		return fmt.Errorf("load live positions: %w", err)
+	}
+	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
+	var balanceReader liveguard.BalanceReader
+	var filterReader liveguard.FilterReader
+	var placer liveguard.OrderPlacer
+	if err == nil {
+		balanceReader = client
+		filterReader = client
+		placer = client
+	}
+	proof := liveguard.BuildProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
+	result := liveguard.ExecuteAutoProofOrder(ctx, cfg, proof, placer, open, positions)
+	if result.Status == liveguard.LiveOrderSubmitted {
+		if err := db.SaveLiveOrderFromParams(
+			result.Order.ClientOrderID,
+			result.Order.OrderID,
+			result.Order.InstID,
+			result.Candidate.Symbol,
+			result.Candidate.Side,
+			result.Candidate.Type,
+			result.Candidate.Price,
+			result.Candidate.Quantity,
+			result.Candidate.Notional,
+			live.StatusLiveOpen,
+		); err != nil {
+			return fmt.Errorf("save auto live order: %w", err)
+		}
+		if err := db.SaveLiveOrderEvent(live.OrderStatus{
+			ClientOrderID: result.Order.ClientOrderID,
+			OrderID:       result.Order.OrderID,
+			InstID:        result.Order.InstID,
+			Status:        live.StatusLiveOpen,
+		}); err != nil {
+			return fmt.Errorf("save auto live order event: %w", err)
+		}
+	}
+	if err := saveJSONFile("reports", "auto_live_order_latest.json", result); err != nil {
+		return err
+	}
+	md := autoLiveOrderMarkdown(result)
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join("reports", "auto_live_order_latest.md"), []byte(md), 0600); err != nil {
+		return err
+	}
+	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		_ = notify.Telegram(ctx, firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")), firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")), md)
+	}
+	fmt.Println(md)
+	return nil
+}
+
 func liveOrderAttemptText(proof liveguard.Proof) string {
 	return fmt.Sprintf("MANUAL LIVE ORDER ATTEMPT\nproof=%s symbol=%s inst_id=%s notional=%.2f\nNo order yet; hard gates still apply.", proof.Status, proof.Candidate.Symbol, proof.Preflight.InstID, proof.Candidate.Notional)
+}
+
+func autoLiveOrderMarkdown(result liveguard.ExecutionResult) string {
+	md := fmt.Sprintf("AUTO LIVE ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
+	if result.Candidate.Symbol != "" {
+		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f post_only=%v\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Quantity, result.Candidate.Notional, result.Candidate.PostOnly)
+	}
+	if result.Preflight.Enabled {
+		md += fmt.Sprintf("Preflight: pass=%v inst_id=%s notional=%.2f\n", result.Preflight.Pass, result.Preflight.InstID, result.Preflight.Notional)
+	}
+	if result.Order.Submitted {
+		md += fmt.Sprintf("Order: submitted=true inst_id=%s order_id=%s client_order_id=%s\n", result.Order.InstID, result.Order.OrderID, result.Order.ClientOrderID)
+	} else {
+		md += "Order: submitted=false\n"
+	}
+	if len(result.Reasons) > 0 {
+		md += "Reasons: " + fmt.Sprint(result.Reasons) + "\n"
+	}
+	return md
 }
 
 func liveOrderMarkdown(result liveguard.ExecutionResult) string {

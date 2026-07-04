@@ -105,6 +105,54 @@ func TestExecuteManualProofOrderNoSecretLeak(t *testing.T) {
 	}
 }
 
+func TestExecuteAutoProofOrderBlocksWhenDisabled(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	cfg.Live.AutoExecute = false
+	placer := &fakeOrderPlacer{}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil)
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
+	}
+}
+
+func TestExecuteAutoProofOrderBlocksOpenLiveOrder(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	placer := &fakeOrderPlacer{}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", ClientOrderID: "existing", Status: live.StatusLiveOpen}}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, open, nil)
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
+	}
+	if !strings.Contains(strings.Join(got.Reasons, " "), "open live order") {
+		t.Fatalf("missing open order blocker: %+v", got.Reasons)
+	}
+}
+
+func TestExecuteAutoProofOrderBlocksBudgetExceeded(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	placer := &fakeOrderPlacer{}
+	positions := []live.LivePosition{{Symbol: "ETHUSDT", CostBasis: 244}}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, positions)
+	if got.Status != LiveOrderBlocked || placer.called {
+		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
+	}
+	if !strings.Contains(strings.Join(got.Reasons, " "), "budget") {
+		t.Fatalf("missing budget blocker: %+v", got.Reasons)
+	}
+}
+
+func TestExecuteAutoProofOrderSubmits(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil)
+	if got.Status != LiveOrderSubmitted || !placer.called {
+		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
+	}
+	if placer.req.InstID != "ETH-USDT" || placer.req.Side != "buy" || !placer.req.PostOnly {
+		t.Fatalf("bad request: %+v", placer.req)
+	}
+}
+
 func executableConfigAndProof() (config.Config, Proof) {
 	var cfg config.Config
 	cfg.Live.Enabled = true
@@ -123,5 +171,16 @@ func executableConfigAndProof() (config.Config, Proof) {
 		Account:   AccountCheck{Enabled: true, AuthOK: true, BalanceOK: true, FreeUSDT: 20},
 	}
 	_ = agent2.StateWatch
+	return cfg, proof
+}
+
+func autoExecutableConfigAndProof() (config.Config, Proof) {
+	cfg, proof := executableConfigAndProof()
+	cfg.Live.AutoExecute = true
+	cfg.Live.RequireManualConfirm = false
+	cfg.Portfolio.TotalCapital = 1000
+	cfg.Portfolio.Allocation = map[string]float64{"ETHUSDT": 0.35}
+	cfg.Risk.MaxTotalDeploymentPerCycle = 0.70
+	cfg.Risk.MaxSingleAssetDeployment = 0.45
 	return cfg, proof
 }

@@ -84,6 +84,7 @@ type Config struct {
 		MinAccountFreeUSDT   float64 `yaml:"min_account_free_usdt"`
 		RequirePostOnly      bool    `yaml:"require_post_only"`
 		RequireManualConfirm bool    `yaml:"require_manual_confirm"`
+		AutoExecute          bool    `yaml:"auto_execute"`
 		ProofOnly            bool    `yaml:"proof_only"`
 	} `yaml:"live"`
 	Execution struct {
@@ -117,11 +118,18 @@ func (c Config) Validate() error {
 		return errors.New("app.mode must be paper, report, or live")
 	}
 	if c.Execution.RealTradingEnabled {
-		if !c.Live.Enabled || c.Live.ProofOnly || !c.Live.RequireManualConfirm {
-			return errors.New("real trading requires live.enabled=true, live.proof_only=false, require_manual_confirm=true")
+		if !c.Live.Enabled || c.Live.ProofOnly {
+			return errors.New("real trading requires live.enabled=true and live.proof_only=false")
+		}
+		if c.Live.AutoExecute {
+			if c.Live.RequireManualConfirm {
+				return errors.New("auto live execution requires live.require_manual_confirm=false")
+			}
+		} else if !c.Live.RequireManualConfirm {
+			return errors.New("manual live execution requires live.require_manual_confirm=true unless live.auto_execute=true")
 		}
 		if c.Live.MaxOrderNotionalUSDT <= 0 || c.Live.MaxOrderNotionalUSDT > 10 {
-			return errors.New("manual live proof max_order_notional_usdt must be >0 and <=10")
+			return errors.New("live max_order_notional_usdt must be >0 and <=10")
 		}
 	}
 	if !c.Execution.PaperTrading && !c.Execution.RealTradingEnabled {

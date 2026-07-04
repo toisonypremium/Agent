@@ -95,6 +95,8 @@ func run(ctx context.Context, args []string) error {
 		return runReconcileLiveOrders(ctx, cfg, db)
 	case "live-positions":
 		return runLivePositions(cfg, db)
+	case "maintenance":
+		return runMaintenance(cfg, db)
 	case "scheduler":
 		return runScheduler(ctx, cfg, db, hasFlag(args, "--run-now"))
 	default:
@@ -103,7 +105,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|status|scheduler> --config config.yaml [--run-now]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -609,6 +611,76 @@ func liveOrderMarkdown(result liveguard.ExecutionResult) string {
 	if len(result.Reasons) > 0 {
 		md += "Reasons: " + fmt.Sprint(result.Reasons) + "\n"
 	}
+	return md
+}
+
+func runMaintenance(cfg config.Config, db *storage.DB) error {
+	mcfg := storage.MaintenanceConfig{
+		ReportRetentionDays:  cfg.Maintenance.ReportRetentionDays,
+		EventRetentionDays:   cfg.Maintenance.EventRetentionDays,
+		MaxReportFiles:       cfg.Maintenance.MaxReportFiles,
+		MaxClosedPaperOrders: cfg.Maintenance.MaxClosedPaperOrders,
+	}
+	if !cfg.Maintenance.Enabled {
+		result := storage.MaintenanceResult{Enabled: false, GeneratedAt: time.Now(), Config: storage.NormalizeMaintenanceConfig(mcfg)}
+		result.RefreshSummary()
+		fmt.Println(result.Summary)
+		return nil
+	}
+	result, err := db.PruneMaintenance(mcfg, time.Now())
+	if err != nil {
+		return err
+	}
+	deletedFiles, err := storage.PruneReportFiles("reports", result.Config.MaxReportFiles, protectedReportFiles())
+	if err != nil {
+		return fmt.Errorf("prune report files: %w", err)
+	}
+	result.ReportFilesDeleted = deletedFiles
+	result.RefreshSummary()
+	if err := saveJSONFile("reports", "maintenance_latest.json", result); err != nil {
+		return err
+	}
+	md := maintenanceMarkdown(result)
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join("reports", "maintenance_latest.md"), []byte(md), 0600); err != nil {
+		return err
+	}
+	fmt.Println(md)
+	return nil
+}
+
+func protectedReportFiles() []string {
+	return []string{
+		"latest.md",
+		"latest.json",
+		"backtest_latest.md",
+		"backtest_latest.json",
+		"ai_eval_latest.md",
+		"ai_eval_latest.json",
+		"ai_watch_latest.md",
+		"ai_watch_latest.json",
+		"live_proof_latest.md",
+		"live_proof_latest.json",
+		"live_order_proof_latest.md",
+		"live_order_proof_latest.json",
+		"live_position_latest.md",
+		"live_position_latest.json",
+		"live_reconcile_latest.md",
+		"live_reconcile_latest.json",
+		"auto_live_order_latest.md",
+		"auto_live_order_latest.json",
+		"maintenance_latest.md",
+		"maintenance_latest.json",
+	}
+}
+
+func maintenanceMarkdown(result storage.MaintenanceResult) string {
+	md := fmt.Sprintf("MAINTENANCE REPORT\n\nGenerated: %s\nSummary: %s\n\n", result.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"), result.Summary)
+	md += fmt.Sprintf("Retention: reports=%dd events=%dd max_report_files=%d max_closed_paper_orders=%d\n", result.Config.ReportRetentionDays, result.Config.EventRetentionDays, result.Config.MaxReportFiles, result.Config.MaxClosedPaperOrders)
+	md += fmt.Sprintf("Deleted: reports=%d live_order_events=%d live_position_events=%d closed_paper_orders=%d report_files=%d\n", result.ReportsDeleted, result.LiveOrderEventsDeleted, result.LivePositionEventsDeleted, result.ClosedPaperOrdersDeleted, result.ReportFilesDeleted)
+	md += "No candles, live orders, live fills, live positions, or operator settings were pruned.\n"
 	return md
 }
 

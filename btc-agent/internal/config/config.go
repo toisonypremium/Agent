@@ -58,6 +58,13 @@ type Config struct {
 		Intervals   []string `yaml:"intervals"`
 		CandleLimit int      `yaml:"candle_limit"`
 	} `yaml:"data"`
+	Maintenance struct {
+		Enabled              bool `yaml:"enabled"`
+		ReportRetentionDays  int  `yaml:"report_retention_days"`
+		EventRetentionDays   int  `yaml:"event_retention_days"`
+		MaxReportFiles       int  `yaml:"max_report_files"`
+		MaxClosedPaperOrders int  `yaml:"max_closed_paper_orders"`
+	} `yaml:"maintenance"`
 	Notify struct {
 		Enabled        bool   `yaml:"enabled"`
 		Provider       string `yaml:"provider"`
@@ -181,6 +188,9 @@ func (c Config) Validate() error {
 	}
 	if c.Data.CandleLimit < 100 {
 		return errors.New("data.candle_limit must be >=100")
+	}
+	if c.Maintenance.ReportRetentionDays < 0 || c.Maintenance.EventRetentionDays < 0 || c.Maintenance.MaxReportFiles < 0 || c.Maintenance.MaxClosedPaperOrders < 0 {
+		return errors.New("maintenance retention values cannot be negative")
 	}
 	if len(c.Execution.LayerDistribution) == 0 {
 		return errors.New("execution.layer_distribution required")

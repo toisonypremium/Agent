@@ -111,14 +111,32 @@ func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	symbols := append([]string{cfg.Data.Symbols.BTC}, cfg.Data.Symbols.Assets...)
 	for _, sym := range symbols {
 		for _, interval := range cfg.Data.Intervals {
-			candles, err := client.Klines(ctx, sym, interval, cfg.Data.CandleLimit)
+			latest, found, err := db.LatestCandleOpenTime(sym, interval)
+			if err != nil {
+				return fmt.Errorf("latest candle %s %s: %w", sym, interval, err)
+			}
+			incremental := found
+			var candles []market.Candle
+			if incremental {
+				candles, err = client.KlinesSince(ctx, sym, interval, latest.Add(time.Second), cfg.Data.CandleLimit)
+			} else {
+				candles, err = client.Klines(ctx, sym, interval, cfg.Data.CandleLimit)
+			}
 			if err != nil {
 				return fmt.Errorf("fetch %s %s: %w", sym, interval, err)
+			}
+			if len(candles) == 0 {
+				fmt.Printf("no new candles %s %s\n", sym, interval)
+				continue
 			}
 			if err := db.SaveCandles(candles); err != nil {
 				return err
 			}
-			fmt.Printf("saved %d candles %s %s\n", len(candles), sym, interval)
+			if incremental {
+				fmt.Printf("saved %d new candles %s %s\n", len(candles), sym, interval)
+			} else {
+				fmt.Printf("saved %d candles %s %s\n", len(candles), sym, interval)
+			}
 		}
 	}
 	return nil

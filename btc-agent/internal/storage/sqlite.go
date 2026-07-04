@@ -72,6 +72,19 @@ func (d *DB) SaveCandles(cs []market.Candle) error {
 	}
 	return tx.Commit()
 }
+
+func (d *DB) LatestCandleOpenTime(symbol, interval string) (time.Time, bool, error) {
+	var openTime sql.NullInt64
+	err := d.QueryRow(`SELECT MAX(open_time) FROM candles WHERE symbol=? AND interval=?`, symbol, interval).Scan(&openTime)
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	if !openTime.Valid {
+		return time.Time{}, false, nil
+	}
+	return time.Unix(openTime.Int64, 0), true, nil
+}
+
 func (d *DB) LoadCandles(symbol, interval string, limit int) ([]market.Candle, error) {
 	rows, err := d.Query(`SELECT symbol,interval,open_time,open,high,low,close,volume,close_time FROM candles WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?`, symbol, interval, limit)
 	if err != nil {

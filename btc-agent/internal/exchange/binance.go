@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"btc-agent/internal/market"
+	"btc-agent/internal/utils"
 )
 
 type BinanceClient struct {
@@ -23,7 +24,18 @@ func NewBinance(base string) *BinanceClient {
 }
 
 func (c *BinanceClient) Klines(ctx context.Context, symbol, interval string, limit int) ([]market.Candle, error) {
+	return c.klines(ctx, symbol, interval, time.Time{}, limit, false)
+}
+
+func (c *BinanceClient) KlinesSince(ctx context.Context, symbol, interval string, start time.Time, limit int) ([]market.Candle, error) {
+	return c.klines(ctx, symbol, interval, start, limit, true)
+}
+
+func (c *BinanceClient) klines(ctx context.Context, symbol, interval string, start time.Time, limit int, incremental bool) ([]market.Candle, error) {
 	q := url.Values{"symbol": {strings.ToUpper(symbol)}, "interval": {interval}, "limit": {strconv.Itoa(limit)}}
+	if !start.IsZero() {
+		q.Set("startTime", strconv.FormatInt(start.UnixMilli(), 10))
+	}
 	var raw [][]json.RawMessage
 	if err := c.get(ctx, "/api/v3/klines?"+q.Encode(), &raw); err != nil {
 		return nil, err
@@ -38,39 +50,28 @@ func (c *BinanceClient) Klines(ctx context.Context, symbol, interval string, lim
 			out = append(out, cdl)
 		}
 	}
-	if len(out) == 0 {
+	if len(out) == 0 && !incremental {
 		return nil, fmt.Errorf("no candles for %s %s", symbol, interval)
 	}
 	return out, nil
 }
 
 func (c *BinanceClient) get(ctx context.Context, path string, out any) error {
-	var last error
-	for i := 0; i < 3; i++ {
+	return utils.Retry(ctx, 3, 500*time.Millisecond, func() error {
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 		if err != nil {
 			return err
 		}
 		resp, err := c.http.Do(req)
 		if err != nil {
-			last = err
-			time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
-			continue
+			return err
 		}
-		func() {
-			defer resp.Body.Close()
-			if resp.StatusCode/100 != 2 {
-				last = fmt.Errorf("binance http %d", resp.StatusCode)
-				return
-			}
-			last = json.NewDecoder(resp.Body).Decode(out)
-		}()
-		if last == nil {
-			return nil
+		defer resp.Body.Close()
+		if resp.StatusCode/100 != 2 {
+			return fmt.Errorf("binance http %d", resp.StatusCode)
 		}
-		time.Sleep(time.Duration(i+1) * 500 * time.Millisecond)
-	}
-	return last
+		return json.NewDecoder(resp.Body).Decode(out)
+	})
 }
 
 func parseKline(symbol, interval string, row []json.RawMessage) (market.Candle, bool) {

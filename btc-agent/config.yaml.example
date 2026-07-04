@@ -54,6 +54,13 @@ data:
     - "1w"
   candle_limit: 500
 
+maintenance:
+  enabled: true
+  report_retention_days: 30
+  event_retention_days: 90
+  max_report_files: 50
+  max_closed_paper_orders: 500
+
 notify:
   enabled: false
   provider: "telegram"

@@ -1,0 +1,92 @@
+app:
+  mode: "paper"
+  timezone: "Asia/Ho_Chi_Minh"
+  daily_run_time: "08:00"
+
+storage:
+  path: "data/btc_agent.db"
+
+portfolio:
+  base_currency: "USDT"
+  total_capital: 1000
+  allocation:
+    ETHUSDT: 0.35
+    SOLUSDT: 0.45
+    RENDERUSDT: 0.20
+  reserve_cash_ratio: 0.05
+
+risk:
+  max_total_deployment_per_cycle: 0.70
+  max_single_asset_deployment: 0.45
+  min_reward_risk: 3.0
+  stop_on_panic_selling: true
+  disable_relative_strength_filter: false
+  relative_strength_lookback_days: 14
+  min_relative_strength: -0.03
+  min_asset_momentum: -0.05
+  disable_rotation_score_filter: false
+  min_rotation_score: 0.55
+  max_rotation_rank: 2
+  disable_asset_flow_entry_filter: false
+  min_asset_flow_bull_score: 0.25
+  allow_neutral_reclaim_entry: true
+  no_futures: true
+  no_leverage: true
+  spot_limit_only: true
+
+btc_cycle:
+  stress_price_reference: 28000
+  use_dynamic_cycle_zone: true
+  require_reclaim_before_major_buy: true
+
+data:
+  binance_base_url: "https://api.binance.com"
+  symbols:
+    btc: "BTCUSDT"
+    assets:
+      - "ETHUSDT"
+      - "SOLUSDT"
+      - "RENDERUSDT"
+  intervals:
+    - "4h"
+    - "1d"
+    - "1w"
+  candle_limit: 500
+
+notify:
+  enabled: false
+  provider: "telegram"
+  telegram_token: ""
+  telegram_chat_id: ""
+  ntfy_topic: ""
+
+ai:
+  enabled: false
+  provider: "9router"
+  model: "Claw"
+  base_url_env: "ANTHROPIC_BASE_URL"
+  api_key_env: "ANTHROPIC_API_KEY"
+  max_tokens: 900
+  temperature: 0
+  telegram_enabled: true
+
+live:
+  enabled: false
+  exchange: "okx"
+  api_key_env: "OKX_API_KEY"
+  api_secret_env: "OKX_API_SECRET"
+  api_passphrase_env: "OKX_API_PASSPHRASE"
+  max_order_notional_usdt: 10
+  min_account_free_usdt: 20
+  require_post_only: true
+  require_manual_confirm: true
+  proof_only: true
+
+execution:
+  paper_trading: true
+  real_trading_enabled: false
+  order_expiry_hours: 48
+  layer_distribution:
+    - 0.25
+    - 0.35
+    - 0.40

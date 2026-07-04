@@ -214,6 +214,12 @@ func runDaily(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	if err := storage.SaveReportFiles("reports", analysis, p, report); err != nil {
 		return err
 	}
+	if cfg.Live.Enabled && cfg.Live.AutoExecute && p.State == agent2.StateActiveLimit {
+		log.Println("Active limit state reached in daily run. Executing automatic order placement...")
+		if err := runAutoLiveOrder(ctx, cfg, db); err != nil {
+			log.Printf("Automatic live order placement error: %v", err)
+		}
+	}
 	if cfg.Notify.Enabled {
 		switch cfg.Notify.Provider {
 		case "telegram":
@@ -559,7 +565,11 @@ func liveOrderAttemptText(proof liveguard.Proof) string {
 }
 
 func autoLiveOrderMarkdown(result liveguard.ExecutionResult) string {
-	md := fmt.Sprintf("AUTO LIVE ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
+	canaryStr := ""
+	if result.Candidate.Canary {
+		canaryStr = " [CANARY MODE]"
+	}
+	md := fmt.Sprintf("AUTO LIVE ORDER%s\n\nStatus: %s\nSummary: %s\nProof status: %s\n", canaryStr, result.Status, result.Summary, result.ProofStatus)
 	if result.Candidate.Symbol != "" {
 		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f post_only=%v\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Quantity, result.Candidate.Notional, result.Candidate.PostOnly)
 	}
@@ -578,7 +588,11 @@ func autoLiveOrderMarkdown(result liveguard.ExecutionResult) string {
 }
 
 func liveOrderMarkdown(result liveguard.ExecutionResult) string {
-	md := fmt.Sprintf("MANUAL LIVE PROOF ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
+	canaryStr := ""
+	if result.Candidate.Canary {
+		canaryStr = " [CANARY MODE]"
+	}
+	md := fmt.Sprintf("MANUAL LIVE PROOF ORDER%s\n\nStatus: %s\nSummary: %s\nProof status: %s\n", canaryStr, result.Status, result.Summary, result.ProofStatus)
 	if result.Candidate.Symbol != "" {
 		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f post_only=%v\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Quantity, result.Candidate.Notional, result.Candidate.PostOnly)
 	}

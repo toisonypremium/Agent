@@ -59,11 +59,13 @@ type Config struct {
 		CandleLimit int      `yaml:"candle_limit"`
 	} `yaml:"data"`
 	Maintenance struct {
-		Enabled              bool `yaml:"enabled"`
-		ReportRetentionDays  int  `yaml:"report_retention_days"`
-		EventRetentionDays   int  `yaml:"event_retention_days"`
-		MaxReportFiles       int  `yaml:"max_report_files"`
-		MaxClosedPaperOrders int  `yaml:"max_closed_paper_orders"`
+		Enabled              bool   `yaml:"enabled"`
+		SchedulerEnabled     bool   `yaml:"scheduler_enabled"`
+		SchedulerTime        string `yaml:"scheduler_time"`
+		ReportRetentionDays  int    `yaml:"report_retention_days"`
+		EventRetentionDays   int    `yaml:"event_retention_days"`
+		MaxReportFiles       int    `yaml:"max_report_files"`
+		MaxClosedPaperOrders int    `yaml:"max_closed_paper_orders"`
 	} `yaml:"maintenance"`
 	Notify struct {
 		Enabled        bool   `yaml:"enabled"`
@@ -120,6 +122,20 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
+func validClockTime(value string) bool {
+	if len(value) != 5 || value[2] != ':' {
+		return false
+	}
+	for _, i := range []int{0, 1, 3, 4} {
+		if value[i] < '0' || value[i] > '9' {
+			return false
+		}
+	}
+	hour := int(value[0]-'0')*10 + int(value[1]-'0')
+	min := int(value[3]-'0')*10 + int(value[4]-'0')
+	return hour >= 0 && hour <= 23 && min >= 0 && min <= 59
+}
+
 func (c Config) Validate() error {
 	if c.App.Mode == "" {
 		return errors.New("app.mode required")
@@ -129,6 +145,9 @@ func (c Config) Validate() error {
 	}
 	if c.App.ReconcileIntervalMinutes < 0 {
 		return errors.New("app.reconcile_interval_minutes cannot be negative")
+	}
+	if c.App.DailyRunTime != "" && !validClockTime(c.App.DailyRunTime) {
+		return errors.New("app.daily_run_time must be HH:MM")
 	}
 	if c.Execution.RealTradingEnabled {
 		if !c.Live.Enabled || c.Live.ProofOnly {
@@ -191,6 +210,9 @@ func (c Config) Validate() error {
 	}
 	if c.Maintenance.ReportRetentionDays < 0 || c.Maintenance.EventRetentionDays < 0 || c.Maintenance.MaxReportFiles < 0 || c.Maintenance.MaxClosedPaperOrders < 0 {
 		return errors.New("maintenance retention values cannot be negative")
+	}
+	if c.Maintenance.SchedulerTime != "" && !validClockTime(c.Maintenance.SchedulerTime) {
+		return errors.New("maintenance.scheduler_time must be HH:MM")
 	}
 	if len(c.Execution.LayerDistribution) == 0 {
 		return errors.New("execution.layer_distribution required")

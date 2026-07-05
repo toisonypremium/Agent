@@ -18,6 +18,7 @@ import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/learning"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/llm"
 	"btc-agent/internal/market"
@@ -75,6 +76,8 @@ func run(ctx context.Context, args []string) error {
 		return nil
 	case "backtest":
 		return runBacktest(cfg, db)
+	case "learn":
+		return runLearning(cfg, db)
 	case "export-training":
 		return runExportTraining(cfg, db)
 	case "run-ai-watch":
@@ -105,7 +108,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|learn|export-training|eval-ai|live-proof|execute-live-proof-order|auto-live-order|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -242,28 +245,29 @@ func runDaily(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	return nil
 }
 
-func runBacktest(cfg config.Config, db *storage.DB) error {
+func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, error) {
 	daily, err := db.LoadCandles(cfg.Data.Symbols.BTC, "1d", cfg.Data.CandleLimit)
 	if err != nil {
-		return err
+		return backtest.Result{}, err
 	}
 	result, err := backtest.RunBTC(backtest.Config{MinWindow1D: 60, HorizonDays: []int{1, 3, 7, 14}}, daily)
 	if err != nil {
-		return err
+		return backtest.Result{}, err
 	}
-	flowAudit, err := backtest.RunBTCFlowBottleneckAudit(map[string][]market.Candle{"1d": daily}, backtest.BTCFlowBottleneckAuditConfig{})
+	btc := map[string][]market.Candle{"1d": daily}
+	flowAudit, err := backtest.RunBTCFlowBottleneckAudit(btc, backtest.BTCFlowBottleneckAuditConfig{})
 	if err != nil {
 		result.BTCFlowBottleneckAudit = backtest.BTCFlowBottleneckAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.BTCFlowBottleneckAudit = flowAudit
 	}
-	qualityAudit, err := backtest.RunFlowParamQualityAudit(map[string][]market.Candle{"1d": daily}, backtest.FlowParamQualityAuditConfig{})
+	qualityAudit, err := backtest.RunFlowParamQualityAudit(btc, backtest.FlowParamQualityAuditConfig{})
 	if err != nil {
 		result.FlowParamQualityAudit = backtest.FlowParamQualityAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.FlowParamQualityAudit = qualityAudit
 	}
-	permissionAudit, err := backtest.RunBTCPermissionAudit(cfg, map[string][]market.Candle{"1d": daily}, backtest.BTCPermissionAuditConfig{})
+	permissionAudit, err := backtest.RunBTCPermissionAudit(cfg, btc, backtest.BTCPermissionAuditConfig{})
 	if err != nil {
 		result.BTCPermissionAudit = backtest.BTCPermissionAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
@@ -277,38 +281,60 @@ func runBacktest(cfg config.Config, db *storage.DB) error {
 		}
 		assets[sym] = candles
 	}
-	sim, err := backtest.RunAgent2Simulation(cfg, map[string][]market.Candle{"1d": daily}, assets)
+	sim, err := backtest.RunAgent2Simulation(cfg, btc, assets)
 	if err != nil {
 		result.Agent2Simulation = backtest.Agent2Simulation{Enabled: false, Assets: map[string]backtest.AssetSimStats{}, Summary: err.Error()}
 	} else {
 		result.Agent2Simulation = sim
 	}
-	watchAudit, err := backtest.RunWatchlistTriggerAudit(cfg, map[string][]market.Candle{"1d": daily}, assets, backtest.WatchlistTriggerAuditConfig{})
+	watchAudit, err := backtest.RunWatchlistTriggerAudit(cfg, btc, assets, backtest.WatchlistTriggerAuditConfig{})
 	if err != nil {
 		result.WatchlistTriggerAudit = backtest.WatchlistTriggerAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.WatchlistTriggerAudit = watchAudit
 	}
-	checklistAudit, err := backtest.RunChecklistPassCountAudit(cfg, map[string][]market.Candle{"1d": daily}, assets, backtest.ChecklistPassCountAuditConfig{})
+	checklistAudit, err := backtest.RunChecklistPassCountAudit(cfg, btc, assets, backtest.ChecklistPassCountAuditConfig{})
 	if err != nil {
 		result.ChecklistPassCountAudit = backtest.ChecklistPassCountAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.ChecklistPassCountAudit = checklistAudit
 	}
-	audit, err := backtest.RunLayerAudit(cfg, map[string][]market.Candle{"1d": daily}, assets, backtest.LayerAuditConfig{})
+	audit, err := backtest.RunLayerAudit(cfg, btc, assets, backtest.LayerAuditConfig{})
 	if err != nil {
 		result.LayerAudit = backtest.LayerAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.LayerAudit = audit
 	}
-	exitAudit, err := backtest.RunExitAudit(cfg, map[string][]market.Candle{"1d": daily}, assets, backtest.ExitAuditConfig{})
+	exitAudit, err := backtest.RunExitAudit(cfg, btc, assets, backtest.ExitAuditConfig{})
 	if err != nil {
 		result.ExitAudit = backtest.ExitAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.ExitAudit = exitAudit
 	}
+	return result, nil
+}
+
+func runBacktest(cfg config.Config, db *storage.DB) error {
+	result, err := buildBacktestResult(cfg, db)
+	if err != nil {
+		return err
+	}
 	md := backtest.Markdown(result)
 	if err := backtest.SaveReports("reports", result, md); err != nil {
+		return err
+	}
+	fmt.Println(md)
+	return nil
+}
+
+func runLearning(cfg config.Config, db *storage.DB) error {
+	backtestResult, err := buildBacktestResult(cfg, db)
+	if err != nil {
+		return err
+	}
+	result := learning.BuildRecommendations(backtestResult)
+	md := learning.Markdown(result)
+	if err := learning.SaveReports("reports", result, md); err != nil {
 		return err
 	}
 	fmt.Println(md)
@@ -673,6 +699,8 @@ func protectedReportFiles() []string {
 		"auto_live_order_latest.json",
 		"maintenance_latest.md",
 		"maintenance_latest.json",
+		"learning_latest.md",
+		"learning_latest.json",
 	}
 }
 

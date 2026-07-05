@@ -106,7 +106,7 @@ func TestResearchBriefHumanText(t *testing.T) {
 		Summary: "ok",
 		Items:   []research.ResearchItem{{Source: "Test RSS", Title: "BTC exchange outage", URL: "https://example.com/news", Risk: research.RiskWarn, Tags: []string{"BTC", "OKX"}}},
 	})
-	for _, want := range []string{"Research brief", "Research-only", "BTC exchange outage", "https://example.com/news", "BTC"} {
+	for _, want := range []string{"Research Brief", "Research-only", "BTC exchange outage", "https://example.com/news", "BTC"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}

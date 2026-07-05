@@ -1949,6 +1949,12 @@ func protectedReportFiles() []string {
 		"maintenance_latest.json",
 		"learning_latest.md",
 		"learning_latest.json",
+		"live_manager_history_latest.md",
+		"live_manager_history_latest.json",
+		"live_manager_simulation_latest.md",
+		"live_manager_simulation_latest.json",
+		"cancel_all_live_orders_latest.md",
+		"cancel_all_live_orders_latest.json",
 	}
 }
 

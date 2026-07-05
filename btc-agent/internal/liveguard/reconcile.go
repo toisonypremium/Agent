@@ -51,6 +51,7 @@ func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.
 			res.Orders = append(res.Orders, o)
 			continue
 		}
+		remote = withLocalOrderIdentity(remote, o)
 
 		if remote.Status != o.Status {
 			res.Updated++
@@ -60,4 +61,17 @@ func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.
 
 	res.Summary = fmt.Sprintf("reconciled %d orders: updated %d, unknown %d", res.Checked, res.Updated, res.Unknown)
 	return res
+}
+
+func withLocalOrderIdentity(remote, local live.OrderStatus) live.OrderStatus {
+	if remote.InstID == "" {
+		remote.InstID = local.InstID
+	}
+	if remote.OrderID == "" {
+		remote.OrderID = local.OrderID
+	}
+	if remote.ClientOrderID == "" {
+		remote.ClientOrderID = local.ClientOrderID
+	}
+	return remote
 }

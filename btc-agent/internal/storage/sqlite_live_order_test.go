@@ -43,7 +43,7 @@ func TestLiveOrderStorageRoundTrip(t *testing.T) {
 		AvgPrice:          1999,
 		AccumulatedFillSz: 0.01,
 		Fee:               -0.001,
-		UpdatedAt:         1700000000000,
+		UpdatedAt:         1700000000,
 	}
 	if err := db.SaveLiveOrderStatus(status); err != nil {
 		t.Fatalf("save live order status: %v", err)
@@ -61,12 +61,13 @@ func TestLiveOrderStorageRoundTrip(t *testing.T) {
 	}
 
 	var savedStatus string
+	var updatedAt int64
 	var payload string
-	if err := db.QueryRow(`SELECT status, payload_json FROM live_orders WHERE client_order_id=?`, "client-1").Scan(&savedStatus, &payload); err != nil {
+	if err := db.QueryRow(`SELECT status, updated_at, payload_json FROM live_orders WHERE client_order_id=?`, "client-1").Scan(&savedStatus, &updatedAt, &payload); err != nil {
 		t.Fatalf("query saved order: %v", err)
 	}
-	if savedStatus != live.StatusFilled || payload == "" {
-		t.Fatalf("bad saved status=%q payload=%q", savedStatus, payload)
+	if savedStatus != live.StatusFilled || updatedAt != 1700000000 || payload == "" {
+		t.Fatalf("bad saved status=%q updated_at=%d payload=%q", savedStatus, updatedAt, payload)
 	}
 
 	var eventCount int

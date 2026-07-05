@@ -1232,11 +1232,11 @@ func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram boo
 // buildResearchTelegramText tries AI analysis first; falls back to deterministic formatter.
 func buildResearchTelegramText(ctx context.Context, cfg config.Config, result research.BriefResult) string {
 	if cfg.AI.Enabled && len(result.Items) > 0 {
-		// Research brief needs more tokens than daily watch (1800 char Telegram output).
-		// Use at least 1200 tokens; respect config if higher.
+		// Research brief needs enough room for JSON wrapper + expert Telegram text.
+		// Use full 2000-token cap to avoid truncated JSON from 9router Agent.
 		maxTokens := cfg.AI.MaxTokens
-		if maxTokens < 1200 {
-			maxTokens = 1200
+		if maxTokens < 2000 {
+			maxTokens = 2000
 		}
 		llmClient, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, maxTokens, cfg.AI.Temperature)
 		if err != nil {

@@ -531,7 +531,7 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 
 func ResearchBriefHumanText(result research.BriefResult) string {
 	var b strings.Builder
-	b.WriteString("🔍 BTC Agent — Research Brief\n")
+	b.WriteString("🔍 BTC Agent — Research Strategy Brief\n")
 	b.WriteString(fmt.Sprintf("🕐 %s\n", result.GeneratedAt.Format("02/01 15:04 UTC")))
 	b.WriteString(separatorLine())
 
@@ -547,73 +547,108 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 		}
 	}
 
-	// Tách WARN và INFO
 	warnItems := []research.ResearchItem{}
 	infoItems := []research.ResearchItem{}
+	allTags := []string{}
 	for _, item := range result.Items {
+		allTags = append(allTags, item.Tags...)
 		if item.Risk == research.RiskWarn {
 			warnItems = append(warnItems, item)
 		} else {
 			infoItems = append(infoItems, item)
 		}
 	}
+	allTags = uniqueTiny(allTags)
 
-	// WARN trước
+	stance := "NEUTRAL / WATCH"
 	if len(warnItems) > 0 {
-		b.WriteString("⚠️ RỦI RO / CẦN CHÚ Ý:\n")
-		limit := len(warnItems)
-		if limit > 3 {
-			limit = 3
-		}
-		for i := 0; i < limit; i++ {
-			item := warnItems[i]
-			tags := ""
-			if len(item.Tags) > 0 {
-				tags = " [" + strings.Join(item.Tags, ",") + "]"
-			}
-			b.WriteString(fmt.Sprintf("%d)%s %s\n", i+1, tags, item.Title))
-			b.WriteString(fmt.Sprintf("   📎 %s\n", item.URL))
-		}
-		b.WriteString(separatorLine())
+		stance = "MIXED → ưu tiên phòng thủ"
+	} else if len(infoItems) >= 3 {
+		stance = "NEUTRAL-RISK ON nhẹ"
 	}
 
-	// INFO
+	b.WriteString("I. KẾT LUẬN\n")
+	b.WriteString(fmt.Sprintf("Stance: %s. Tin tức là context, không đổi quyền giao dịch.\n", stance))
+	b.WriteString("Bot vẫn bám Agent 1/2: chỉ vào lệnh nếu có ACTIVE_LIMIT + safety gate sạch.\n")
+	b.WriteString(separatorLine())
+
+	b.WriteString("II. LUẬN ĐIỂM\n")
+	if len(allTags) > 0 {
+		b.WriteString("Chủ đề nổi bật: " + strings.Join(firstStrings(allTags, 6), ", ") + ".\n")
+	}
 	if len(infoItems) > 0 {
-		b.WriteString("📰 TIN TỨC THỊ TRƯỜNG:\n")
-		limit := len(infoItems)
-		maxInfo := 5 - len(warnItems)
-		if maxInfo < 2 {
-			maxInfo = 2
-		}
-		if limit > maxInfo {
-			limit = maxInfo
-		}
-		for i := 0; i < limit; i++ {
-			item := infoItems[i]
-			tags := ""
-			if len(item.Tags) > 0 {
-				tags = " [" + strings.Join(item.Tags, ",") + "]"
-			}
-			b.WriteString(fmt.Sprintf("%d)%s %s\n", i+1, tags, item.Title))
-			b.WriteString(fmt.Sprintf("   📎 %s\n", item.URL))
-		}
-		b.WriteString(separatorLine())
+		b.WriteString("Tin nền nghiêng về theo dõi dòng tiền và tâm lý, chưa đủ làm tín hiệu mua độc lập.\n")
 	}
-
 	if len(result.Items) == 0 {
-		b.WriteString("Chưa có tin tức mới.\n")
+		b.WriteString("Chưa có tin mới đủ dùng để nâng cấp nhận định.\n")
 	}
+	b.WriteString(separatorLine())
 
-	b.WriteString(fmt.Sprintf("📊 Tổng: %d tin | %d nguồn\n", len(result.Items), result.SourcesChecked))
+	b.WriteString("III. RỦI RO\n")
+	if len(warnItems) == 0 {
+		b.WriteString("Chưa có cảnh báo lớn từ news layer; vẫn cần tránh FOMO và chờ vùng discount.\n")
+	} else {
+		for _, item := range firstResearchItems(warnItems, 3) {
+			b.WriteString("- " + compactNewsTitle(item) + "\n")
+		}
+	}
+	b.WriteString(separatorLine())
+
+	b.WriteString("IV. CƠ HỘI\n")
+	if len(infoItems) == 0 {
+		b.WriteString("Chưa có catalyst rõ. Giữ watchlist, chờ giá và flow xác nhận.\n")
+	} else {
+		for _, item := range firstResearchItems(infoItems, 3) {
+			b.WriteString("- " + compactNewsTitle(item) + "\n")
+		}
+	}
+	b.WriteString(separatorLine())
+
+	b.WriteString("V. KẾ HOẠCH BOT\n")
+	b.WriteString("Action bias: WATCH / HOLD CASH. Không chase theo tin.\n")
+	b.WriteString("Chỉ cân nhắc spot limit BUY post-only nếu Agent 2 tạo ACTIVE_LIMIT và risk gate OK.\n")
+	b.WriteString(fmt.Sprintf("Nguồn xử lý: %d tin / %d nguồn. Link URL không gửi vào Telegram.\n", len(result.Items), result.SourcesChecked))
+	if len(result.Warnings) > 0 {
+		b.WriteString("Cảnh báo thu thập: " + result.Warnings[0] + "\n")
+	}
 	b.WriteString("Research-only: không đặt lệnh, không override Agent 1/2.\n")
 
-	if len(result.Warnings) > 0 {
-		b.WriteString("⚠️ Lỗi thu thập: ")
-		b.WriteString(result.Warnings[0])
-		b.WriteString("\n")
-	}
-
 	return trimTelegram(b.String())
+}
+
+func firstResearchItems(items []research.ResearchItem, limit int) []research.ResearchItem {
+	if len(items) < limit {
+		limit = len(items)
+	}
+	return items[:limit]
+}
+
+func compactNewsTitle(item research.ResearchItem) string {
+	tags := ""
+	if len(item.Tags) > 0 {
+		tags = " [" + strings.Join(firstStrings(item.Tags, 4), ",") + "]"
+	}
+	return shortReason(item.Title) + tags
+}
+
+func firstStrings(items []string, limit int) []string {
+	if len(items) < limit {
+		limit = len(items)
+	}
+	return items[:limit]
+}
+
+func uniqueTiny(in []string) []string {
+	seen := map[string]bool{}
+	out := []string{}
+	for _, item := range in {
+		if item == "" || seen[item] {
+			continue
+		}
+		seen[item] = true
+		out = append(out, item)
+	}
+	return out
 }
 
 func managementDecisionText(item liveguard.ManagedOrderDecision) string {

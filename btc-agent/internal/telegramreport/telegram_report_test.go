@@ -106,10 +106,13 @@ func TestResearchBriefHumanText(t *testing.T) {
 		Summary: "ok",
 		Items:   []research.ResearchItem{{Source: "Test RSS", Title: "BTC exchange outage", URL: "https://example.com/news", Risk: research.RiskWarn, Tags: []string{"BTC", "OKX"}}},
 	})
-	for _, want := range []string{"Research Brief", "Research-only", "BTC exchange outage", "https://example.com/news", "BTC"} {
+	for _, want := range []string{"Research Strategy Brief", "Research-only", "BTC exchange outage", "BTC", "KẾ HOẠCH BOT"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}
+	}
+	if strings.Contains(got, "https://example.com/news") {
+		t.Fatalf("research Telegram should not include raw URLs: %s", got)
 	}
 	for _, leak := range []string{"OKX_API_SECRET", "telegram_token", "08ceca61", "276BDF"} {
 		if strings.Contains(got, leak) {

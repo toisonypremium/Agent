@@ -33,6 +33,10 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent export-training --config config.yaml
 ./bin/btc-agent eval-ai --config config.yaml
 ./bin/btc-agent live-proof --config config.yaml
+./bin/btc-agent execute-live-proof-order --config config.yaml --confirm <client-order-id>
+./bin/btc-agent auto-live-order --config config.yaml
+./bin/btc-agent reconcile-live-orders --config config.yaml
+./bin/btc-agent live-positions --config config.yaml
 ./bin/btc-agent maintenance --config config.yaml
 ```
 
@@ -158,6 +162,17 @@ reports/live_proof_latest.json
 ```
 
 It does not place a real order. Real order execution is intentionally a separate future manual-confirmed command.
+
+`reconcile-live-orders` reads local open live orders, checks OKX order status with read-only signed REST calls, updates local order/event state, and writes:
+
+```text
+reports/live_reconcile_latest.md
+reports/live_reconcile_latest.json
+reports/live_position_latest.md
+reports/live_position_latest.json
+```
+
+Reconciliation never places orders. Unknown exchange errors are marked for manual check. `live-positions` prints the local live position ledger without calling the exchange.
 
 ## Tests
 

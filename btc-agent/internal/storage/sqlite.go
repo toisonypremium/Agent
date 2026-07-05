@@ -189,7 +189,10 @@ func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
 }
 
 func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
-	now := time.Now().Unix()
+	updatedAt := o.UpdatedAt
+	if updatedAt == 0 {
+		updatedAt = time.Now().Unix()
+	}
 	b, _ := json.Marshal(o)
 	update := func(where string, id string) (int64, error) {
 		res, err := d.Exec(
@@ -209,7 +212,7 @@ func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
 			o.Price, o.Price,
 			o.Quantity, o.Quantity,
 			o.Price, o.Quantity, o.Price, o.Quantity,
-			o.Status, now, string(b), id,
+			o.Status, updatedAt, string(b), id,
 		)
 		if err != nil {
 			return 0, err

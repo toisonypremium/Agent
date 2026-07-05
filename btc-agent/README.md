@@ -30,6 +30,7 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent run-ai-watch --config config.yaml
 ./bin/btc-agent status --config config.yaml
 ./bin/btc-agent backtest --config config.yaml
+./bin/btc-agent learn --config config.yaml
 ./bin/btc-agent export-training --config config.yaml
 ./bin/btc-agent eval-ai --config config.yaml
 ./bin/btc-agent live-proof --config config.yaml
@@ -88,6 +89,23 @@ reports/backtest_latest.json
 ```
 
 Use this to audit Liquidity Flow signals by historical forward returns and drawdowns. It also runs BTC Flow Detector Bottleneck Audit, which reports flow component frequency, bias forward return/drawdown, and audit-only parameter sensitivity; it does not tune `flow.DefaultParams()` automatically. Flow Param Candidate Forward Quality Audit then compares those audit-only param candidates by bullish/bearish forward return, added signal quality, false-positive proxy, and drawdown; it also does not tune production params automatically. It also runs BTC Permission Bottleneck Audit, which reports Agent 1 permission distribution, forward return/drawdown by permission, and top blockers explaining why BTC is not `ALLOWED`; this is diagnostic only and does not tune Agent 1 automatically. It also runs Agent 2 Layer Simulation for ETH/SOL/RENDER using local 1D candles: limit-layer placement, fills, expiries, invalidation hits, max deployed capital, drawdown, and simulated PnL. Agent 2 diagnostics explain Agent 1 permission counts, regime/risk gates, per-asset block reasons, and sample PLAN/FILL/EXPIRE/INVALIDATION/TAKE_PROFIT/TIME_STOP events. Orders become active from the next candle to avoid same-candle lookahead. The Layer Audit compares invalidation buffers and layer-depth multipliers to see whether volatile assets like RENDER fail because stops are too tight or layers are too shallow. The Exit / Take-Profit Audit compares TP percentages and time-stop windows using local candles only; if TP and invalidation happen in the same candle, invalidation wins as the conservative OHLCV assumption. Agent 2 also uses an Asset Relative Strength Filter when BTC 1D benchmark candles are available: assets that are both weak in absolute momentum and underperforming BTC over the configured lookback are blocked before layer planning. Agent 2 then reports Asset Ranking / Rotation Score, combining relative strength, momentum, discount quality, and asset-level liquidity flow; low-score or low-rank assets stay WATCH before layer planning. Agent 2 also requires Asset Flow Entry confirmation before layer planning: sweep-low reclaim, failed breakdown/bear trap, absorption, or accumulation near support can pass; distribution, bull-trap, or failed breakout hard-blocks entry. Candidate Discovery / Watchlist Report appears in `plan`, `status`, and `reports/latest.json`; it ranks the closest candidates by readiness, lists missing conditions, gives the next trigger to wait for, and includes a Strict Entry Checklist for BTC permission, relative strength, rotation score/rank, asset flow entry, discount zone, reward/risk, falling knife, and FOMO. Backtest also includes Watchlist Trigger Audit, which measures forward return, win rate, and worst drawdown after historical actionable watchlist candidates appear, plus Checklist Pass-Count Audit, which reports average checks passed, hard/soft fail rates, near-actionable samples, and top blockers per asset. Watchlist readiness is noise-capped: BTC-not-allowed, relative-weak, falling-knife, FOMO, and unconfirmed-flow candidates remain visible for context but are not actionable by default. Ranking, flow entry, watchlist reporting, Strict Entry Checklist, Checklist Pass-Count Audit, BTC Flow Detector Bottleneck Audit, Flow Param Candidate Forward Quality Audit, BTC Permission Bottleneck Audit, and trigger audit do not reallocate capital, trigger alerts, tune rules, or enable real trading. Backtest diagnostics count these blocks in per-asset reasons. These audits do not change production planner/config automatically and do not enable take-profit order placement. They are for debugging rules, not a profit guarantee. If the sample is small, treat the conclusion as weak.
+
+## Learning Recommendations Report
+
+Run after local BTC/assets 1D candles exist in SQLite:
+
+```bash
+./bin/btc-agent learn --config config.yaml
+```
+
+This reruns deterministic backtest/audits from local candles and writes:
+
+```text
+reports/learning_latest.md
+reports/learning_latest.json
+```
+
+It turns diagnostics into manual recommendations for flow params, BTC blockers, watchlist triggers, layering, and exits. It never edits config, calls an LLM, calls an exchange, places orders, or overrides the deterministic engine.
 
 ## AI Training Dataset Export
 

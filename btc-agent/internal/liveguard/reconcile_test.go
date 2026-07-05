@@ -53,6 +53,23 @@ func TestReconcileOrders(t *testing.T) {
 		}
 	})
 
+	t.Run("remote response keeps local identity", func(t *testing.T) {
+		reader := &mockReader{
+			status: func(ctx context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error) {
+				return live.OrderStatus{Status: live.StatusFilled}, nil
+			},
+		}
+
+		open := []live.OrderStatus{
+			{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "c1", Status: live.StatusLiveOpen},
+		}
+
+		res := ReconcileOrders(context.Background(), reader, open)
+		if res.Orders[0].InstID != "ETH-USDT" || res.Orders[0].OrderID != "123" || res.Orders[0].ClientOrderID != "c1" {
+			t.Fatalf("remote identity not preserved: %+v", res.Orders[0])
+		}
+	})
+
 	t.Run("nil reader marks unknown", func(t *testing.T) {
 		open := []live.OrderStatus{
 			{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "c1", Status: live.StatusLiveOpen},

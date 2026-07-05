@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/llm"
 	"btc-agent/internal/storage"
 )
 
@@ -182,7 +184,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
-		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
+		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
 
 	for {
@@ -281,7 +283,25 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 }
 
-func schedulerRunNowTelegram(db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {
+func schedulerRunNowTelegram(ctx context.Context, cfg config.Config, db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {
+	fallback := schedulerRunNowTelegramDeterministic(db, researchSummary, dailyOK, reconcileOK, supervisor, supervisorSet, notes)
+	if !cfg.AI.Enabled {
+		return fallback
+	}
+	text, err := schedulerRunNowTelegramAI(ctx, cfg, db, researchSummary, dailyOK, reconcileOK, supervisor, supervisorSet, notes)
+	if err != nil {
+		log.Printf("scheduler AI Telegram fallback: %v", err)
+		return fallback
+	}
+	if strings.TrimSpace(text) == "" || len(strings.TrimSpace(text)) < 1200 || strings.Contains(strings.ToLower(text), "api_key") || strings.Contains(strings.ToLower(text), "telegram_token") {
+		log.Printf("scheduler AI Telegram fallback: empty/short/unsafe output len=%d", len(strings.TrimSpace(text)))
+		return fallback
+	}
+	log.Printf("scheduler AI Telegram ok (%d chars)", len(text))
+	return strings.TrimSpace(text) + "\n"
+}
+
+func schedulerRunNowTelegramDeterministic(db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {
 	analysis, analysisErr := db.LatestAnalysis()
 	plan, planErr := db.LatestPlan()
 
@@ -371,6 +391,148 @@ func schedulerRunNowTelegram(db *storage.DB, researchSummary string, dailyOK boo
 	}
 	b.WriteString("\nAn toàn: không futures, không leverage, không market order. Chỉ spot limit BUY post-only khi Agent 2 ACTIVE_LIMIT và safety gate sạch.\n")
 	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) (string, error) {
+	analysis, err := db.LatestAnalysis()
+	if err != nil {
+		return "", fmt.Errorf("latest analysis: %w", err)
+	}
+	plan, err := db.LatestPlan()
+	if err != nil {
+		return "", fmt.Errorf("latest plan: %w", err)
+	}
+	maxTokens := cfg.AI.MaxTokens
+	if maxTokens < 2000 {
+		maxTokens = 2000
+	}
+	client, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, maxTokens, cfg.AI.Temperature)
+	if err != nil {
+		return "", err
+	}
+
+	payload := map[string]any{
+		"generated_at": time.Now().UTC().Format(time.RFC3339),
+		"btc": map[string]any{
+			"price":              analysis.BTCPrice,
+			"regime":             analysis.MarketRegime,
+			"trend_score":        analysis.TrendScore,
+			"weekly_bias":        analysis.WeeklyBias,
+			"daily_bias":         analysis.DailyBias,
+			"four_hour_bias":     analysis.FourHourBias,
+			"flow_bias":          analysis.Flow.Bias,
+			"flow_score":         analysis.Flow.Score,
+			"risk_level":         analysis.RiskLevel,
+			"falling_knife_risk": analysis.FallingKnifeRisk,
+			"fomo_risk":          analysis.FomoRisk,
+			"accumulation_zone":  analysis.AccumulationZone,
+			"support_zone":       analysis.PrimarySupportZone,
+			"deep_support_zone":  analysis.DeepSupportZone,
+			"resistance_zone":    analysis.ResistanceZone,
+			"invalidation_zone":  analysis.InvalidationZone,
+			"scenario_main":      analysis.ScenarioMain,
+			"scenario_bullish":   analysis.ScenarioBullish,
+			"scenario_bearish":   analysis.ScenarioBearish,
+			"permission":         analysis.ActionPermission,
+		},
+		"plan":               compactPlanForAI(plan),
+		"research_summary":   researchSummary,
+		"daily_ok":           dailyOK,
+		"reconcile_ok":       reconcileOK,
+		"supervisor_set":     supervisorSet,
+		"supervisor_status":  supervisor.Status,
+		"supervisor_action":  supervisor.Action,
+		"supervisor_summary": supervisor.Summary,
+		"notes":              notes,
+	}
+	if supervisor.Managed != nil {
+		m := supervisor.Managed
+		payload["managed"] = map[string]any{
+			"status":               m.Status,
+			"summary":              m.Summary,
+			"desired":              len(m.Desired),
+			"placed":               len(m.Placed),
+			"canceled":             len(m.Canceled),
+			"replaced":             len(m.Replaced),
+			"blocked":              len(m.Blocked),
+			"data_health":          m.DataHealth.Status,
+			"reconcile_safety":     m.ReconcileSafety.Status,
+			"risk_governor":        m.RiskGovernor.Status,
+			"risk_warnings":        m.RiskGovernor.Warnings,
+			"why_no_order_by_coin": m.PerCoin,
+		}
+	}
+	b, _ := json.MarshalIndent(payload, "", "  ")
+	prompt := fmt.Sprintf(`Viết 1 bản tin Telegram TIẾNG VIỆT như trader chuyên nghiệp báo cáo cho chủ tài khoản.
+Không trả JSON. Không markdown fence. Không URL. Không tiếng Anh, trừ WATCH/ACTIVE_LIMIT/NO_TRADE.
+
+BẮT BUỘC đủ 6 mục dưới đây, 1600-2600 ký tự:
+📊 BTC Agent — Bản tin chiến lược
+I. Kết luận: nói có đặt lệnh không, vì sao.
+II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score, risk.
+III. Vùng giá & kịch bản: vùng gom, support, deep support, kháng cự, invalidation; kịch bản chính/tốt/xấu.
+IV. Kế hoạch bot: permission, plan state, ACTIVE_LIMIT layer nếu có; nếu không có thì nói thiếu gì và watchlist chờ trigger nào.
+V. Research context: chỉ bối cảnh phụ, không override.
+VI. Trạng thái an toàn: daily/reconcile/supervisor/gates, kết luận spot limit BUY post-only only.
+
+Nếu không có ACTIVE_LIMIT, phải ghi rõ: không đặt lệnh, không chase giá, chờ trigger. Không futures, không leverage, không market order.
+
+Dữ liệu:
+%s`, string(b))
+	text, err := client.ChatText(ctx, prompt)
+	if err != nil {
+		return "", err
+	}
+	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(text, "```"), "```"))
+	text = stripURLsScheduler(text)
+	if len(text) > 3200 {
+		text = strings.TrimSpace(text[:3200]) + "\n..."
+	}
+	return text, nil
+}
+
+func compactPlanForAI(plan agent2.Plan) map[string]any {
+	assets := []map[string]any{}
+	for _, a := range plan.Assets {
+		layers := []map[string]any{}
+		for _, l := range a.Layers {
+			layers = append(layers, map[string]any{"index": l.Index, "price": l.Price, "notional": l.Notional})
+		}
+		assets = append(assets, map[string]any{
+			"symbol": a.Symbol, "state": a.State, "reason": a.Reason,
+			"rotation_rank": a.RotationRank, "rotation_score": a.RotationScore,
+			"reward_risk": a.RewardRisk, "layers": layers,
+		})
+	}
+	watch := []map[string]any{}
+	limit := len(plan.Watchlist.Candidates)
+	if limit > 5 {
+		limit = 5
+	}
+	for _, c := range plan.Watchlist.Candidates[:limit] {
+		watch = append(watch, map[string]any{
+			"symbol": c.Symbol, "readiness_score": c.ReadinessScore, "tier": c.Tier,
+			"actionable": c.Actionable, "missing": c.Missing, "next_trigger": c.NextTrigger,
+		})
+	}
+	return map[string]any{"state": plan.State, "summary": plan.Summary, "assets": assets, "watchlist": watch}
+}
+
+func stripURLsScheduler(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		words := strings.Fields(line)
+		kept := []string{}
+		for _, word := range words {
+			lower := strings.ToLower(strings.Trim(word, "()[]{}.,;"))
+			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "www.") {
+				continue
+			}
+			kept = append(kept, word)
+		}
+		lines[i] = strings.Join(kept, " ")
+	}
+	return strings.Join(lines, "\n")
 }
 
 func actionConclusionVI(analysis agent1.MarketAnalysis, plan agent2.Plan) string {

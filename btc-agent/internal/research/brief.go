@@ -15,10 +15,10 @@ func BuildBrief(ctx context.Context, cfg config.Config) BriefResult {
 		return result
 	}
 	if cfg.Research.RSS.Enabled {
-		items, warnings := FetchRSS(ctx, cfg)
+		items, sourcesOK, warnings := FetchRSS(ctx, cfg)
 		result.Items = append(result.Items, items...)
 		result.Warnings = append(result.Warnings, warnings...)
-		result.SourcesChecked += len(cfg.Research.RSS.Feeds)
+		result.SourcesChecked += sourcesOK
 	}
 	if len(result.Items) == 0 {
 		result.Warnings = append(result.Warnings, "no research items collected")

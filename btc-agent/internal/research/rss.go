@@ -45,11 +45,12 @@ type atomLink struct {
 	Href string `xml:"href,attr"`
 }
 
-func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, []string) {
+func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, int, []string) {
 	items := []ResearchItem{}
 	warnings := []string{}
+	sourcesOK := 0
 	if !cfg.Research.RSS.Enabled {
-		return items, warnings
+		return items, sourcesOK, warnings
 	}
 	feeds := cfg.Research.RSS.Feeds
 	limit := cfg.Research.MaxSourcesPerCycle
@@ -71,6 +72,7 @@ func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, []string)
 			warnings = append(warnings, fmt.Sprintf("rss feed failed %s: %v", feedURL, err))
 			continue
 		}
+		sourcesOK++
 		for _, item := range feedItems {
 			if len(items) >= limit {
 				break
@@ -87,7 +89,7 @@ func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, []string)
 			items = append(items, item)
 		}
 	}
-	return items, warnings
+	return items, sourcesOK, warnings
 }
 
 func fetchFeed(ctx context.Context, client *http.Client, feedURL string) ([]ResearchItem, error) {

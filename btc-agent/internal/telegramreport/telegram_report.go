@@ -53,32 +53,243 @@ type LiveReadinessView struct {
 
 func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Báo cáo ngày\n\n")
-	b.WriteString(fmt.Sprintf("Kết luận: %s\n", ExplainPermission(analysis.ActionPermission)))
-	b.WriteString("Lệnh thật: KHÔNG đặt lệnh từ báo cáo này.\n\n")
-	b.WriteString("1) BTC đang thế nào?\n")
-	b.WriteString(fmt.Sprintf("- Regime: %s.\n", analysis.MarketRegime))
-	b.WriteString(fmt.Sprintf("- Risk: %s. Falling knife: %s. FOMO: %s.\n", ExplainRisk(analysis.RiskLevel), analysis.FallingKnifeRisk, analysis.FomoRisk))
-	b.WriteString(fmt.Sprintf("- Trend score: %.1f. Flow: %s %.2f — %s\n", analysis.TrendScore, analysis.Flow.Bias, analysis.Flow.Score, humanFlow(analysis.Flow.Bias)))
-	b.WriteString("\n2) Agent 2 đang làm gì?\n")
-	b.WriteString(fmt.Sprintf("- Plan: %s — %s\n", plan.State, ExplainPlanState(plan.State)))
-	if len(plan.Watchlist.Candidates) > 0 {
-		b.WriteString("- Watchlist gần nhất:\n")
-		for _, c := range firstCandidates(plan.Watchlist.Candidates, 3) {
-			b.WriteString(fmt.Sprintf("  • %s readiness %.2f: %s\n", c.Symbol, c.ReadinessScore, ExplainPlanState(c.State)))
-			if len(c.Missing) > 0 {
-				b.WriteString(fmt.Sprintf("    Thiếu: %s\n", humanList(c.Missing, 3)))
+
+	// ── Header ───────────────────────────────────────────────────────────────
+	b.WriteString("📊 BTC Agent — Phân tích ngày\n")
+	b.WriteString(fmt.Sprintf("🕐 %s\n", analysis.Timestamp.Format("02/01 15:04 UTC")))
+	b.WriteString(separatorLine())
+
+	// ── I. Tổng quan thị trường ───────────────────────────────────────────
+	b.WriteString("I. THỊ TRƯỜNG BTC\n")
+	b.WriteString(fmt.Sprintf("Giá: $%.0f  |  Regime: %s\n", analysis.BTCPrice, humanRegime(analysis.MarketRegime)))
+	b.WriteString(fmt.Sprintf("Trend: %.1f/100  |  F&G: %s (%d)\n",
+		analysis.TrendScore,
+		analysis.FearGreed.Classification,
+		analysis.FearGreed.Value))
+	b.WriteString(fmt.Sprintf("Bias: W=%s  D=%s  4H=%s\n",
+		shortBias(analysis.WeeklyBias),
+		shortBias(analysis.DailyBias),
+		shortBias(analysis.FourHourBias)))
+	b.WriteString(fmt.Sprintf("Flow: %s %.2f — %s\n",
+		analysis.Flow.Bias, analysis.Flow.Score, humanFlow(analysis.Flow.Bias)))
+	b.WriteString(separatorLine())
+
+	// ── II. Rủi ro ────────────────────────────────────────────────────────
+	b.WriteString("II. RỦI RO\n")
+	b.WriteString(fmt.Sprintf("Tổng rủi ro: %s\n", humanRiskEmoji(analysis.RiskLevel)))
+	b.WriteString(fmt.Sprintf("Falling knife: %s  |  FOMO: %s\n",
+		humanRiskEmoji(analysis.FallingKnifeRisk),
+		humanRiskEmoji(analysis.FomoRisk)))
+	b.WriteString(separatorLine())
+
+	// ── III. Vùng giá then chốt ───────────────────────────────────────────
+	b.WriteString("III. VÙNG GIÁ\n")
+	if analysis.AccumulationZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("🟢 Gom: $%.0f – $%.0f\n",
+			analysis.AccumulationZone.Low, analysis.AccumulationZone.High))
+	}
+	if analysis.PrimarySupportZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("🔵 Support: $%.0f – $%.0f\n",
+			analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High))
+	}
+	if analysis.DeepSupportZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("⚫ Deep: $%.0f – $%.0f\n",
+			analysis.DeepSupportZone.Low, analysis.DeepSupportZone.High))
+	}
+	if analysis.ResistanceZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("🔴 Kháng cự: $%.0f – $%.0f\n",
+			analysis.ResistanceZone.Low, analysis.ResistanceZone.High))
+	}
+	if analysis.InvalidationZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("❌ Invalidation: $%.0f – $%.0f\n",
+			analysis.InvalidationZone.Low, analysis.InvalidationZone.High))
+	}
+	b.WriteString(separatorLine())
+
+	// ── IV. Kịch bản ─────────────────────────────────────────────────────
+	b.WriteString("IV. KỊCH BẢN\n")
+	if analysis.ScenarioMain != "" {
+		b.WriteString(fmt.Sprintf("📌 Chính: %s\n", analysis.ScenarioMain))
+	}
+	if analysis.ScenarioBullish != "" {
+		b.WriteString(fmt.Sprintf("🐂 Bull: %s\n", analysis.ScenarioBullish))
+	}
+	if analysis.ScenarioBearish != "" {
+		b.WriteString(fmt.Sprintf("🐻 Bear: %s\n", analysis.ScenarioBearish))
+	}
+	b.WriteString(separatorLine())
+
+	// ── V. Kế hoạch giao dịch (Agent 2) ──────────────────────────────────
+	b.WriteString("V. KẾ HOẠCH GIAO DỊCH\n")
+	b.WriteString(fmt.Sprintf("Permission: %s\n", ExplainPermission(analysis.ActionPermission)))
+	b.WriteString(fmt.Sprintf("Plan state: %s\n", humanPlanStateEmoji(plan.State)))
+
+	// Active assets with layers
+	activeAssets := []agent2.AssetPlan{}
+	for _, a := range plan.Assets {
+		if a.State == agent2.StateActiveLimit {
+			activeAssets = append(activeAssets, a)
+		}
+	}
+	if len(activeAssets) > 0 {
+		b.WriteString("\n🟩 ACTIVE LIMIT — Đã có layer:\n")
+		for _, a := range activeAssets {
+			b.WriteString(fmt.Sprintf("  %s | RR=%.1f | rank #%d\n",
+				a.Symbol, a.RewardRisk, a.RotationRank))
+			for _, l := range a.Layers {
+				b.WriteString(fmt.Sprintf("    Layer %d: $%.2f × %.0f USDT\n",
+					l.Index, l.Price, l.Notional))
 			}
-			if c.NextTrigger != "" {
-				b.WriteString(fmt.Sprintf("    Chờ: %s\n", c.NextTrigger))
+			if a.Reason != "" {
+				b.WriteString(fmt.Sprintf("    → %s\n", shortReason(a.Reason)))
 			}
 		}
-	} else {
-		b.WriteString("- Chưa có watchlist đủ gần điều kiện.\n")
 	}
-	b.WriteString("\n3) Hành động an toàn\n")
-	b.WriteString("- Tiếp tục theo dõi. Không resume live, không đặt lệnh nếu chưa có ACTIVE_LIMIT và proof sạch.\n")
+
+	// Watchlist
+	if len(plan.Watchlist.Candidates) > 0 {
+		b.WriteString("\n👀 WATCHLIST (sắp đủ điều kiện):\n")
+		for _, c := range firstCandidates(plan.Watchlist.Candidates, 3) {
+			bar := readinessBar(c.ReadinessScore)
+			b.WriteString(fmt.Sprintf("  %s %s %.0f%%", c.Symbol, bar, c.ReadinessScore*100))
+			if c.NextTrigger != "" {
+				b.WriteString(fmt.Sprintf(" | chờ: %s", c.NextTrigger))
+			}
+			b.WriteString("\n")
+			if len(c.Missing) > 0 {
+				b.WriteString(fmt.Sprintf("    Thiếu: %s\n", humanList(c.Missing, 2)))
+			}
+		}
+	}
+
+	// Rotation ranking (non-active)
+	watchOrArmed := []agent2.AssetPlan{}
+	for _, a := range plan.Assets {
+		if a.State == agent2.StateWatch || a.State == agent2.StateArmed {
+			watchOrArmed = append(watchOrArmed, a)
+		}
+	}
+	if len(watchOrArmed) > 0 {
+		b.WriteString("\n⏳ THEO DÕI:\n")
+		for _, a := range watchOrArmed {
+			b.WriteString(fmt.Sprintf("  %s [%s] rank #%d score %.2f\n",
+				a.Symbol, a.State, a.RotationRank, a.RotationScore))
+		}
+	}
+	b.WriteString(separatorLine())
+
+	// ── VI. Kết luận hành động ───────────────────────────────────────────
+	b.WriteString("VI. HÀNH ĐỘNG\n")
+	b.WriteString(humanActionConclusion(analysis.ActionPermission, plan.State, len(activeAssets)))
+	b.WriteString("\n⚠️ Spot limit BUY post-only. Không futures/leverage/market.\n")
+
 	return trimTelegram(b.String())
+}
+
+func separatorLine() string {
+	return "───────────────────\n"
+}
+
+func shortBias(bias string) string {
+	switch strings.ToUpper(bias) {
+	case "BULLISH":
+		return "🟢"
+	case "BEARISH":
+		return "🔴"
+	case "NEUTRAL":
+		return "⚪"
+	case "ACCUMULATION":
+		return "🟢ACC"
+	case "DISTRIBUTION":
+		return "🔴DIST"
+	case "BEAR_TRAP":
+		return "🟡TRAP"
+	case "BULL_TRAP":
+		return "🟡BULL_T"
+	default:
+		if bias == "" {
+			return "—"
+		}
+		return bias
+	}
+}
+
+func humanRegime(regime string) string {
+	switch regime {
+	case "UPTREND":
+		return "🟢 UPTREND"
+	case "DOWNTREND":
+		return "🔴 DOWNTREND"
+	case "RANGING":
+		return "⚪ RANGING"
+	case "PANIC_SELLING":
+		return "🚨 PANIC SELLING"
+	case "RECOVERY":
+		return "🟡 RECOVERY"
+	default:
+		return regime
+	}
+}
+
+func humanRiskEmoji(r agent1.Risk) string {
+	switch r {
+	case agent1.Low:
+		return "🟢 LOW"
+	case agent1.Medium:
+		return "🟡 MEDIUM"
+	case agent1.High:
+		return "🔴 HIGH"
+	default:
+		return string(r)
+	}
+}
+
+func humanPlanStateEmoji(state agent2.State) string {
+	switch state {
+	case agent2.StateActiveLimit:
+		return "🟩 ACTIVE_LIMIT — Đã có layer limit hợp lệ"
+	case agent2.StateArmed:
+		return "🟡 ARMED — Gần đủ điều kiện, chờ trigger"
+	case agent2.StateWatch:
+		return "👀 WATCH — Theo dõi, chưa đặt lệnh"
+	case agent2.StateNoTrade:
+		return "🚫 NO_TRADE — Không giao dịch"
+	default:
+		return string(state)
+	}
+}
+
+func readinessBar(score float64) string {
+	filled := int(score * 5)
+	if filled > 5 {
+		filled = 5
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", 5-filled)
+	return "[" + bar + "]"
+}
+
+func shortReason(reason string) string {
+	if len(reason) > 80 {
+		return reason[:77] + "..."
+	}
+	return reason
+}
+
+func humanActionConclusion(perm agent1.Permission, state agent2.State, activeCount int) string {
+	switch {
+	case perm == agent1.NoTrade:
+		return "🚫 KHÔNG giao dịch. BTC chưa cho phép. Giữ USDT.\n"
+	case perm == agent1.Watch && state == agent2.StateWatch:
+		return "👀 QUAN SÁT. Chưa có setup. Theo dõi vùng support, chờ flow xác nhận.\n"
+	case perm == agent1.Armed:
+		return "🟡 CHUẨN BỊ. BTC gần đủ điều kiện. Theo dõi chặt trigger để chuyển ACTIVE_LIMIT.\n"
+	case perm == agent1.Allowed && activeCount > 0:
+		return fmt.Sprintf("✅ CÓ %d COIN ĐỦ ĐIỀU KIỆN. Bot tự đặt limit nếu proof sạch và không có blocker.\n", activeCount)
+	case perm == agent1.Allowed && activeCount == 0:
+		return "🟢 BTC ALLOWED nhưng chưa coin nào đủ setup. Theo dõi watchlist.\n"
+	default:
+		return "👀 Tiếp tục theo dõi. Không đặt lệnh thủ công.\n"
+	}
 }
 
 func LiveReadinessHumanText(r LiveReadinessView) string {
@@ -320,27 +531,76 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 
 func ResearchBriefHumanText(result research.BriefResult) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Research brief\n\n")
-	b.WriteString(fmt.Sprintf("Kết luận: %s\n", result.Summary))
+	b.WriteString("🔍 BTC Agent — Research Brief\n")
+	b.WriteString(fmt.Sprintf("🕐 %s\n", result.GeneratedAt.Format("02/01 15:04 UTC")))
+	b.WriteString(separatorLine())
+
+	// Tách WARN và INFO
+	warnItems := []research.ResearchItem{}
+	infoItems := []research.ResearchItem{}
+	for _, item := range result.Items {
+		if item.Risk == research.RiskWarn {
+			warnItems = append(warnItems, item)
+		} else {
+			infoItems = append(infoItems, item)
+		}
+	}
+
+	// WARN trước
+	if len(warnItems) > 0 {
+		b.WriteString("⚠️ RỦI RO / CẦN CHÚ Ý:\n")
+		limit := len(warnItems)
+		if limit > 3 {
+			limit = 3
+		}
+		for i := 0; i < limit; i++ {
+			item := warnItems[i]
+			tags := ""
+			if len(item.Tags) > 0 {
+				tags = " [" + strings.Join(item.Tags, ",") + "]"
+			}
+			b.WriteString(fmt.Sprintf("%d)%s %s\n", i+1, tags, item.Title))
+			b.WriteString(fmt.Sprintf("   📎 %s\n", item.URL))
+		}
+		b.WriteString(separatorLine())
+	}
+
+	// INFO
+	if len(infoItems) > 0 {
+		b.WriteString("📰 TIN TỨC THỊ TRƯỜNG:\n")
+		limit := len(infoItems)
+		maxInfo := 5 - len(warnItems)
+		if maxInfo < 2 {
+			maxInfo = 2
+		}
+		if limit > maxInfo {
+			limit = maxInfo
+		}
+		for i := 0; i < limit; i++ {
+			item := infoItems[i]
+			tags := ""
+			if len(item.Tags) > 0 {
+				tags = " [" + strings.Join(item.Tags, ",") + "]"
+			}
+			b.WriteString(fmt.Sprintf("%d)%s %s\n", i+1, tags, item.Title))
+			b.WriteString(fmt.Sprintf("   📎 %s\n", item.URL))
+		}
+		b.WriteString(separatorLine())
+	}
+
+	if len(result.Items) == 0 {
+		b.WriteString("Chưa có tin tức mới.\n")
+	}
+
+	b.WriteString(fmt.Sprintf("📊 Tổng: %d tin | %d nguồn\n", len(result.Items), result.SourcesChecked))
 	b.WriteString("Research-only: không đặt lệnh, không override Agent 1/2.\n")
-	limit := len(result.Items)
-	if limit > 5 {
-		limit = 5
-	}
-	for i := 0; i < limit; i++ {
-		item := result.Items[i]
-		b.WriteString(fmt.Sprintf("\n%d) [%s] %s\n", i+1, item.Risk, item.Title))
-		if len(item.Tags) > 0 {
-			b.WriteString(fmt.Sprintf("Tags: %s\n", strings.Join(item.Tags, ", ")))
-		}
-		b.WriteString(fmt.Sprintf("Source: %s\n%s\n", item.Source, item.URL))
-	}
+
 	if len(result.Warnings) > 0 {
-		b.WriteString("\nWarnings:\n")
-		for _, warning := range result.Warnings {
-			b.WriteString("- " + warning + "\n")
-		}
+		b.WriteString("⚠️ Lỗi thu thập: ")
+		b.WriteString(result.Warnings[0])
+		b.WriteString("\n")
 	}
+
 	return trimTelegram(b.String())
 }
 

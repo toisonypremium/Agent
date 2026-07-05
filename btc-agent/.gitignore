@@ -7,3 +7,4 @@ bin/
 secrets.env
 .codebase-memory/
 reports/
+logs/

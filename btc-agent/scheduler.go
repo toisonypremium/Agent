@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -92,22 +93,36 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 	}()
 
+	runNowNotes := []string{}
+	runNowResearchSummary := "research skipped"
+	runNowDailyOK := false
+	runNowReconcileOK := false
+	var runNowSupervisor liveguard.SupervisorResult
+	runNowSupervisorSet := false
+
 	// #4: runNow sequence — research (read-only) BEFORE daily run, BEFORE supervisor.
-	// Research cannot affect live gate decisions this way.
+	// For --run-now, suppress individual Telegram sends and send one combined summary.
 	if runNow && cfg.Research.Enabled {
 		log.Println("[Scheduler] Executing initial research doctor/brief (--run-now)...")
 		if _, err := runResearchDoctor(shutdownCtx, cfg); err != nil {
 			log.Printf("[Scheduler] Initial research doctor error: %v", err)
+			runNowNotes = append(runNowNotes, "research doctor: "+err.Error())
 		}
-		if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
+		if brief, err := runResearchBrief(shutdownCtx, cfg, false); err != nil {
 			log.Printf("[Scheduler] Initial research brief error: %v", err)
+			runNowNotes = append(runNowNotes, "research brief: "+err.Error())
+		} else {
+			runNowResearchSummary = brief.Summary
 		}
 	}
 
 	if runNow {
 		log.Println("[Scheduler] Executing initial daily run (--run-now)...")
-		if err := runDaily(shutdownCtx, cfg, db); err != nil {
+		if err := runDailyWithNotify(shutdownCtx, cfg, db, false); err != nil {
 			log.Printf("[Scheduler] Initial daily run error: %v", err)
+			runNowNotes = append(runNowNotes, "daily: "+err.Error())
+		} else {
+			runNowDailyOK = true
 		}
 	}
 
@@ -124,8 +139,14 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextReconcile time.Time
 	if cfg.Live.Enabled {
 		log.Println("[Scheduler] Executing initial live order reconciliation...")
-		if err := runReconcileLiveOrders(shutdownCtx, cfg, db); err != nil {
+		notifyReconcile := !runNow
+		if err := runReconcileLiveOrdersWithNotify(shutdownCtx, cfg, db, notifyReconcile); err != nil {
 			log.Printf("[Scheduler] Initial reconciliation error: %v", err)
+			if runNow {
+				runNowNotes = append(runNowNotes, "reconcile: "+err.Error())
+			}
+		} else if runNow {
+			runNowReconcileOK = true
 		}
 		nextReconcile = time.Now().Add(reconcileInterval)
 	}
@@ -148,10 +169,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
 		if runNow {
 			log.Println("[Scheduler] Executing initial live supervisor cycle (--run-now)...")
-			if _, err := runLiveSupervisorCycleWithDoctor(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor); err != nil {
+			if supervisor, err := runLiveSupervisorCycleWithDoctorNotify(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor, false); err != nil {
 				log.Printf("[Scheduler] Initial live supervisor error: %v", err)
+				runNowNotes = append(runNowNotes, "supervisor: "+err.Error())
+			} else {
+				runNowSupervisor = supervisor
+				runNowSupervisorSet = true
 			}
 		}
+	}
+
+	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
 
 	for {
@@ -248,6 +277,71 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			log.Printf("[Scheduler] Next scheduled maintenance run: %s", nextMaintenance.Format("2006-01-02 15:04:05 MST"))
 		}
 	}
+}
+
+func schedulerRunNowTelegram(db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {
+	var b strings.Builder
+	b.WriteString("🤖 BTC Agent — Tổng hợp scheduler run-now\n")
+	b.WriteString(time.Now().UTC().Format("02/01 15:04 UTC") + "\n")
+	b.WriteString("───────────────────\n")
+
+	analysis, analysisErr := db.LatestAnalysis()
+	plan, planErr := db.LatestPlan()
+	if analysisErr == nil {
+		b.WriteString(fmt.Sprintf("BTC: %.0f | Regime: %s | Permission: %s | Risk: %s\n", analysis.BTCPrice, analysis.MarketRegime, analysis.ActionPermission, analysis.RiskLevel))
+		b.WriteString(fmt.Sprintf("Trend: %.1f | Flow: %s %.2f\n", analysis.TrendScore, analysis.Flow.Bias, analysis.Flow.Score))
+	}
+	if planErr == nil {
+		b.WriteString(fmt.Sprintf("Plan: %s | Assets: %d | Watchlist: %d\n", plan.State, len(plan.Assets), len(plan.Watchlist.Candidates)))
+	}
+	b.WriteString("───────────────────\n")
+
+	b.WriteString("1) Research\n")
+	b.WriteString("- " + emptyScheduler(researchSummary, "not run") + "\n")
+
+	b.WriteString("2) Daily engine\n")
+	if dailyOK {
+		b.WriteString("- OK: candles fetched, Agent 1 analyzed, Agent 2 planned.\n")
+	} else {
+		b.WriteString("- WARN: daily run chưa hoàn tất.\n")
+	}
+
+	b.WriteString("3) Reconcile\n")
+	if reconcileOK {
+		b.WriteString("- OK: live orders reconciled / no open orders.\n")
+	} else {
+		b.WriteString("- WARN: reconcile chưa hoàn tất.\n")
+	}
+
+	b.WriteString("4) Supervisor\n")
+	if supervisorSet {
+		b.WriteString(fmt.Sprintf("- %s | %s\n", supervisor.Status, supervisor.Action))
+		if supervisor.Managed != nil {
+			m := supervisor.Managed
+			b.WriteString(fmt.Sprintf("- Managed: desired=%d placed=%d canceled=%d replaced=%d blocked=%d\n", len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
+			b.WriteString(fmt.Sprintf("- Gates: data=%s reconcile=%s risk=%s\n", m.DataHealth.Status, m.ReconcileSafety.Status, m.RiskGovernor.Status))
+		}
+	} else {
+		b.WriteString("- not run\n")
+	}
+
+	if len(notes) > 0 {
+		b.WriteString("───────────────────\n")
+		b.WriteString("Cảnh báo:\n")
+		for _, note := range notes {
+			b.WriteString("- " + note + "\n")
+		}
+	}
+	b.WriteString("───────────────────\n")
+	b.WriteString("Kết luận: 1 tin tổng hợp cho run-now. Không futures/leverage/market; chỉ spot limit BUY post-only khi Agent 2 ACTIVE_LIMIT + safety gate OK.\n")
+	return strings.TrimSpace(b.String()) + "\n"
+}
+
+func emptyScheduler(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }
 
 func parseClockTime(value string) (int, int, error) {

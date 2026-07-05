@@ -1232,7 +1232,13 @@ func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram boo
 // buildResearchTelegramText tries AI analysis first; falls back to deterministic formatter.
 func buildResearchTelegramText(ctx context.Context, cfg config.Config, result research.BriefResult) string {
 	if cfg.AI.Enabled && len(result.Items) > 0 {
-		llmClient, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
+		// Research brief needs more tokens than daily watch (1800 char Telegram output).
+		// Use at least 1200 tokens; respect config if higher.
+		maxTokens := cfg.AI.MaxTokens
+		if maxTokens < 1200 {
+			maxTokens = 1200
+		}
+		llmClient, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, maxTokens, cfg.AI.Temperature)
 		if err != nil {
 			log.Printf("research ai client: %v — using deterministic formatter", err)
 		} else {

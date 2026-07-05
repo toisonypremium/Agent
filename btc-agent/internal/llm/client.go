@@ -70,7 +70,11 @@ func (c *Client) ChatJSON(ctx context.Context, prompt string, out any) error {
 	if err != nil {
 		return err
 	}
-	url := strings.TrimRight(c.cfg.BaseURL, "/") + "/chat/completions"
+	base := strings.TrimRight(c.cfg.BaseURL, "/")
+	if !strings.HasSuffix(base, "/v1") {
+		base += "/v1"
+	}
+	url := base + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
 		return err

@@ -150,3 +150,55 @@ func TestOrderStatusSignsFullQueryPath(t *testing.T) {
 		t.Fatalf("bad status: %+v", status)
 	}
 }
+
+func TestOrderStatusCanLookupByClientOrderID(t *testing.T) {
+	const secret = "test-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath := r.URL.RequestURI()
+		if sawPath != "/api/v5/trade/order?instId=ETH-USDT&clOrdId=client-123" {
+			t.Fatalf("path=%s", sawPath)
+		}
+		ts := r.Header.Get("OK-ACCESS-TIMESTAMP")
+		wantSign := okxSign(ts, http.MethodGet, sawPath, "", secret)
+		if r.Header.Get("OK-ACCESS-SIGN") != wantSign {
+			t.Fatalf("signature did not include clOrdId query path")
+		}
+		_, _ = w.Write([]byte(`{"code":"0","msg":"","data":[{"instId":"ETH-USDT","ordId":"ord-123","clOrdId":"client-123","state":"filled","side":"buy","ordType":"limit","px":"2000","sz":"0.01","accFillSz":"0.01","avgPx":"1999","fee":"-0.001","feeCcy":"USDT","uTime":"1700000000000"}]}`))
+	}))
+	defer server.Close()
+
+	client := &OKXClient{baseURL: server.URL, key: "key", secret: secret, passphrase: "pass", http: server.Client()}
+	status, err := client.OrderStatus(context.Background(), "ETH-USDT", "", "client-123")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Status != StatusFilled || status.ClientOrderID != "client-123" || status.OrderID != "ord-123" {
+		t.Fatalf("bad status: %+v", status)
+	}
+}
+
+func TestPendingOrdersSignsFullQueryPath(t *testing.T) {
+	const secret = "test-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sawPath := r.URL.RequestURI()
+		if sawPath != "/api/v5/trade/orders-pending?instType=SPOT&instId=ETH-USDT" {
+			t.Fatalf("path=%s", sawPath)
+		}
+		ts := r.Header.Get("OK-ACCESS-TIMESTAMP")
+		wantSign := okxSign(ts, http.MethodGet, sawPath, "", secret)
+		if r.Header.Get("OK-ACCESS-SIGN") != wantSign {
+			t.Fatalf("signature did not include pending-orders query path")
+		}
+		_, _ = w.Write([]byte(`{"code":"0","msg":"","data":[{"instId":"ETH-USDT","ordId":"ord-123","clOrdId":"client-123","state":"live","side":"buy","ordType":"limit","px":"2000","sz":"0.01","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000000"}]}`))
+	}))
+	defer server.Close()
+
+	client := &OKXClient{baseURL: server.URL, key: "key", secret: secret, passphrase: "pass", http: server.Client()}
+	statuses, err := client.PendingOrders(context.Background(), "ETH-USDT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statuses) != 1 || statuses[0].Status != StatusLiveOpen {
+		t.Fatalf("bad pending statuses: %+v", statuses)
+	}
+}

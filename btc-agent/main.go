@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"btc-agent/internal/agent1"
@@ -28,6 +29,13 @@ import (
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/telegramreport"
+)
+
+// telegramMessageIDs tracks the last sent message_id per label so we can
+// delete the old message before sending a new one (prevents accumulation).
+var (
+	telegramMsgMu  sync.Mutex
+	telegramMsgIDs = map[string]int{}
 )
 
 func main() {
@@ -1211,10 +1219,30 @@ func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram boo
 		return result, err
 	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
-		sendTelegram(ctx, cfg, "research-brief", telegramreport.ResearchBriefHumanText(result))
+		telegramText := buildResearchTelegramText(ctx, cfg, result)
+		sendTelegram(ctx, cfg, "research-brief", telegramText)
 	}
 	fmt.Println(md)
 	return result, nil
+}
+
+// buildResearchTelegramText tries AI analysis first; falls back to deterministic formatter.
+func buildResearchTelegramText(ctx context.Context, cfg config.Config, result research.BriefResult) string {
+	if cfg.AI.Enabled && len(result.Items) > 0 {
+		llmClient, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
+		if err != nil {
+			log.Printf("research ai client: %v — using deterministic formatter", err)
+		} else {
+			aiText, err := research.AnalyzeBriefWithAI(ctx, llmClient, result)
+			if err != nil {
+				log.Printf("research ai analysis: %v — using deterministic formatter", err)
+			} else if aiText != "" {
+				log.Printf("research brief: AI analysis ok (%d chars)", len(aiText))
+				return aiText
+			}
+		}
+	}
+	return telegramreport.ResearchBriefHumanText(result)
 }
 
 func runExecuteLiveProofOrder(ctx context.Context, cfg config.Config, db *storage.DB, confirm string) error {
@@ -2037,7 +2065,19 @@ func firstNonEmpty(values ...string) string {
 func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 	token := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
-	if err := notify.Telegram(ctx, token, chatID, text); err != nil {
+
+	// Delete previous message for this label to avoid accumulation of old messages.
+	telegramMsgMu.Lock()
+	oldID := telegramMsgIDs[label]
+	telegramMsgMu.Unlock()
+	if oldID != 0 {
+		if err := notify.TelegramDelete(ctx, token, chatID, oldID); err != nil {
+			log.Printf("telegram delete old [%s] msg_id=%d: %v", label, oldID, err)
+		}
+	}
+
+	result, err := notify.TelegramSend(ctx, token, chatID, text)
+	if err != nil {
 		if errors.Is(err, notify.ErrTelegramSkipped) {
 			log.Printf("telegram skipped [%s]: missing token/chat", label)
 			return
@@ -2045,7 +2085,12 @@ func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 		log.Printf("telegram warning [%s]: %v", label, err)
 		return
 	}
-	log.Printf("telegram sent ok [%s]", label)
+	if result.MessageID != 0 {
+		telegramMsgMu.Lock()
+		telegramMsgIDs[label] = result.MessageID
+		telegramMsgMu.Unlock()
+	}
+	log.Printf("telegram sent ok [%s] msg_id=%d", label, result.MessageID)
 }
 
 func formatStatus(db *storage.DB) (string, error) {

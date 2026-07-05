@@ -54,11 +54,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 	log.Printf("[Scheduler] Maintenance schedule: %s (enabled: %v)", maintenanceTime, maintenanceEnabled)
 
+	// #8: interval=0 means "run on --run-now only, no scheduled repeats".
+	// Only set a positive interval when BriefIntervalMinutes > 0.
 	researchInterval := time.Duration(cfg.Research.BriefIntervalMinutes) * time.Minute
-	if researchInterval <= 0 {
-		researchInterval = 6 * time.Hour
-	}
-	log.Printf("[Scheduler] Research brief interval: %v (enabled: %v)", researchInterval, cfg.Research.Enabled)
+	researchScheduled := cfg.Research.Enabled && researchInterval > 0
+	log.Printf("[Scheduler] Research brief interval: %v scheduled=%v (enabled: %v)", researchInterval, researchScheduled, cfg.Research.Enabled)
 
 	// Calculate initial next daily run time
 	nextDaily, err := getNextRunTime(dailyTime, loc, time.Now().In(loc))
@@ -92,7 +92,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 	}()
 
-	// Execute runDaily immediately if requested
+	// #4: runNow sequence — research (read-only) BEFORE daily run, BEFORE supervisor.
+	// Research cannot affect live gate decisions this way.
+	if runNow && cfg.Research.Enabled {
+		log.Println("[Scheduler] Executing initial research doctor/brief (--run-now)...")
+		if _, err := runResearchDoctor(shutdownCtx, cfg); err != nil {
+			log.Printf("[Scheduler] Initial research doctor error: %v", err)
+		}
+		if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
+			log.Printf("[Scheduler] Initial research brief error: %v", err)
+		}
+	}
+
 	if runNow {
 		log.Println("[Scheduler] Executing initial daily run (--run-now)...")
 		if err := runDaily(shutdownCtx, cfg, db); err != nil {
@@ -101,18 +112,12 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	var nextResearch time.Time
-	if cfg.Research.Enabled {
-		if runNow {
-			log.Println("[Scheduler] Executing initial research doctor/brief (--run-now)...")
-			if _, err := runResearchDoctor(shutdownCtx, cfg); err != nil {
-				log.Printf("[Scheduler] Initial research doctor error: %v", err)
-			}
-			if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
-				log.Printf("[Scheduler] Initial research brief error: %v", err)
-			}
-		}
+	if researchScheduled {
 		nextResearch = time.Now().Add(researchInterval)
 		log.Printf("[Scheduler] Next research brief: %s", nextResearch.Format("2006-01-02 15:04:05 MST"))
+	} else if cfg.Research.Enabled {
+		// #8: interval=0 → run on --run-now only; no scheduled repeats.
+		log.Printf("[Scheduler] Research enabled but brief_interval_minutes=0: no scheduled repeats.")
 	}
 
 	// Run reconciliation once on start if live is enabled, then schedule future ticks.
@@ -157,7 +162,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if cfg.Live.SupervisorEnabled && nextSupervisor.Before(waitUntil) {
 			waitUntil = nextSupervisor
 		}
-		if cfg.Research.Enabled && nextResearch.Before(waitUntil) {
+		if researchScheduled && nextResearch.Before(waitUntil) {
 			waitUntil = nextResearch
 		}
 		if maintenanceEnabled && nextMaintenance.Before(waitUntil) {
@@ -204,7 +209,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextReconcile = time.Now().Add(reconcileInterval)
 		}
 
-		if cfg.Research.Enabled && !time.Now().Before(nextResearch) {
+		if researchScheduled && !time.Now().Before(nextResearch) {
 			log.Println("[Scheduler] Triggering scheduled research brief...")
 			if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
 				log.Printf("[Scheduler] Research brief error: %v", err)

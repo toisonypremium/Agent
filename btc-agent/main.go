@@ -261,11 +261,14 @@ func runDaily(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	if err := storage.SaveReportFiles("reports", analysis, p, report); err != nil {
 		return err
 	}
-	if cfg.Live.Enabled && cfg.Live.AutoExecute && p.State == agent2.StateActiveLimit {
+	// #5: auto live order in runDaily bypasses supervisor state tracking.
+	// Supervisor handles auto live order execution via its own cycle.
+	// runDaily only triggers if supervisor is NOT enabled (standalone daily run).
+	if cfg.Live.Enabled && cfg.Live.AutoExecute && p.State == agent2.StateActiveLimit && !cfg.Live.SupervisorEnabled {
 		if err := requireAutoLiveRuntime(cfg); err != nil {
 			log.Printf("Automatic live order blocked: %v", err)
 		} else {
-			log.Println("Active limit state reached in daily run. Executing automatic canary live order placement...")
+			log.Println("Active limit state reached in daily run (supervisor disabled). Executing automatic canary live order placement...")
 			if err := runAutoLiveOrder(ctx, cfg, db, false); err != nil {
 				log.Printf("Automatic live order placement error: %v", err)
 			}
@@ -1364,8 +1367,11 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		canceler = client
 	}
 	if cfg.Live.OrderManagementEnabled {
+		// #9: skip OKX InstrumentFilters HTTP call when plan is not ACTIVE_LIMIT
+		// and there are no open orders to cancel. Avoids unnecessary API usage every cycle.
+		noActiveWork := p.State != agent2.StateActiveLimit && len(open) == 0
 		filters := []live.InstrumentFilter{}
-		if filterReader != nil {
+		if filterReader != nil && !noActiveWork {
 			filters, err = filterReader.InstrumentFilters(ctx)
 			if err != nil {
 				return fmt.Errorf("load instrument filters for order management: %w", err)
@@ -2167,6 +2173,8 @@ func runReconcileLiveOrdersWithNotify(ctx context.Context, cfg config.Config, db
 
 	var result liveguard.ReconcileResult
 	if len(open) == 0 {
+		// #11: no open orders — skip OKX client creation entirely; ReconcileOrders with
+		// nil reader is safe but pointless. Build empty clean result directly.
 		result = liveguard.ReconcileOrders(ctx, nil, open)
 	} else {
 		client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)

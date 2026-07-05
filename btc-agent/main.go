@@ -243,6 +243,10 @@ func plan(ctx context.Context, cfg config.Config, db *storage.DB) (agent2.Plan, 
 }
 
 func runDaily(ctx context.Context, cfg config.Config, db *storage.DB) error {
+	return runDailyWithNotify(ctx, cfg, db, true)
+}
+
+func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, notifyTelegram bool) error {
 	if err := fetch(ctx, cfg, db); err != nil {
 		return err
 	}
@@ -274,7 +278,7 @@ func runDaily(ctx context.Context, cfg config.Config, db *storage.DB) error {
 			}
 		}
 	}
-	if cfg.Notify.Enabled {
+	if notifyTelegram && cfg.Notify.Enabled {
 		switch cfg.Notify.Provider {
 		case "telegram":
 			sendTelegram(ctx, cfg, "run-daily", telegramreport.DailyHumanText(analysis, p))
@@ -1525,6 +1529,10 @@ func runLiveSupervisorCycle(ctx context.Context, cfg config.Config, db *storage.
 }
 
 func runLiveSupervisorCycleWithDoctor(ctx context.Context, cfg config.Config, db *storage.DB, state *liveSupervisorState, dryRun bool, doctor *liveguard.RuntimeDoctorResult) (liveguard.SupervisorResult, error) {
+	return runLiveSupervisorCycleWithDoctorNotify(ctx, cfg, db, state, dryRun, doctor, true)
+}
+
+func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Config, db *storage.DB, state *liveSupervisorState, dryRun bool, doctor *liveguard.RuntimeDoctorResult, notifyTelegram bool) (liveguard.SupervisorResult, error) {
 	if state == nil {
 		state = &liveSupervisorState{}
 	}
@@ -1538,7 +1546,7 @@ func runLiveSupervisorCycleWithDoctor(ctx context.Context, cfg config.Config, db
 			result.Reasons = append(result.Reasons, "reconcile after doctor block: "+err.Error())
 		}
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, shouldNotifySupervisor(cfg, result, state))
+		return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if !cfg.Live.SupervisorEnabled {
 		result.Action = liveguard.SupervisorActionSkipped
@@ -1552,7 +1560,7 @@ func runLiveSupervisorCycleWithDoctor(ctx context.Context, cfg config.Config, db
 		result.ConsecutiveErrors = state.ConsecutiveErrors
 		result.Reasons = append(result.Reasons, "read operator halt: "+err.Error())
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, shouldNotifySupervisor(cfg, result, state))
+		return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if halted {
 		result.Action = liveguard.SupervisorActionReconcileOnly
@@ -1566,7 +1574,7 @@ func runLiveSupervisorCycleWithDoctor(ctx context.Context, cfg config.Config, db
 			result.ConsecutiveErrors = 0
 		}
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, shouldNotifySupervisor(cfg, result, state))
+		return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if dryRun {
 		result.Action = liveguard.SupervisorActionHeartbeat
@@ -1603,7 +1611,7 @@ func runLiveSupervisorCycleWithDoctor(ctx context.Context, cfg config.Config, db
 		}
 	}
 	result.RefreshSummary()
-	return result, writeLiveSupervisorResult(ctx, cfg, result, shouldNotifySupervisor(cfg, result, state))
+	return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 }
 
 func loadLatestManagedCycleReport() (liveguard.ManagedCycleResult, bool) {

@@ -535,6 +535,18 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 	b.WriteString(fmt.Sprintf("🕐 %s\n", result.GeneratedAt.Format("02/01 15:04 UTC")))
 	b.WriteString(separatorLine())
 
+	// #13: clearly state when research is disabled
+	if result.Status == research.BriefWarn && len(result.Warnings) > 0 {
+		for _, w := range result.Warnings {
+			if w == "research disabled" {
+				b.WriteString("⚫ Research đang tắt (research.enabled=false trong config).\n")
+				b.WriteString("Không có tin tức được thu thập. Bật research.enabled=true để nhận brief.\n")
+				b.WriteString("Research-only: không đặt lệnh, không override Agent 1/2.\n")
+				return trimTelegram(b.String())
+			}
+		}
+	}
+
 	// Tách WARN và INFO
 	warnItems := []research.ResearchItem{}
 	infoItems := []research.ResearchItem{}

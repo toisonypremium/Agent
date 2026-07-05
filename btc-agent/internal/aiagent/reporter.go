@@ -8,6 +8,7 @@ import (
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
+	"btc-agent/internal/telegramreport"
 )
 
 type JSONCaller interface {
@@ -119,13 +120,9 @@ func Fallback(snap Snapshot, safety SafetyResult) Report {
 			break
 		}
 	}
-	text := fmt.Sprintf("BTC AGENT WATCH\nDeterministic decision: %s\nRegime: %s | Risk: %s | Flow: %s %.2f\nMode: report/watch only. No real orders.\n", snap.Analysis.ActionPermission, snap.Analysis.MarketRegime, snap.Analysis.RiskLevel, snap.Analysis.Flow.Bias, snap.Analysis.Flow.Score)
+	text := telegramreport.DailyHumanText(snap.Analysis, snap.Plan)
 	if len(blockers) > 0 {
-		text += "Blockers: " + strings.Join(unique(blockers), "; ") + "\n"
-	}
-	if len(snap.Plan.Watchlist.Candidates) > 0 {
-		best := snap.Plan.Watchlist.Candidates[0]
-		text += fmt.Sprintf("Closest: %s readiness %.2f tier=%s next=%s\n", best.Symbol, best.ReadinessScore, best.Tier, best.NextTrigger)
+		text += "\nTóm tắt blocker: " + strings.Join(unique(blockers), "; ") + "\n"
 	}
 	finalSafety := CheckSafety(text, false)
 	if len(safety.Reasons) > 0 && finalSafety.Pass {

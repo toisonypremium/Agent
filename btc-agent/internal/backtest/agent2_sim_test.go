@@ -196,3 +196,30 @@ func TestDiagnosticsRecordBlockedReasons(t *testing.T) {
 		t.Fatalf("expected BTC permission block reason: %+v", sim.Diagnostics.AssetReasonCounts)
 	}
 }
+
+func TestResearchPermissionOverridePromotesOnlyArmed(t *testing.T) {
+	sim := newTestSim()
+	armed := agent1.MarketAnalysis{ActionPermission: agent1.Armed}
+	got := applyResearchPermissionOverride(&sim, armed, SimulationOverrides{AllowArmedAsAllowed: true})
+	if got.ActionPermission != agent1.Allowed {
+		t.Fatalf("ARMED should be research-promoted to ALLOWED: %+v", got.ActionPermission)
+	}
+	watch := agent1.MarketAnalysis{ActionPermission: agent1.Watch}
+	got = applyResearchPermissionOverride(&sim, watch, SimulationOverrides{AllowArmedAsAllowed: true})
+	if got.ActionPermission != agent1.Watch {
+		t.Fatalf("WATCH must not be promoted: %+v", got.ActionPermission)
+	}
+	noTrade := agent1.MarketAnalysis{ActionPermission: agent1.NoTrade}
+	got = applyResearchPermissionOverride(&sim, noTrade, SimulationOverrides{AllowArmedAsAllowed: true})
+	if got.ActionPermission != agent1.NoTrade {
+		t.Fatalf("NO_TRADE must not be promoted: %+v", got.ActionPermission)
+	}
+}
+
+func TestResearchPermissionOverrideAddsSafetyNote(t *testing.T) {
+	sim := newTestSim()
+	_ = applyResearchPermissionOverride(&sim, agent1.MarketAnalysis{ActionPermission: agent1.Armed}, SimulationOverrides{AllowArmedAsAllowed: true})
+	if len(sim.Diagnostics.Notes) == 0 {
+		t.Fatalf("expected research-only safety note")
+	}
+}

@@ -13,13 +13,29 @@ type OrderStatusReader interface {
 	PendingOrders(ctx context.Context, instID string) ([]live.OrderStatus, error)
 }
 
+const (
+	ReconcileClean = "RECONCILE_CLEAN"
+	ReconcileWarn  = "RECONCILE_WARN"
+	ReconcileBlock = "RECONCILE_BLOCK"
+)
+
 type ReconcileResult struct {
-	GeneratedAt time.Time          `json:"generated_at"`
-	Checked     int                `json:"checked"`
-	Updated     int                `json:"updated"`
-	Unknown     int                `json:"unknown"`
-	Orders      []live.OrderStatus `json:"orders"`
-	Summary     string             `json:"summary"`
+	GeneratedAt time.Time             `json:"generated_at"`
+	Checked     int                   `json:"checked"`
+	Updated     int                   `json:"updated"`
+	Unknown     int                   `json:"unknown"`
+	Orders      []live.OrderStatus    `json:"orders"`
+	Safety      ReconcileSafetyResult `json:"safety,omitempty"`
+	Summary     string                `json:"summary"`
+}
+
+type ReconcileSafetyResult struct {
+	Status    string   `json:"status"`
+	LocalOpen int      `json:"local_open"`
+	Unknown   int      `json:"unknown"`
+	Blockers  []string `json:"blockers,omitempty"`
+	Warnings  []string `json:"warnings,omitempty"`
+	Summary   string   `json:"summary"`
 }
 
 func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.OrderStatus) ReconcileResult {
@@ -30,6 +46,7 @@ func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.
 
 	if len(open) == 0 {
 		res.Summary = "no local live orders to reconcile"
+		res.Safety = ReconcileSafety(res)
 		return res
 	}
 
@@ -41,6 +58,7 @@ func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.
 			res.Orders = append(res.Orders, o)
 		}
 		res.Summary = fmt.Sprintf("reconciled %d orders: updated %d, unknown %d", res.Checked, res.Updated, res.Unknown)
+		res.Safety = ReconcileSafety(res)
 		return res
 	}
 	for _, o := range open {
@@ -60,6 +78,7 @@ func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.
 	}
 
 	res.Summary = fmt.Sprintf("reconciled %d orders: updated %d, unknown %d", res.Checked, res.Updated, res.Unknown)
+	res.Safety = ReconcileSafety(res)
 	return res
 }
 
@@ -74,4 +93,34 @@ func withLocalOrderIdentity(remote, local live.OrderStatus) live.OrderStatus {
 		remote.ClientOrderID = local.ClientOrderID
 	}
 	return remote
+}
+
+func ReconcileSafety(result ReconcileResult) ReconcileSafetyResult {
+	safety := ReconcileSafetyResult{Status: ReconcileClean, LocalOpen: result.Checked, Unknown: result.Unknown}
+	if result.Unknown > 0 {
+		safety.Blockers = append(safety.Blockers, fmt.Sprintf("%d live order status unknown", result.Unknown))
+	}
+	for _, order := range result.Orders {
+		if order.Status == live.StatusUnknownNeedsManualCheck {
+			safety.Blockers = append(safety.Blockers, fmt.Sprintf("%s/%s needs manual check", order.ClientOrderID, order.OrderID))
+		}
+		if order.Status == live.StatusPartiallyFilled || order.Status == live.StatusFilled {
+			filled := order.AccumulatedFillSz
+			if filled == 0 {
+				filled = order.FilledQuantity
+			}
+			if filled <= 0 || (order.AvgPrice <= 0 && order.Price <= 0) {
+				safety.Blockers = append(safety.Blockers, fmt.Sprintf("%s/%s fill status missing fill quantity/price", order.ClientOrderID, order.OrderID))
+			}
+		}
+	}
+	safety.Blockers = uniqueHealthStrings(safety.Blockers)
+	safety.Warnings = uniqueHealthStrings(safety.Warnings)
+	if len(safety.Blockers) > 0 {
+		safety.Status = ReconcileBlock
+	} else if len(safety.Warnings) > 0 {
+		safety.Status = ReconcileWarn
+	}
+	safety.Summary = fmt.Sprintf("%s: local_open=%d unknown=%d blockers=%d warnings=%d", safety.Status, safety.LocalOpen, safety.Unknown, len(safety.Blockers), len(safety.Warnings))
+	return safety
 }

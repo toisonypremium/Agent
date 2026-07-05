@@ -142,3 +142,26 @@ func TestHaltStatusStorage(t *testing.T) {
 		t.Fatal("expected halt status to be false after resetting to false")
 	}
 }
+
+func TestManagedLiveOrderStorageRoundTrip(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	meta := live.OrderStatus{LayerIndex: 2, Source: "deterministic_agent2_layer_2", InvalidationPrice: 88, ExpiresAt: 1700003600, DecisionReason: "active layer", LastManagementAction: "placed"}
+	if err := db.SaveManagedLiveOrder("client-m", "order-m", "ETH-USDT", "ETHUSDT", "BUY", "limit", 95, 0.02, 1.9, live.StatusLiveOpen, meta); err != nil {
+		t.Fatal(err)
+	}
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open len=%d", len(open))
+	}
+	got := open[0]
+	if got.Symbol != "ETHUSDT" || got.LayerIndex != 2 || got.Source != meta.Source || got.InvalidationPrice != 88 || got.DecisionReason != "active layer" || got.LastManagementAction != "placed" {
+		t.Fatalf("bad metadata: %+v", got)
+	}
+}

@@ -27,25 +27,30 @@ type SignalStats struct {
 }
 
 type Result struct {
-	GeneratedAt             time.Time                     `json:"generated_at"`
-	Symbol                  string                        `json:"symbol"`
-	PeriodStart             time.Time                     `json:"period_start"`
-	PeriodEnd               time.Time                     `json:"period_end"`
-	WindowsTested           int                           `json:"windows_tested"`
-	Horizons                []int                         `json:"horizons"`
-	FlowParams              flow.Params                   `json:"flow_params"`
-	SignalDensity           float64                       `json:"signal_density"`
-	FlowCounts              map[flow.Bias]int             `json:"flow_counts"`
-	ByBias                  map[flow.Bias]SignalStats     `json:"by_bias"`
-	BTCFlowBottleneckAudit  BTCFlowBottleneckAuditResult  `json:"btc_flow_bottleneck_audit"`
-	FlowParamQualityAudit   FlowParamQualityAuditResult   `json:"flow_param_quality_audit"`
-	BTCPermissionAudit      BTCPermissionAuditResult      `json:"btc_permission_audit"`
-	Agent2Simulation        Agent2Simulation              `json:"agent2_simulation"`
-	WatchlistTriggerAudit   WatchlistTriggerAuditResult   `json:"watchlist_trigger_audit"`
-	ChecklistPassCountAudit ChecklistPassCountAuditResult `json:"checklist_pass_count_audit"`
-	LayerAudit              LayerAuditResult              `json:"layer_audit"`
-	ExitAudit               ExitAuditResult               `json:"exit_audit"`
-	Summary                 string                        `json:"summary"`
+	GeneratedAt                   time.Time                     `json:"generated_at"`
+	Symbol                        string                        `json:"symbol"`
+	PeriodStart                   time.Time                     `json:"period_start"`
+	PeriodEnd                     time.Time                     `json:"period_end"`
+	WindowsTested                 int                           `json:"windows_tested"`
+	Horizons                      []int                         `json:"horizons"`
+	FlowParams                    flow.Params                   `json:"flow_params"`
+	SignalDensity                 float64                       `json:"signal_density"`
+	FlowCounts                    map[flow.Bias]int             `json:"flow_counts"`
+	ByBias                        map[flow.Bias]SignalStats     `json:"by_bias"`
+	BTCFlowBottleneckAudit        BTCFlowBottleneckAuditResult  `json:"btc_flow_bottleneck_audit"`
+	FlowParamQualityAudit         FlowParamQualityAuditResult   `json:"flow_param_quality_audit"`
+	BTCFlowRegimeAudit            BTCFlowRegimeAuditResult      `json:"btc_flow_regime_audit"`
+	BTCPermissionAudit            BTCPermissionAuditResult      `json:"btc_permission_audit"`
+	Agent2Simulation              Agent2Simulation              `json:"agent2_simulation"`
+	Agent2ArmedResearchSimulation Agent2Simulation              `json:"agent2_armed_research_simulation"`
+	WatchlistTriggerAudit         WatchlistTriggerAuditResult   `json:"watchlist_trigger_audit"`
+	NearMissWatchlistAudit        WatchlistTriggerAuditResult   `json:"near_miss_watchlist_audit"`
+	AssetFlowEntryAudit           AssetFlowEntryAuditResult     `json:"asset_flow_entry_audit"`
+	NearMissLayerAudit            NearMissLayerAuditResult      `json:"near_miss_layer_audit"`
+	ChecklistPassCountAudit       ChecklistPassCountAuditResult `json:"checklist_pass_count_audit"`
+	LayerAudit                    LayerAuditResult              `json:"layer_audit"`
+	ExitAudit                     ExitAuditResult               `json:"exit_audit"`
+	Summary                       string                        `json:"summary"`
 }
 
 type accStats struct {
@@ -228,7 +233,28 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("8. BTC Permission Bottleneck Audit\n")
+	b.WriteString("8. BTC Flow by Regime Audit\n")
+	if !r.BTCFlowRegimeAudit.Enabled {
+		b.WriteString("- BTC flow by regime audit: skipped / not enough BTC candles\n\n")
+	} else {
+		b.WriteString("- " + r.BTCFlowRegimeAudit.Summary + "\n")
+		if note := btcFlowRegimeGuardRecommendation(r.BTCFlowRegimeAudit.Rows); note != "" {
+			b.WriteString("- " + note + "\n")
+		}
+		b.WriteString("- Diagnostic only: compares BTC flow bias inside each market regime; does not change Flow Engine params.\n")
+		b.WriteString("| Regime | Bias | Count | Rate | Avg trend | Avg flow | 3D avg/win/DD | 7D avg/win/DD | 14D avg/win/DD | Verdict |\n")
+		b.WriteString("|---|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
+		limit := len(r.BTCFlowRegimeAudit.Rows)
+		if limit > 24 {
+			limit = 24
+		}
+		for _, row := range r.BTCFlowRegimeAudit.Rows[:limit] {
+			b.WriteString(fmt.Sprintf("| %s | %s | %d | %.1f%% | %.1f | %.2f | %s | %s | %s | %s |\n", row.Regime, row.Bias, row.Count, row.Rate*100, row.AvgTrendScore, row.AvgFlowScore, btcFlowRegimeHorizonCell(row, 3), btcFlowRegimeHorizonCell(row, 7), btcFlowRegimeHorizonCell(row, 14), row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("9. BTC Permission Bottleneck Audit\n")
 	if !r.BTCPermissionAudit.Enabled {
 		b.WriteString("- BTC permission audit: skipped / not enough BTC candles\n\n")
 	} else {
@@ -251,10 +277,23 @@ func Markdown(r Result) string {
 				b.WriteString(fmt.Sprintf("| %s | %d | %.1f%% |\n", row.Blocker, row.Count, row.Rate*100))
 			}
 		}
+		if len(r.BTCPermissionAudit.BlockersByPermission) > 0 {
+			b.WriteString("\nTop blockers by permission\n")
+			b.WriteString("| Permission | Blocker | Count | Rate within permission |\n")
+			b.WriteString("|---|---|---:|---:|\n")
+			shown := map[agent1.Permission]int{}
+			for _, row := range r.BTCPermissionAudit.BlockersByPermission {
+				if shown[row.Permission] >= 5 {
+					continue
+				}
+				b.WriteString(fmt.Sprintf("| %s | %s | %d | %.1f%% |\n", row.Permission, row.Blocker, row.Count, row.RateWithinPermission*100))
+				shown[row.Permission]++
+			}
+		}
 		b.WriteString("\n")
 	}
 
-	b.WriteString("9. Agent 2 Layer Simulation\n")
+	b.WriteString("10. Agent 2 Layer Simulation\n")
 	if !r.Agent2Simulation.Enabled {
 		b.WriteString("- Agent 2 simulation: skipped / not enough asset candles\n\n")
 	} else {
@@ -293,7 +332,47 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("10. Agent 2 Watchlist Trigger Audit\n")
+	b.WriteString("11. Agent 2 ARMED Research Simulation\n")
+	b.WriteString("- Research-only: treats ARMED as ALLOWED inside this backtest simulation only; production plan/live behavior unchanged.\n")
+	if !r.Agent2ArmedResearchSimulation.Enabled {
+		b.WriteString("- Agent 2 ARMED research simulation: skipped / not enough asset candles\n\n")
+	} else {
+		b.WriteString("- " + r.Agent2ArmedResearchSimulation.Summary + "\n")
+		for _, sym := range sortedAssetSymbols(r.Agent2ArmedResearchSimulation.Assets) {
+			asset := r.Agent2ArmedResearchSimulation.Assets[sym]
+			b.WriteString(fmt.Sprintf("\n%s\n", sym))
+			b.WriteString(fmt.Sprintf("- plans created: %d\n", asset.PlansCreated))
+			b.WriteString(fmt.Sprintf("- orders placed/filled/expired: %d / %d / %d\n", asset.OrdersPlaced, asset.OrdersFilled, asset.OrdersExpired))
+			b.WriteString(fmt.Sprintf("- fill rate: %.2f%%\n", asset.FillRate*100))
+			b.WriteString(fmt.Sprintf("- invalidations / take-profits / time-stops: %d / %d / %d\n", asset.Invalidations, asset.TakeProfits, asset.TimeStops))
+			b.WriteString(fmt.Sprintf("- max deployed: %.2f\n", asset.MaxDeployed))
+			b.WriteString(fmt.Sprintf("- max drawdown: %.2f%%\n", asset.MaxDrawdown*100))
+			b.WriteString(fmt.Sprintf("- final simulated PnL: %.2f\n", asset.FinalPnL))
+		}
+		b.WriteString("\nDiagnostics\n")
+		d := r.Agent2ArmedResearchSimulation.Diagnostics
+		b.WriteString(fmt.Sprintf("- windows tested: %d\n", d.WindowsTested))
+		b.WriteString(fmt.Sprintf("- Agent 1 permissions: %s\n", permissionCounts(d.Agent1PermissionCount)))
+		b.WriteString(fmt.Sprintf("- Agent 1 regimes: %s\n", stringCounts(d.Agent1RegimeCounts, 6)))
+		b.WriteString(fmt.Sprintf("- Agent 1 risks: %s\n", stringCounts(d.Agent1RiskCounts, 6)))
+		b.WriteString("- Top asset block reasons:\n")
+		for _, sym := range sortedReasonSymbols(d.AssetReasonCounts) {
+			b.WriteString(fmt.Sprintf("  - %s: %s\n", sym, topReasons(d.AssetReasonCounts[sym], 5)))
+		}
+		if len(d.Events) > 0 {
+			b.WriteString("- Event samples:\n")
+			limit := len(d.Events)
+			if limit > 12 {
+				limit = 12
+			}
+			for _, event := range d.Events[:limit] {
+				b.WriteString(fmt.Sprintf("  - %s %s %s layer=%d price=%.4f invalidation=%.4f %s\n", event.Time, event.Symbol, event.Type, event.Layer, event.Price, event.Invalidation, event.Reason))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("12. Agent 2 Watchlist Trigger Audit\n")
 	if !r.WatchlistTriggerAudit.Enabled {
 		b.WriteString("- Watchlist trigger audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -311,7 +390,61 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("11. Agent 2 Checklist Pass-Count Audit\n")
+	b.WriteString("13. Agent 2 Near-Miss Watchlist Forward Audit\n")
+	if !r.NearMissWatchlistAudit.Enabled {
+		b.WriteString("- Near-miss watchlist audit: skipped / not enough asset candles\n\n")
+	} else {
+		b.WriteString("- " + r.NearMissWatchlistAudit.Summary + "\n")
+		b.WriteString("- Research-only: includes unactionable/noisy candidates for diagnosis; does not create alerts or orders.\n")
+		b.WriteString("| Symbol | Trigger | Ready>= | Count | 3D avg/win/DD | 7D avg/win/DD | 14D avg/win/DD | Score | Verdict |\n")
+		b.WriteString("|---|---|---:|---:|---:|---:|---:|---:|---|\n")
+		limit := len(r.NearMissWatchlistAudit.Rows)
+		if limit > 24 {
+			limit = 24
+		}
+		for _, row := range r.NearMissWatchlistAudit.Rows[:limit] {
+			b.WriteString(fmt.Sprintf("| %s | %s | %.2f | %d | %s | %s | %s | %.2f | %s |\n", row.Symbol, row.Trigger, row.ReadinessThreshold, row.Count, watchAuditHorizonCell(row, 3), watchAuditHorizonCell(row, 7), watchAuditHorizonCell(row, 14), row.Score, row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("14. Agent 2 Asset Flow Entry Forward Audit\n")
+	if !r.AssetFlowEntryAudit.Enabled {
+		b.WriteString("- Asset flow entry audit: skipped / not enough asset candles\n\n")
+	} else {
+		b.WriteString("- " + r.AssetFlowEntryAudit.Summary + "\n")
+		b.WriteString("- Diagnostic only: measures AssetFlowEntry pass/soft-fail/hard-block forward quality; does not change thresholds, alerts, plans, or orders.\n")
+		b.WriteString("| Symbol | Flow bias | Trigger | Bull bucket | Count | Avg bull | Avg bear | 3D avg/win/DD | 7D avg/win/DD | 14D avg/win/DD | Score | Verdict |\n")
+		b.WriteString("|---|---|---|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
+		limit := len(r.AssetFlowEntryAudit.Rows)
+		if limit > 24 {
+			limit = 24
+		}
+		for _, row := range r.AssetFlowEntryAudit.Rows[:limit] {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s | %s | %d | %.2f | %.2f | %s | %s | %s | %.2f | %s |\n", row.Symbol, row.FlowBias, row.Trigger, row.BullScoreBucket, row.Count, row.AvgBullScore, row.AvgBearScore, assetFlowEntryAuditHorizonCell(row, 3), assetFlowEntryAuditHorizonCell(row, 7), assetFlowEntryAuditHorizonCell(row, 14), row.Score, row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("15. Agent 2 Near-Miss Forced Layer Mechanics Audit\n")
+	b.WriteString("- Research-only forced near-miss layer audit; production plan/live behavior unchanged.\n")
+	if !r.NearMissLayerAudit.Enabled {
+		b.WriteString("- Near-miss forced layer audit: skipped / not enough candidate candles\n\n")
+	} else {
+		b.WriteString("- " + r.NearMissLayerAudit.Summary + "\n")
+		b.WriteString("| Symbol | Trigger | Ready>= | Inv buffer | TP | Time stop | Plans | Filled | Expired | TP hits | Invalidations | Time stops | Max DD | PnL | Score | Verdict |\n")
+		b.WriteString("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|\n")
+		limit := len(r.NearMissLayerAudit.Rows)
+		if limit > 24 {
+			limit = 24
+		}
+		for _, row := range r.NearMissLayerAudit.Rows[:limit] {
+			b.WriteString(fmt.Sprintf("| %s | %s | %.2f | %.3f | %.2f%% | %d | %d | %d | %d | %d | %d | %d | %.2f%% | %.2f | %.2f | %s |\n", row.Symbol, row.Trigger, row.ReadinessThreshold, row.InvalidationBuffer, row.TakeProfitPct*100, row.TimeStopDays, row.PlansCreated, row.OrdersFilled, row.OrdersExpired, row.TakeProfits, row.Invalidations, row.TimeStops, row.MaxDrawdown*100, row.FinalPnL, row.Score, row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("16. Agent 2 Checklist Pass-Count Audit\n")
 	if !r.ChecklistPassCountAudit.Enabled {
 		b.WriteString("- Checklist pass-count audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -329,7 +462,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("12. Agent 2 Invalidation/Layer Audit\n")
+	b.WriteString("17. Agent 2 Invalidation/Layer Audit\n")
 	if !r.LayerAudit.Enabled {
 		b.WriteString("- Layer audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -346,7 +479,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("13. Agent 2 Exit / Take-Profit Audit\n")
+	b.WriteString("18. Agent 2 Exit / Take-Profit Audit\n")
 	if !r.ExitAudit.Enabled {
 		b.WriteString("- Exit audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -363,7 +496,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("14. Kết luận\n")
+	b.WriteString("19. Kết luận\n")
 	b.WriteString("- " + r.Summary + "\n")
 	b.WriteString("- Đây là audit rule bằng dữ liệu quá khứ, không phải cam kết lợi nhuận. Mẫu ít thì chỉ dùng để debug rule. Agent 2 simulation chưa mô hình take-profit.\n")
 	return b.String()
@@ -397,7 +530,21 @@ func btcFlowBiasHorizonCell(row BTCFlowBiasAuditRow, horizon int) string {
 	return fmt.Sprintf("%.2f%% / %.1f%% / %.2f%%", row.AvgReturn[horizon]*100, row.WinRate[horizon]*100, row.WorstDrawdown[horizon]*100)
 }
 
+func btcFlowRegimeHorizonCell(row BTCFlowRegimeAuditRow, horizon int) string {
+	if row.AvgReturn == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.1f%% / %.2f%%", row.AvgReturn[horizon]*100, row.WinRate[horizon]*100, row.WorstDrawdown[horizon]*100)
+}
+
 func btcPermissionHorizonCell(row BTCPermissionAuditRow, horizon int) string {
+	if row.AvgReturn == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.1f%% / %.2f%%", row.AvgReturn[horizon]*100, row.WinRate[horizon]*100, row.WorstDrawdown[horizon]*100)
+}
+
+func assetFlowEntryAuditHorizonCell(row AssetFlowEntryAuditRow, horizon int) string {
 	if row.AvgReturn == nil {
 		return "n/a"
 	}

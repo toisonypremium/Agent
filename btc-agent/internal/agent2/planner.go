@@ -62,25 +62,51 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 	p := Plan{Timestamp: time.Now(), ActionPermission: a.ActionPermission, State: StateNoTrade}
 	benchmark := benchmarkCandles(cfg, benchmarks)
 	p.Rotation = RankAssets(cfg, candles, benchmark)
+	rotationBySymbol := map[string]AssetRotationScore{}
+	for _, r := range p.Rotation {
+		rotationBySymbol[r.Symbol] = r
+	}
+	useAssetFlowEntry := len(benchmark) > 0
+	if a.FallingKnifeRisk == agent1.High || a.FomoRisk == agent1.High || a.MarketRegime == "PANIC_SELLING" {
+		p.Summary = "Risk filter chặn gom."
+		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, nil)
+		AddWatchlistMissing(&p.Watchlist, "BTC risk/regime chưa cho phép gom", cfg)
+		return p
+	}
 	if a.ActionPermission != agent1.Allowed {
+		if a.ActionPermission == agent1.Armed || a.ActionPermission == agent1.Watch {
+			anyProbe := false
+			for _, sym := range cfg.Data.Symbols.Assets {
+				ap := planProbeAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
+				p.Assets = append(p.Assets, ap)
+				if ap.State == StateArmed {
+					anyProbe = true
+				}
+			}
+			p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
+			AddWatchlistMissing(&p.Watchlist, "BTC permission chưa ALLOWED; chỉ cho phép ARMED probe nhỏ", cfg)
+			if anyProbe {
+				p.State = StateArmed
+				p.Summary = "BTC chưa ALLOWED nhưng có ARMED probe candidate chất lượng cao."
+			} else {
+				p.State = StateWatch
+				p.Summary = "BTC chưa ALLOWED; chưa có coin đủ đẹp để tạo probe."
+			}
+			return p
+		}
 		p.Summary = "Agent 1 chưa cho phép gom; giữ NO_TRADE/WATCH."
 		p.State = StateWatch
 		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, nil)
 		AddWatchlistMissing(&p.Watchlist, "BTC permission chưa ALLOWED", cfg)
 		return p
 	}
-	if a.FallingKnifeRisk == agent1.High || a.FomoRisk == agent1.High || a.MarketRegime == "PANIC_SELLING" || a.MarketRegime == "DOWNTREND" {
+	if a.MarketRegime == "DOWNTREND" {
 		p.Summary = "Risk filter chặn gom."
 		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, nil)
 		AddWatchlistMissing(&p.Watchlist, "BTC risk/regime chưa cho phép gom", cfg)
 		return p
 	}
 
-	rotationBySymbol := map[string]AssetRotationScore{}
-	for _, r := range p.Rotation {
-		rotationBySymbol[r.Symbol] = r
-	}
-	useAssetFlowEntry := len(benchmark) > 0
 	anyActive := false
 	for _, sym := range cfg.Data.Symbols.Assets {
 		ap := planAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
@@ -98,6 +124,43 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 		p.Summary = "Chưa có asset đủ discount/reward-risk."
 	}
 	return p
+}
+
+func planProbeAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
+	probeCfg := cfg
+	if probeCfg.Risk.MinRewardRisk > 0 {
+		probeCfg.Risk.MinRewardRisk *= 0.80
+	}
+	ap := planAsset(probeCfg, sym, c, benchmark, rotation, useAssetFlowEntry)
+	if ap.State != StateActiveLimit || len(ap.Layers) == 0 {
+		if ap.Symbol == "" {
+			ap.Symbol = sym
+		}
+		return ap
+	}
+	ap.State = StateArmed
+	ap.Reason = "BTC chưa ALLOWED nhưng coin setup rất đẹp; tạo ARMED probe layer"
+	ap.Layers = ap.Layers[:1]
+	notional := probeNotional(cfg)
+	ap.Layers[0].Fraction = 1
+	ap.Layers[0].Notional = notional
+	if ap.Layers[0].Price > 0 {
+		ap.Layers[0].Quantity = notional / ap.Layers[0].Price
+	}
+	return ap
+}
+
+func probeNotional(cfg config.Config) float64 {
+	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
+		return cfg.Live.MaxLiveNotionalPerOrderUSDT
+	}
+	if cfg.Live.CanaryMaxNotionalUSDT > 0 {
+		return cfg.Live.CanaryMaxNotionalUSDT
+	}
+	if cfg.Live.MaxOrderNotionalUSDT > 0 {
+		return cfg.Live.MaxOrderNotionalUSDT
+	}
+	return 1
 }
 
 func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
@@ -155,7 +218,7 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 			return ap
 		}
 	}
-	if !support.Valid() || price > support.High*1.05 {
+	if !support.Valid() || price > support.High*(1+discountZonePremiumPct(cfg)) {
 		ap.State = StateWatch
 		ap.DiscountZone = support
 		ap.Reason = "giá chưa vào discount zone"
@@ -220,6 +283,13 @@ func relativeStrengthParams(cfg config.Config) (bool, int, float64, float64) {
 		minMomentum = -0.05
 	}
 	return true, lookback, minRelative, minMomentum
+}
+
+func discountZonePremiumPct(cfg config.Config) float64 {
+	if cfg.Risk.DiscountZonePremiumPct > 0 {
+		return cfg.Risk.DiscountZonePremiumPct
+	}
+	return 0.05
 }
 
 func min(a, b int) int {

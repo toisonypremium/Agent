@@ -39,12 +39,13 @@ type BTCPermissionAuditConfig struct {
 }
 
 type BTCPermissionAuditResult struct {
-	Enabled      bool                      `json:"enabled"`
-	Rows         []BTCPermissionAuditRow   `json:"rows"`
-	Blockers     []BTCPermissionBlockerRow `json:"blockers"`
-	RegimeCounts map[string]int            `json:"regime_counts"`
-	RiskCounts   map[string]int            `json:"risk_counts"`
-	Summary      string                    `json:"summary"`
+	Enabled              bool                                  `json:"enabled"`
+	Rows                 []BTCPermissionAuditRow               `json:"rows"`
+	Blockers             []BTCPermissionBlockerRow             `json:"blockers"`
+	BlockersByPermission []BTCPermissionBlockerByPermissionRow `json:"blockers_by_permission"`
+	RegimeCounts         map[string]int                        `json:"regime_counts"`
+	RiskCounts           map[string]int                        `json:"risk_counts"`
+	Summary              string                                `json:"summary"`
 }
 
 type BTCPermissionAuditRow struct {
@@ -61,6 +62,13 @@ type BTCPermissionBlockerRow struct {
 	Blocker string  `json:"blocker"`
 	Count   int     `json:"count"`
 	Rate    float64 `json:"rate"`
+}
+
+type BTCPermissionBlockerByPermissionRow struct {
+	Permission           agent1.Permission `json:"permission"`
+	Blocker              string            `json:"blocker"`
+	Count                int               `json:"count"`
+	RateWithinPermission float64           `json:"rate_within_permission"`
 }
 
 type btcPermissionAcc struct {
@@ -86,6 +94,8 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 		acc[perm] = newBTCPermissionAcc(auditCfg.HorizonDays)
 	}
 	blockerCounts := map[string]int{}
+	blockerByPermissionCounts := map[agent1.Permission]map[string]int{}
+	permissionCounts := map[agent1.Permission]int{}
 	regimeCounts := map[string]int{}
 	riskCounts := map[string]int{}
 	neutralFG := exchange.FearGreed{Value: 50, Classification: "Neutral"}
@@ -111,6 +121,7 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 			acc[analysis.ActionPermission] = a
 		}
 		a.count++
+		permissionCounts[analysis.ActionPermission]++
 		a.trendTotal += analysis.TrendScore
 		for _, h := range auditCfg.HorizonDays {
 			future := btc1d[i+h]
@@ -128,6 +139,10 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 		if analysis.ActionPermission != agent1.Allowed {
 			for _, blocker := range btcPermissionBlockers(analysis) {
 				blockerCounts[blocker]++
+				if blockerByPermissionCounts[analysis.ActionPermission] == nil {
+					blockerByPermissionCounts[analysis.ActionPermission] = map[string]int{}
+				}
+				blockerByPermissionCounts[analysis.ActionPermission][blocker]++
 			}
 		}
 	}
@@ -137,6 +152,7 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 		result.Rows = append(result.Rows, finalizeBTCPermissionRow(perm, acc[perm], auditCfg.HorizonDays, windows))
 	}
 	result.Blockers = finalizeBTCPermissionBlockers(blockerCounts, windows)
+	result.BlockersByPermission = finalizeBTCPermissionBlockersByPermission(blockerByPermissionCounts, permissionCounts)
 	result.Summary = summarizeBTCPermissionAudit(result.Rows, result.Blockers, windows)
 	return result, nil
 }
@@ -289,6 +305,39 @@ func finalizeBTCPermissionBlockers(counts map[string]int, total int) []BTCPermis
 		return rows[i].Blocker < rows[j].Blocker
 	})
 	return rows
+}
+
+func finalizeBTCPermissionBlockersByPermission(counts map[agent1.Permission]map[string]int, permissionCounts map[agent1.Permission]int) []BTCPermissionBlockerByPermissionRow {
+	rows := []BTCPermissionBlockerByPermissionRow{}
+	for _, perm := range btcPermissionOrder() {
+		total := permissionCounts[perm]
+		for blocker, count := range counts[perm] {
+			row := BTCPermissionBlockerByPermissionRow{Permission: perm, Blocker: blocker, Count: count}
+			if total > 0 {
+				row.RateWithinPermission = float64(count) / float64(total)
+			}
+			rows = append(rows, row)
+		}
+	}
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].Permission != rows[j].Permission {
+			return permissionOrderIndex(rows[i].Permission) < permissionOrderIndex(rows[j].Permission)
+		}
+		if rows[i].Count != rows[j].Count {
+			return rows[i].Count > rows[j].Count
+		}
+		return rows[i].Blocker < rows[j].Blocker
+	})
+	return rows
+}
+
+func permissionOrderIndex(perm agent1.Permission) int {
+	for i, item := range btcPermissionOrder() {
+		if item == perm {
+			return i
+		}
+	}
+	return len(btcPermissionOrder())
 }
 
 func summarizeBTCPermissionAudit(rows []BTCPermissionAuditRow, blockers []BTCPermissionBlockerRow, windows int) string {

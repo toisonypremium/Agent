@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/liveguard"
 )
 
 func TestLiveLedgerStorage(t *testing.T) {
@@ -115,5 +116,23 @@ func TestLiveLedgerFeeCurrencyMixed(t *testing.T) {
 	}
 	if pos.FeeCurrency != "MIXED" {
 		t.Fatalf("fee currency=%s want MIXED", pos.FeeCurrency)
+	}
+}
+
+func TestSaveManagedCycleReport(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SaveManagedCycleReport(liveguard.ManagedCycleResult{Status: liveguard.ManagedCycleDryRun, Summary: "dry run"}); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM reports WHERE type='auto_live_management'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("managed cycle reports=%d want 1", count)
 	}
 }

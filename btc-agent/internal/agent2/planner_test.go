@@ -44,8 +44,8 @@ func TestBuildPlanRequiresAgent1Allowed(t *testing.T) {
 	analysis := allowedAnalysis()
 	analysis.ActionPermission = agent1.Watch
 	got := BuildPlan(testConfig(), analysis, map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)})
-	if got.State == StateActiveLimit || len(got.Assets) != 0 {
-		t.Fatalf("WATCH permission must not create active plan: %+v", got)
+	if got.State == StateActiveLimit {
+		t.Fatalf("WATCH permission must not create full active plan: %+v", got)
 	}
 }
 
@@ -221,5 +221,59 @@ func TestFOMOFilterBlocksHotExtension(t *testing.T) {
 	}
 	if !FOMO(candles, 100, 50, market.Zone{}) {
 		t.Fatal("expected FOMO block")
+	}
+}
+
+func TestBuildPlanCreatesProbeCandidateWhenBTCArmedAndAssetSetupStrong(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	cfg.Risk.DisableRelativeStrengthFilter = true
+	cfg.Risk.DisableRotationScoreFilter = true
+	cfg.Risk.DisableAssetFlowEntryFilter = true
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 2
+	analysis := allowedAnalysis()
+	analysis.ActionPermission = agent1.Armed
+	got := BuildPlanWithBenchmarks(cfg, analysis, map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)}, nil)
+	if got.State != StateArmed || len(got.Assets) != 1 || got.Assets[0].State != StateArmed {
+		t.Fatalf("expected ARMED probe plan: %+v", got)
+	}
+	if len(got.Assets[0].Layers) != 1 {
+		t.Fatalf("expected one probe layer: %+v", got.Assets[0].Layers)
+	}
+}
+
+func TestBuildPlanDoesNotProbeWhenBTCHardRisk(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	cfg.Risk.DisableRelativeStrengthFilter = true
+	cfg.Risk.DisableRotationScoreFilter = true
+	cfg.Risk.DisableAssetFlowEntryFilter = true
+	analysis := allowedAnalysis()
+	analysis.ActionPermission = agent1.Armed
+	analysis.MarketRegime = "PANIC_SELLING"
+	got := BuildPlanWithBenchmarks(cfg, analysis, map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)}, nil)
+	if got.State == StateArmed || len(got.Assets) != 0 {
+		t.Fatalf("hard BTC risk must not create probe: %+v", got)
+	}
+}
+
+func TestBuildPlanDoesNotProbeWeakAsset(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	cfg.Risk.DisableRelativeStrengthFilter = true
+	cfg.Risk.DisableRotationScoreFilter = true
+	cfg.Risk.DisableAssetFlowEntryFilter = true
+	analysis := allowedAnalysis()
+	analysis.ActionPermission = agent1.Armed
+	asset := assetCandles(80, true)
+	for i := len(asset) - 5; i < len(asset); i++ {
+		asset[i].Close = 150
+		asset[i].Open = 150
+		asset[i].High = 153
+		asset[i].Low = 147
+	}
+	got := BuildPlanWithBenchmarks(cfg, analysis, map[string][]market.Candle{"ETHUSDT": asset}, nil)
+	if got.State == StateArmed {
+		t.Fatalf("weak/far asset must not create probe: %+v", got)
 	}
 }

@@ -36,6 +36,21 @@ type OrderResult struct {
 	Message       string `json:"message,omitempty"`
 }
 
+type CancelOrderRequest struct {
+	InstID        string `json:"inst_id"`
+	OrderID       string `json:"order_id"`
+	ClientOrderID string `json:"client_order_id"`
+}
+
+type CancelOrderResult struct {
+	InstID        string `json:"inst_id"`
+	OrderID       string `json:"order_id"`
+	ClientOrderID string `json:"client_order_id"`
+	Canceled      bool   `json:"canceled"`
+	Code          string `json:"code,omitempty"`
+	Message       string `json:"message,omitempty"`
+}
+
 const (
 	StatusLiveOpen                = "LIVE_OPEN"
 	StatusPartiallyFilled         = "PARTIALLY_FILLED"
@@ -46,21 +61,30 @@ const (
 )
 
 type OrderStatus struct {
-	InstID            string  `json:"inst_id"`
-	OrderID           string  `json:"order_id"`
-	ClientOrderID     string  `json:"client_order_id"`
-	State             string  `json:"state"` // OKX raw: live, partially_filled, filled, canceled
-	Status            string  `json:"status"`
-	Side              string  `json:"side"`
-	OrderType         string  `json:"order_type"`
-	Price             float64 `json:"price"`
-	Quantity          float64 `json:"quantity"`
-	FilledQuantity    float64 `json:"filled_quantity"`
-	AvgPrice          float64 `json:"avg_price"`
-	AccumulatedFillSz float64 `json:"accumulated_fill_sz"`
-	Fee               float64 `json:"fee"`
-	FeeCurrency       string  `json:"fee_currency"`
-	UpdatedAt         int64   `json:"updated_at"`
+	InstID               string  `json:"inst_id"`
+	OrderID              string  `json:"order_id"`
+	ClientOrderID        string  `json:"client_order_id"`
+	State                string  `json:"state"` // OKX raw: live, partially_filled, filled, canceled
+	Status               string  `json:"status"`
+	Side                 string  `json:"side"`
+	OrderType            string  `json:"order_type"`
+	Price                float64 `json:"price"`
+	Quantity             float64 `json:"quantity"`
+	FilledQuantity       float64 `json:"filled_quantity"`
+	AvgPrice             float64 `json:"avg_price"`
+	AccumulatedFillSz    float64 `json:"accumulated_fill_sz"`
+	Fee                  float64 `json:"fee"`
+	FeeCurrency          string  `json:"fee_currency"`
+	UpdatedAt            int64   `json:"updated_at"`
+	Symbol               string  `json:"symbol,omitempty"`
+	Notional             float64 `json:"notional,omitempty"`
+	LayerIndex           int     `json:"layer_index,omitempty"`
+	Source               string  `json:"source,omitempty"`
+	InvalidationPrice    float64 `json:"invalidation_price,omitempty"`
+	ExpiresAt            int64   `json:"expires_at,omitempty"`
+	DecisionReason       string  `json:"decision_reason,omitempty"`
+	LastManagementAction string  `json:"last_management_action,omitempty"`
+	SubmittedAt          int64   `json:"submitted_at,omitempty"`
 }
 
 type LiveFillSnapshot struct {

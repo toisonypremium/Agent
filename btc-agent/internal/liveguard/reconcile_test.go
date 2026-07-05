@@ -104,3 +104,21 @@ func TestReconcileOrders(t *testing.T) {
 		}
 	})
 }
+
+func TestReconcileSafetyBlocksUnknownAndBadFill(t *testing.T) {
+	res := ReconcileResult{Checked: 2, Unknown: 1, Orders: []live.OrderStatus{
+		{ClientOrderID: "c1", OrderID: "o1", Status: live.StatusUnknownNeedsManualCheck},
+		{ClientOrderID: "c2", OrderID: "o2", Status: live.StatusFilled},
+	}}
+	got := ReconcileSafety(res)
+	if got.Status != ReconcileBlock || len(got.Blockers) == 0 {
+		t.Fatalf("expected reconcile block: %+v", got)
+	}
+}
+
+func TestReconcileSafetyClean(t *testing.T) {
+	got := ReconcileSafety(ReconcileResult{Checked: 1, Orders: []live.OrderStatus{{ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen}}})
+	if got.Status != ReconcileClean || len(got.Blockers) != 0 {
+		t.Fatalf("expected clean safety: %+v", got)
+	}
+}

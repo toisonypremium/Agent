@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"btc-agent/internal/config"
+	"btc-agent/internal/liveguard"
 	"btc-agent/internal/storage"
 )
 
-func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow bool) error {
+func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow bool, dryRun bool) error {
 	tz := cfg.App.Timezone
 	if tz == "" {
 		tz = "Asia/Ho_Chi_Minh"
@@ -24,6 +25,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	log.Printf("[Scheduler] Started. Timezone: %s", tz)
+	if dryRun {
+		log.Println("[Scheduler] Dry-run mode enabled: supervisor/order management cycles will not place or cancel real orders.")
+	}
 
 	dailyTime := cfg.App.DailyRunTime
 	if dailyTime == "" {
@@ -37,12 +41,24 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 	log.Printf("[Scheduler] Live order reconciliation interval: %v (Live enabled: %v)", reconcileInterval, cfg.Live.Enabled)
 
+	managementInterval := 15 * time.Minute
+	if cfg.Live.ManagementIntervalMinutes > 0 {
+		managementInterval = time.Duration(cfg.Live.ManagementIntervalMinutes) * time.Minute
+	}
+	log.Printf("[Scheduler] Live supervisor interval: %v (enabled: %v)", managementInterval, cfg.Live.SupervisorEnabled)
+
 	maintenanceEnabled := cfg.Maintenance.Enabled && cfg.Maintenance.SchedulerEnabled
 	maintenanceTime := cfg.Maintenance.SchedulerTime
 	if maintenanceTime == "" {
 		maintenanceTime = "03:30"
 	}
 	log.Printf("[Scheduler] Maintenance schedule: %s (enabled: %v)", maintenanceTime, maintenanceEnabled)
+
+	researchInterval := time.Duration(cfg.Research.BriefIntervalMinutes) * time.Minute
+	if researchInterval <= 0 {
+		researchInterval = 6 * time.Hour
+	}
+	log.Printf("[Scheduler] Research brief interval: %v (enabled: %v)", researchInterval, cfg.Research.Enabled)
 
 	// Calculate initial next daily run time
 	nextDaily, err := getNextRunTime(dailyTime, loc, time.Now().In(loc))
@@ -84,6 +100,21 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 	}
 
+	var nextResearch time.Time
+	if cfg.Research.Enabled {
+		if runNow {
+			log.Println("[Scheduler] Executing initial research doctor/brief (--run-now)...")
+			if _, err := runResearchDoctor(shutdownCtx, cfg); err != nil {
+				log.Printf("[Scheduler] Initial research doctor error: %v", err)
+			}
+			if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
+				log.Printf("[Scheduler] Initial research brief error: %v", err)
+			}
+		}
+		nextResearch = time.Now().Add(researchInterval)
+		log.Printf("[Scheduler] Next research brief: %s", nextResearch.Format("2006-01-02 15:04:05 MST"))
+	}
+
 	// Run reconciliation once on start if live is enabled, then schedule future ticks.
 	var nextReconcile time.Time
 	if cfg.Live.Enabled {
@@ -94,10 +125,40 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		nextReconcile = time.Now().Add(reconcileInterval)
 	}
 
+	var nextSupervisor time.Time
+	var latestDoctor *liveguard.RuntimeDoctorResult
+	liveSupervisor := liveSupervisorState{}
+	if cfg.Live.SupervisorEnabled {
+		doctor, err := runLiveDoctor(shutdownCtx, cfg, db)
+		if err != nil {
+			log.Printf("[Scheduler] Live doctor error: %v", err)
+		} else {
+			latestDoctor = &doctor
+			log.Printf("[Scheduler] Live doctor status: %s", doctor.Summary)
+			if !dryRun && doctor.Status == liveguard.DoctorBlock {
+				log.Printf("[Scheduler] Live supervisor real management blocked by doctor: %s", doctor.Summary)
+			}
+		}
+		nextSupervisor = time.Now().Add(managementInterval)
+		log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
+		if runNow {
+			log.Println("[Scheduler] Executing initial live supervisor cycle (--run-now)...")
+			if _, err := runLiveSupervisorCycleWithDoctor(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor); err != nil {
+				log.Printf("[Scheduler] Initial live supervisor error: %v", err)
+			}
+		}
+	}
+
 	for {
 		waitUntil := nextDaily
 		if cfg.Live.Enabled && nextReconcile.Before(waitUntil) {
 			waitUntil = nextReconcile
+		}
+		if cfg.Live.SupervisorEnabled && nextSupervisor.Before(waitUntil) {
+			waitUntil = nextSupervisor
+		}
+		if cfg.Research.Enabled && nextResearch.Before(waitUntil) {
+			waitUntil = nextResearch
 		}
 		if maintenanceEnabled && nextMaintenance.Before(waitUntil) {
 			waitUntil = nextMaintenance
@@ -141,6 +202,31 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				log.Printf("[Scheduler] Reconciliation error: %v", err)
 			}
 			nextReconcile = time.Now().Add(reconcileInterval)
+		}
+
+		if cfg.Research.Enabled && !time.Now().Before(nextResearch) {
+			log.Println("[Scheduler] Triggering scheduled research brief...")
+			if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
+				log.Printf("[Scheduler] Research brief error: %v", err)
+			}
+			nextResearch = time.Now().Add(researchInterval)
+			log.Printf("[Scheduler] Next research brief: %s", nextResearch.Format("2006-01-02 15:04:05 MST"))
+		}
+
+		if cfg.Live.SupervisorEnabled && !time.Now().Before(nextSupervisor) {
+			log.Println("[Scheduler] Triggering scheduled live supervisor cycle...")
+			doctor, err := runLiveDoctor(shutdownCtx, cfg, db)
+			if err != nil {
+				log.Printf("[Scheduler] Live doctor error: %v", err)
+			} else {
+				latestDoctor = &doctor
+				log.Printf("[Scheduler] Live doctor status: %s", doctor.Summary)
+			}
+			if _, err := runLiveSupervisorCycleWithDoctor(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor); err != nil {
+				log.Printf("[Scheduler] Live supervisor error: %v", err)
+			}
+			nextSupervisor = time.Now().Add(managementInterval)
+			log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
 		}
 
 		if maintenanceEnabled && !time.Now().Before(nextMaintenance) {

@@ -61,10 +61,10 @@ func TestBuildPlanWithBenchmarksIncludesWatchlistWhenAgent1NotAllowed(t *testing
 	assets := map[string][]market.Candle{"ETHUSDT": assetCandles(80, true), "SOLUSDT": assetCandles(80, true), "RENDERUSDT": assetCandles(80, true)}
 	btc := assetCandles(80, false)
 	got := BuildPlanWithBenchmarks(cfg, analysis, assets, map[string][]market.Candle{"BTCUSDT": btc})
-	if got.State != StateWatch || len(got.Assets) != 0 || len(got.Watchlist.Candidates) == 0 {
-		t.Fatalf("expected watchlist on non-ALLOWED BTC: %+v", got)
+	if got.State == StateActiveLimit || len(got.Watchlist.Candidates) == 0 {
+		t.Fatalf("expected watchlist without full active plan on non-ALLOWED BTC: %+v", got)
 	}
-	if !containsString(got.Watchlist.Candidates[0].Missing, "BTC permission chưa ALLOWED") {
+	if !containsString(got.Watchlist.Candidates[0].Missing, "BTC permission chưa ALLOWED; chỉ cho phép ARMED probe nhỏ") {
 		t.Fatalf("expected BTC permission missing: %+v", got.Watchlist.Candidates[0])
 	}
 }

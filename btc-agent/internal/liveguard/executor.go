@@ -41,6 +41,17 @@ type ExecutionResult struct {
 	Summary     string           `json:"summary"`
 }
 
+type LadderExecutionResult struct {
+	GeneratedAt   time.Time          `json:"generated_at"`
+	Status        string             `json:"status"`
+	ProofStatus   string             `json:"proof_status"`
+	Candidates    []CandidateOrder   `json:"candidates"`
+	Orders        []live.OrderResult `json:"orders"`
+	Reasons       []string           `json:"reasons,omitempty"`
+	TotalNotional float64            `json:"total_notional"`
+	Summary       string             `json:"summary"`
+}
+
 func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof, confirm string, placer OrderPlacer, haltReader HaltReader) ExecutionResult {
 	result := ExecutionResult{GeneratedAt: time.Now(), Status: LiveOrderBlocked, ProofStatus: proof.Status, Candidate: proof.Candidate, Preflight: proof.Preflight}
 	reasons := manualOrderBlockers(cfg, proof, confirm, placer, haltReader)
@@ -96,6 +107,40 @@ func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, 
 	}
 	result.Status = LiveOrderSubmitted
 	result.Summary = fmt.Sprintf("%s: %s order_id=%s client_order_id=%s", LiveOrderSubmitted, order.InstID, order.OrderID, order.ClientOrderID)
+	return result
+}
+
+func ExecuteAutoLadderProofOrder(ctx context.Context, cfg config.Config, proof LadderProof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition, haltReader HaltReader) LadderExecutionResult {
+	result := LadderExecutionResult{GeneratedAt: time.Now(), Status: LiveOrderBlocked, ProofStatus: proof.Status, Candidates: proof.Candidates, TotalNotional: proof.TotalNotional, Orders: []live.OrderResult{}}
+	reasons := autoLadderBlockers(cfg, proof, placer, openOrders, positions, haltReader)
+	if len(reasons) > 0 {
+		result.Reasons = reasons
+		result.Summary = LiveOrderBlocked + ": " + strings.Join(reasons, "; ")
+		return result
+	}
+	for _, candidate := range proof.Candidates {
+		instID := ""
+		for _, preflight := range proof.Preflights {
+			if preflight.Symbol == candidate.Symbol {
+				instID = preflight.InstID
+				break
+			}
+		}
+		if instID == "" {
+			instID = strings.ReplaceAll(candidate.Symbol, "USDT", "-USDT")
+		}
+		req := live.LimitOrderRequest{InstID: instID, Side: strings.ToLower(candidate.Side), Price: candidate.Price, Quantity: candidate.Quantity, PostOnly: candidate.PostOnly, ClientOrderID: clientOrderID(candidate.Symbol, cfg.Live.CanaryMode)}
+		order, err := placer.PlaceSpotLimitOrder(ctx, req)
+		result.Orders = append(result.Orders, order)
+		if err != nil {
+			result.Status = LiveOrderRejected
+			result.Reasons = append(result.Reasons, err.Error())
+			result.Summary = fmt.Sprintf("%s: submitted %d/%d before error: %v", LiveOrderRejected, len(result.Orders)-1, len(proof.Candidates), err)
+			return result
+		}
+	}
+	result.Status = LiveOrderSubmitted
+	result.Summary = fmt.Sprintf("%s: submitted %d ladder orders total %.2f USDT", LiveOrderSubmitted, len(result.Orders), result.TotalNotional)
 	return result
 }
 
@@ -255,6 +300,79 @@ func autoOrderBlockers(cfg config.Config, proof Proof, placer OrderPlacer, openO
 	return uniqueStrings(reasons)
 }
 
+func autoLadderBlockers(cfg config.Config, proof LadderProof, placer OrderPlacer, openOrders []live.OrderStatus, positions []live.LivePosition, haltReader HaltReader) []string {
+	reasons := []string{}
+	halted := true
+	var err error
+	if haltReader != nil {
+		halted, err = haltReader.IsHalted()
+		if err != nil {
+			halted = true
+		}
+	}
+	if halted {
+		reasons = append(reasons, "operator halt active")
+	}
+	if !cfg.Live.AutoExecute {
+		reasons = append(reasons, "live.auto_execute=false")
+	}
+	if !cfg.Live.AutoLadderEnabled {
+		reasons = append(reasons, "live.auto_ladder_enabled=false")
+	}
+	if cfg.Live.RequireManualConfirm {
+		reasons = append(reasons, "live.require_manual_confirm=true")
+	}
+	if !cfg.Live.Enabled {
+		reasons = append(reasons, "live.enabled=false")
+	}
+	if cfg.Live.ProofOnly {
+		reasons = append(reasons, "live.proof_only=true")
+	}
+	if !cfg.Execution.RealTradingEnabled {
+		reasons = append(reasons, "execution.real_trading_enabled=false")
+	}
+	if len(openOrders) >= normalizedMaxOpenLiveOrdersExec(cfg) {
+		reasons = append(reasons, "open live order limit reached")
+	}
+	if proof.Status != ReadyForManualLiveProofOrder {
+		reasons = append(reasons, "proof not ready: "+proof.Status)
+	}
+	if !proof.Account.AuthOK || !proof.Account.BalanceOK {
+		reasons = append(reasons, "account check not pass")
+	}
+	if len(proof.Candidates) == 0 {
+		reasons = append(reasons, "no ladder candidates")
+	}
+	if proof.TotalNotional <= 0 {
+		reasons = append(reasons, "ladder total notional must be positive")
+	} else if proof.TotalNotional > normalizedAutoLadderMaxNotionalExec(cfg)+1e-9 {
+		reasons = append(reasons, "ladder total notional above max")
+	}
+	for _, candidate := range proof.Candidates {
+		if candidate.Side != "BUY" {
+			reasons = append(reasons, "candidate side must be BUY")
+		}
+		if strings.ToLower(candidate.Type) != "limit" {
+			reasons = append(reasons, "candidate type must be limit")
+		}
+		if cfg.Live.RequirePostOnly && !candidate.PostOnly {
+			reasons = append(reasons, "candidate post_only required")
+		}
+		if !livePositionBudgetOK(cfg, candidate, positions) {
+			reasons = append(reasons, "candidate would exceed configured live position budget")
+		}
+	}
+	for _, preflight := range proof.Preflights {
+		if !preflight.Pass {
+			reasons = append(reasons, "preflight not pass")
+		}
+	}
+	if placer == nil {
+		reasons = append(reasons, "order placer unavailable")
+	}
+	return uniqueStrings(reasons)
+}
+
 func livePositionBudgetOK(cfg config.Config, candidate CandidateOrder, positions []live.LivePosition) bool {
 	if candidate.Symbol == "" || candidate.Notional <= 0 {
 		return false
@@ -282,4 +400,18 @@ func livePositionBudgetOK(cfg config.Config, candidate CandidateOrder, positions
 		}
 	}
 	return current+candidate.Notional <= budget+1e-9
+}
+
+func normalizedMaxOpenLiveOrdersExec(cfg config.Config) int {
+	if cfg.Live.MaxOpenLiveOrders <= 0 {
+		return 1
+	}
+	return cfg.Live.MaxOpenLiveOrders
+}
+
+func normalizedAutoLadderMaxNotionalExec(cfg config.Config) float64 {
+	if cfg.Live.AutoLadderMaxNotionalUSDT > 0 {
+		return cfg.Live.AutoLadderMaxNotionalUSDT
+	}
+	return cfg.Live.CanaryMaxNotionalUSDT
 }

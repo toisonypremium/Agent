@@ -79,3 +79,16 @@ func TestWatchlistTriggerAuditDefaultsSkipUnactionable(t *testing.T) {
 		}
 	}
 }
+
+func TestWatchlistTriggerAuditIncludeUnactionableCanProduceRows(t *testing.T) {
+	cfg := triggerAuditConfig()
+	btc := map[string][]market.Candle{"1d": auditCandles("BTCUSDT", 140, 100)}
+	assets := map[string][]market.Candle{"ETHUSDT": auditCandles("ETHUSDT", 140, 80), "SOLUSDT": auditCandles("SOLUSDT", 140, 60)}
+	got, err := RunWatchlistTriggerAudit(cfg, btc, assets, WatchlistTriggerAuditConfig{IncludeUnactionable: true, ReadinessThresholds: []float64{0.30}, HorizonDays: []int{3, 7}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got.Enabled || len(got.Rows) == 0 {
+		t.Fatalf("expected unactionable audit rows: %+v", got)
+	}
+}

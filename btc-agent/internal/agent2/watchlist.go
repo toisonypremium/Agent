@@ -176,7 +176,7 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 	discountReady := discountComponent(c.Price, c.Support)
 	if !c.Support.Valid() {
 		c.Missing = append(c.Missing, "support zone không hợp lệ")
-	} else if c.Price > c.Support.High*1.05 {
+	} else if c.Price > c.Support.High*(1+discountZonePremiumPct(cfg)) {
 		c.Missing = append(c.Missing, "giá chưa vào discount zone")
 	} else if c.Price < c.Support.Low*0.97 {
 		c.Missing = append(c.Missing, "giá dưới support quá sâu; tránh dao rơi")
@@ -429,6 +429,9 @@ func nextTrigger(c WatchCandidate) string {
 		case strings.Contains(m, "FOMO"):
 			return "Không đuổi giá; chờ pullback về value/support."
 		}
+	}
+	if c.State == StateArmed {
+		return "ARMED probe: BTC chưa full ALLOWED; nếu hard safety pass, live manager chỉ được sizing nhỏ."
 	}
 	if c.State == StateActiveLimit {
 		return "Đã đủ điều kiện theo deterministic engine; chỉ paper limit plan."

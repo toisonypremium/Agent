@@ -4,14 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"time"
 )
 
+var ErrTelegramSkipped = errors.New("telegram skipped: missing token/chat")
+
 func Telegram(ctx context.Context, token, chatID, text string) error {
 	if token == "" || chatID == "" {
-		return nil
+		return ErrTelegramSkipped
 	}
 	body, _ := json.Marshal(map[string]string{"chat_id": chatID, "text": text})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token), bytes.NewReader(body))

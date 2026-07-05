@@ -56,8 +56,99 @@ type Proof struct {
 	Summary     string          `json:"summary"`
 }
 
+type LadderProof struct {
+	GeneratedAt   time.Time         `json:"generated_at"`
+	Status        string            `json:"status"`
+	Reasons       []string          `json:"reasons,omitempty"`
+	Candidates    []CandidateOrder  `json:"candidates,omitempty"`
+	Account       AccountCheck      `json:"account"`
+	Preflights    []PreflightResult `json:"preflights,omitempty"`
+	TotalNotional float64           `json:"total_notional"`
+	MaxLayers     int               `json:"max_layers"`
+	MaxOpenOrders int               `json:"max_open_orders"`
+	MaxNotional   float64           `json:"max_notional"`
+	Summary       string            `json:"summary"`
+}
+
 func BuildProof(cfg config.Config, plan agent2.Plan) Proof {
 	return BuildProofWithAccount(context.Background(), cfg, plan, nil)
+}
+
+func BuildLadderProofWithChecks(ctx context.Context, cfg config.Config, plan agent2.Plan, reader BalanceReader, filterReader FilterReader) LadderProof {
+	p := LadderProof{
+		GeneratedAt:   time.Now(),
+		Status:        ReadyForManualLiveProofOrder,
+		MaxLayers:     normalizedMaxAutoLayers(cfg),
+		MaxOpenOrders: normalizedMaxOpenLiveOrders(cfg),
+		MaxNotional:   normalizedAutoLadderMaxNotional(cfg),
+	}
+	if !cfg.Risk.NoFutures || !cfg.Risk.NoLeverage || !cfg.Risk.SpotLimitOnly {
+		return ladderNotReady(p, NotReadyConfig, "risk flags must enforce no futures/no leverage/spot limit only")
+	}
+	if !cfg.Live.Enabled {
+		return ladderNotReady(p, NotReadyConfig, "live.enabled=false")
+	}
+	if !cfg.Execution.RealTradingEnabled {
+		return ladderNotReady(p, NotReadyConfig, "execution.real_trading_enabled=false")
+	}
+	if !cfg.Live.AutoExecute {
+		return ladderNotReady(p, NotReadyConfig, "live.auto_execute=false")
+	}
+	if !cfg.Live.AutoLadderEnabled {
+		return ladderNotReady(p, NotReadyConfig, "live.auto_ladder_enabled=false")
+	}
+	if !cfg.Live.CanaryMode {
+		return ladderNotReady(p, NotReadyConfig, "live.canary_mode=true required for auto ladder")
+	}
+	if cfg.Live.Exchange == "" || strings.ToLower(cfg.Live.Exchange) != "okx" {
+		return ladderNotReady(p, NotReadyConfig, "only okx live proof is planned")
+	}
+	for _, env := range []string{cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv} {
+		if env == "" || os.Getenv(env) == "" {
+			return ladderNotReady(p, NotReadyConfig, "required live credential env is not set: "+env)
+		}
+	}
+	p.Account = AccountCheck{Enabled: reader != nil, BaseCurrency: "USDT", MinRequiredUSDT: cfg.Live.MinAccountFreeUSDT}
+	if reader != nil {
+		balances, err := reader.AccountBalance(ctx)
+		if err != nil {
+			p.Account.Error = sanitizeError(err.Error(), cfg)
+			return ladderNotReady(p, NotReadyBalance, "OKX account balance check failed")
+		}
+		p.Account.AuthOK = true
+		p.Account.FreeUSDT = freeBalance(balances, "USDT")
+		p.Account.BalanceOK = cfg.Live.MinAccountFreeUSDT <= 0 || p.Account.FreeUSDT >= cfg.Live.MinAccountFreeUSDT
+		if !p.Account.BalanceOK {
+			return ladderNotReady(p, NotReadyBalance, fmt.Sprintf("USDT free %.2f below required %.2f", p.Account.FreeUSDT, cfg.Live.MinAccountFreeUSDT))
+		}
+	}
+	candidates, ok := ladderCandidates(cfg, plan)
+	if !ok {
+		return ladderNotReady(p, NotReadyNoDeterministicOrder, "no deterministic ACTIVE_LIMIT layer available")
+	}
+	if filterReader != nil {
+		filters, err := filterReader.InstrumentFilters(ctx)
+		if err != nil {
+			p.Preflights = []PreflightResult{{Enabled: true, Pass: false, Reasons: []string{sanitizeError(err.Error(), cfg)}}}
+			return ladderNotReady(p, NotReadyFilters, "OKX instrument filter check failed")
+		}
+		checked := make([]CandidateOrder, 0, len(candidates))
+		for _, candidate := range candidates {
+			candidate, preflight := RunPreflight(cfg, candidate, filters)
+			p.Preflights = append(p.Preflights, preflight)
+			if !preflight.Pass {
+				return ladderNotReady(p, NotReadyFilters, "live ladder preflight failed")
+			}
+			checked = append(checked, candidate)
+		}
+		candidates = checked
+	}
+	p.Candidates = candidates
+	for _, candidate := range candidates {
+		p.TotalNotional += candidate.Notional
+	}
+	p.Summary = fmt.Sprintf("Live ladder proof ready: %d limit orders total %.2f USDT; no order was placed", len(candidates), p.TotalNotional)
+	return p
 }
 
 func BuildProofWithAccount(ctx context.Context, cfg config.Config, plan agent2.Plan, reader BalanceReader) Proof {
@@ -136,16 +227,96 @@ func firstCandidate(cfg config.Config, plan agent2.Plan) (CandidateOrder, bool) 
 		if cfg.Live.CanaryMode && cfg.Live.CanaryMaxNotionalUSDT > 0 && notional > cfg.Live.CanaryMaxNotionalUSDT {
 			notional = cfg.Live.CanaryMaxNotionalUSDT
 		}
-		qty := 0.0
-		if layer.Price > 0 {
-			qty = notional / layer.Price
-		}
-		if layer.Price <= 0 || qty <= 0 || notional <= 0 {
-			return CandidateOrder{}, false
-		}
-		return CandidateOrder{Symbol: asset.Symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: "deterministic_agent2_layer_1", Canary: cfg.Live.CanaryMode}, true
+		candidate, ok := candidateFromLayer(cfg, asset.Symbol, layer, notional)
+		return candidate, ok
 	}
 	return CandidateOrder{}, false
+}
+
+func ladderCandidates(cfg config.Config, plan agent2.Plan) ([]CandidateOrder, bool) {
+	if plan.State != agent2.StateActiveLimit {
+		return nil, false
+	}
+	maxLayers := normalizedMaxAutoLayers(cfg)
+	maxNotional := normalizedAutoLadderMaxNotional(cfg)
+	out := []CandidateOrder{}
+	total := 0.0
+	for _, asset := range plan.Assets {
+		if asset.State != agent2.StateActiveLimit {
+			continue
+		}
+		for _, layer := range asset.Layers {
+			if len(out) >= maxLayers || total >= maxNotional {
+				break
+			}
+			notional := layer.Notional
+			remaining := maxNotional - total
+			if notional > remaining {
+				notional = remaining
+			}
+			if cap := cfg.Live.MaxOrderNotionalUSDT; cap > 0 && notional > cap {
+				notional = cap
+			}
+			candidate, ok := candidateFromLayer(cfg, asset.Symbol, layer, notional)
+			if !ok {
+				continue
+			}
+			out = append(out, candidate)
+			total += candidate.Notional
+		}
+		if len(out) >= maxLayers || total >= maxNotional {
+			break
+		}
+	}
+	return out, len(out) > 0
+}
+
+func candidateFromLayer(cfg config.Config, symbol string, layer agent2.Layer, notional float64) (CandidateOrder, bool) {
+	qty := 0.0
+	if layer.Price > 0 {
+		qty = notional / layer.Price
+	}
+	if layer.Price <= 0 || qty <= 0 || notional <= 0 {
+		return CandidateOrder{}, false
+	}
+	return CandidateOrder{Symbol: symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: fmt.Sprintf("deterministic_agent2_layer_%d", layer.Index), Canary: cfg.Live.CanaryMode}, true
+}
+
+func normalizedMaxAutoLayers(cfg config.Config) int {
+	if cfg.Live.MaxAutoLayersPerCycle <= 0 {
+		return 1
+	}
+	if cfg.Live.MaxAutoLayersPerCycle > 3 {
+		return 3
+	}
+	return cfg.Live.MaxAutoLayersPerCycle
+}
+
+func normalizedMaxOpenLiveOrders(cfg config.Config) int {
+	if cfg.Live.MaxOpenLiveOrders <= 0 {
+		return 1
+	}
+	if cfg.Live.MaxOpenLiveOrders > 3 {
+		return 3
+	}
+	return cfg.Live.MaxOpenLiveOrders
+}
+
+func normalizedAutoLadderMaxNotional(cfg config.Config) float64 {
+	if cfg.Live.AutoLadderMaxNotionalUSDT > 0 {
+		return cfg.Live.AutoLadderMaxNotionalUSDT
+	}
+	if cfg.Live.CanaryMaxNotionalUSDT > 0 {
+		return cfg.Live.CanaryMaxNotionalUSDT
+	}
+	return cfg.Live.MaxOrderNotionalUSDT
+}
+
+func ladderNotReady(p LadderProof, status, reason string) LadderProof {
+	p.Status = status
+	p.Reasons = []string{reason}
+	p.Summary = status + ": " + reason
+	return p
 }
 
 func freeBalance(balances []live.Balance, asset string) float64 {

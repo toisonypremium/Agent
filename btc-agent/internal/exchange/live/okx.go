@@ -126,6 +126,53 @@ func (c *OKXClient) PlaceSpotLimitOrder(ctx context.Context, order LimitOrderReq
 	return result, nil
 }
 
+func (c *OKXClient) CancelOrder(ctx context.Context, cancel CancelOrderRequest) (CancelOrderResult, error) {
+	const requestPath = "/api/v5/trade/cancel-order"
+	const method = http.MethodPost
+	if cancel.InstID == "" {
+		return CancelOrderResult{}, fmt.Errorf("instID required")
+	}
+	body := map[string]string{"instId": cancel.InstID}
+	if cancel.OrderID != "" {
+		body["ordId"] = cancel.OrderID
+	} else if cancel.ClientOrderID != "" {
+		body["clOrdId"] = cancel.ClientOrderID
+	} else {
+		return CancelOrderResult{}, fmt.Errorf("orderID or clientOrderID required")
+	}
+	b, err := json.Marshal(body)
+	if err != nil {
+		return CancelOrderResult{}, err
+	}
+	timestamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+requestPath, bytes.NewReader(b))
+	if err != nil {
+		return CancelOrderResult{}, fmt.Errorf("okx cancel request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("OK-ACCESS-KEY", c.key)
+	req.Header.Set("OK-ACCESS-SIGN", okxSign(timestamp, method, requestPath, string(b), c.secret))
+	req.Header.Set("OK-ACCESS-TIMESTAMP", timestamp)
+	req.Header.Set("OK-ACCESS-PASSPHRASE", c.passphrase)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return CancelOrderResult{}, fmt.Errorf("okx cancel request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return CancelOrderResult{}, fmt.Errorf("okx cancel read failed: %w", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		return CancelOrderResult{}, fmt.Errorf("okx cancel http %d: %s", resp.StatusCode, redact(data, c.key, c.secret, c.passphrase))
+	}
+	result, err := parseCancelOrderResult(data, cancel.InstID)
+	if err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
 func (c *OKXClient) AccountBalance(ctx context.Context) ([]Balance, error) {
 	const requestPath = "/api/v5/account/balance"
 	const method = http.MethodGet
@@ -281,6 +328,34 @@ func parseOrderResult(data []byte, instID string) (OrderResult, error) {
 	result := OrderResult{InstID: instID, OrderID: item.OrderID, ClientOrderID: item.ClientOrderID, Code: item.SCode, Message: item.SMsg, Submitted: item.SCode == "0"}
 	if !result.Submitted {
 		return result, fmt.Errorf("okx order rejected code %s: %s", item.SCode, item.SMsg)
+	}
+	return result, nil
+}
+
+func parseCancelOrderResult(data []byte, instID string) (CancelOrderResult, error) {
+	var raw struct {
+		Code string `json:"code"`
+		Msg  string `json:"msg"`
+		Data []struct {
+			OrderID       string `json:"ordId"`
+			ClientOrderID string `json:"clOrdId"`
+			SCode         string `json:"sCode"`
+			SMsg          string `json:"sMsg"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return CancelOrderResult{}, fmt.Errorf("okx cancel decode failed: %w", err)
+	}
+	if raw.Code != "0" {
+		return CancelOrderResult{InstID: instID, Code: raw.Code, Message: raw.Msg}, fmt.Errorf("okx cancel code %s: %s", raw.Code, raw.Msg)
+	}
+	if len(raw.Data) == 0 {
+		return CancelOrderResult{InstID: instID}, fmt.Errorf("okx cancel returned no data")
+	}
+	item := raw.Data[0]
+	result := CancelOrderResult{InstID: instID, OrderID: item.OrderID, ClientOrderID: item.ClientOrderID, Code: item.SCode, Message: item.SMsg, Canceled: item.SCode == "0"}
+	if !result.Canceled {
+		return result, fmt.Errorf("okx cancel rejected code %s: %s", item.SCode, item.SMsg)
 	}
 	return result, nil
 }

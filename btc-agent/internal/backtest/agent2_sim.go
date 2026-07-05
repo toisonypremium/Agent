@@ -83,6 +83,7 @@ type SimulationOverrides struct {
 	TargetSymbols        map[string]bool
 	TakeProfitPct        float64
 	TimeStopDays         int
+	AllowArmedAsAllowed  bool
 }
 
 func RunAgent2Simulation(cfg config.Config, btc map[string][]market.Candle, assets map[string][]market.Candle) (Agent2Simulation, error) {
@@ -128,6 +129,8 @@ func RunAgent2SimulationWithOverrides(cfg config.Config, btc map[string][]market
 		sim.Diagnostics.WindowsTested++
 		recordAgent1Diagnostics(&sim, analysis)
 
+		planAnalysis := applyResearchPermissionOverride(&sim, analysis, overrides)
+
 		assetWindows := map[string][]market.Candle{}
 		for _, sym := range cfg.Data.Symbols.Assets {
 			if len(assets[sym]) > i {
@@ -135,14 +138,26 @@ func RunAgent2SimulationWithOverrides(cfg config.Config, btc map[string][]market
 			}
 		}
 		benchmarks := map[string][]market.Candle{cfg.Data.Symbols.BTC: btc1d[:i+1], "BTCUSDT": btc1d[:i+1]}
-		plan := agent2.BuildPlanWithBenchmarks(cfg, analysis, assetWindows, benchmarks)
+		plan := agent2.BuildPlanWithBenchmarks(cfg, planAnalysis, assetWindows, benchmarks)
 		plan = applySimulationOverrides(plan, overrides)
-		recordPlanReasons(&sim, cfg, analysis, plan)
+		recordPlanReasons(&sim, cfg, planAnalysis, plan)
 		placeOrders(&sim, openOrders, positions, plan, i, eventTime(btc1d[i].CloseTime))
 		processOrdersAndPositionsWithOverrides(&sim, openOrders, positions, assets, i, expiryDays, eventTime(btc1d[i].CloseTime), overrides)
 	}
 	finalizeSimulation(&sim, positions, assets, lastIndex)
 	return sim, nil
+}
+
+func applyResearchPermissionOverride(sim *Agent2Simulation, analysis agent1.MarketAnalysis, overrides SimulationOverrides) agent1.MarketAnalysis {
+	if !overrides.AllowArmedAsAllowed || analysis.ActionPermission != agent1.Armed {
+		return analysis
+	}
+	out := analysis
+	out.ActionPermission = agent1.Allowed
+	if sim != nil {
+		sim.Diagnostics.Notes = append(sim.Diagnostics.Notes, "Research-only: ARMED treated as ALLOWED inside this backtest simulation; production plan/live behavior unchanged.")
+	}
+	return out
 }
 
 func applySimulationOverrides(plan agent2.Plan, overrides SimulationOverrides) agent2.Plan {

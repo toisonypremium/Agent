@@ -34,6 +34,8 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent export-training --config config.yaml
 ./bin/btc-agent eval-ai --config config.yaml
 ./bin/btc-agent live-proof --config config.yaml
+./bin/btc-agent research-doctor --config config.yaml
+./bin/btc-agent research-brief --config config.yaml
 ./bin/btc-agent execute-live-proof-order --config config.yaml --confirm <client-order-id>
 ./bin/btc-agent auto-live-order --config config.yaml
 ./bin/btc-agent reconcile-live-orders --config config.yaml
@@ -124,6 +126,26 @@ data/training/decision_dataset.csv
 
 The export uses local candles only. It does not call LLMs, does not call exchange APIs, does not read secrets, and does not trade. Labels are heuristic/outcome labels for future AI evaluation or training preparation, not profit guarantees. AI should learn to explain and audit deterministic decisions, not override them.
 
+## Read-only research layer
+
+P3 adds RSS-first research reports inspired by Agent-Reach routing/doctor patterns, but it stays read-only:
+
+```bash
+./bin/btc-agent research-doctor --config config.yaml
+./bin/btc-agent research-brief --config config.yaml
+```
+
+It writes:
+
+```text
+reports/research_doctor_latest.md
+reports/research_doctor_latest.json
+reports/research_brief_latest.md
+reports/research_brief_latest.json
+```
+
+Scope: public RSS/news only in P3. No exchange auth, no browser cookies, no social login, no order authority. Research can add evidence/context and Telegram summaries, but it cannot place orders, cancel orders, override Agent 1/2, or loosen live safety gates. If `research.enabled=true`, scheduler runs a brief at `research.brief_interval_minutes` and logs warnings without stopping live supervisor.
+
 ## AI Agent Evaluation Harness
 
 Run after `export-training` has created the local decision dataset:
@@ -179,7 +201,20 @@ reports/live_proof_latest.md
 reports/live_proof_latest.json
 ```
 
-It does not place a real order. Real order execution is intentionally a separate future manual-confirmed command.
+It does not place a real order. `live-readiness` gives the full operator checklist: config flags, credential-env presence, operator halt, latest deterministic plan state, proof/preflight, open live order count, and live position count. It writes:
+
+```text
+reports/live_readiness_latest.md
+reports/live_readiness_latest.json
+```
+
+Manual real execution is intentionally separate and requires the exact confirm phrase:
+
+```bash
+./bin/btc-agent execute-live-proof-order --config config.yaml --confirm I_UNDERSTAND_THIS_PLACES_A_REAL_SPOT_LIMIT_ORDER
+```
+
+Auto live execution is fail-closed. It requires `live.auto_execute=true`, `live.require_manual_confirm=false`, `live.canary_mode=true`, `BTC_AGENT_ALLOW_AUTO_LIVE=true`, operator halt inactive, passing proof/preflight, open live orders below the configured cap, and position budget room. First rollout should use canary max notional and ladder caps (for example `live.canary_max_notional_usdt: 2`, `live.auto_ladder_enabled: true`, `live.max_auto_layers_per_cycle: 1`, `live.max_open_live_orders: 1`, `live.auto_ladder_max_notional_usdt: 2`). Auto ladder still submits only spot post-only BUY limit orders and reconciles after submission.
 
 `reconcile-live-orders` reads local open live orders, checks OKX order status with read-only signed REST calls, updates local order/event state, and writes:
 
@@ -191,6 +226,62 @@ reports/live_position_latest.json
 ```
 
 Reconciliation never places orders. Unknown exchange errors are marked for manual check. `live-positions` prints the local live position ledger without calling the exchange.
+
+### 24/7 live rollout runbook
+
+1. Keep operator halt active by default:
+
+```bash
+./bin/btc-agent operator-halt --config config.yaml
+```
+
+2. Run daily plan + readiness checks without placing orders:
+
+```bash
+./bin/btc-agent run-daily --config config.yaml
+./bin/btc-agent live-readiness --config config.yaml
+./bin/btc-agent live-proof --config config.yaml
+./bin/btc-agent reconcile-live-orders --config config.yaml
+./bin/btc-agent live-positions --config config.yaml
+```
+
+3. Manual one-order canary only after readiness is clean:
+
+```bash
+./bin/btc-agent operator-resume --config config.yaml
+./bin/btc-agent execute-live-proof-order --config config.yaml --confirm I_UNDERSTAND_THIS_PLACES_A_REAL_SPOT_LIMIT_ORDER
+./bin/btc-agent reconcile-live-orders --config config.yaml
+./bin/btc-agent operator-halt --config config.yaml
+```
+
+4. 24/7 scheduler/supervisor mode:
+
+```bash
+# Paper/report smoke mode. Scheduler runs with --dry-run.
+export BTC_AGENT_MODE=paper
+./scripts/btc-agent-scheduler.sh
+
+# Live proof/reconcile visibility only. Scheduler still runs with --dry-run.
+export BTC_AGENT_MODE=live-proof
+./scripts/btc-agent-scheduler.sh
+
+# Canary auto only after manual live has proven safe.
+export BTC_AGENT_MODE=live-canary-auto
+export BTC_AGENT_ALLOW_AUTO_LIVE=true
+./bin/btc-agent live-doctor --config config.yaml
+./scripts/btc-agent-scheduler.sh
+```
+
+Legacy loop remains available as `./scripts/btc-agent-24h.sh`, but P2 production runtime should prefer scheduler/supervisor because it uses `live-supervisor`, doctor startup checks, heartbeat reports, and sequential non-overlapping cycles.
+
+Secrets:
+
+- Never paste real exchange or Telegram keys into chat/logs.
+- Rotate any key pasted outside the device.
+- Use OKX IP whitelist and least permissions where possible.
+- If you accept local env-file risk, copy `btc-agent.env.example` to `$HOME/btc-agent.env` and fill values there. Never commit real secrets.
+
+Termux:Boot defaults should use `BTC_AGENT_MODE=paper` unless `$HOME/btc-agent.env` explicitly overrides it.
 
 ## Tests
 

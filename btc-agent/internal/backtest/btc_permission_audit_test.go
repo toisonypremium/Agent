@@ -85,3 +85,18 @@ func hasString(items []string, want string) bool {
 	}
 	return false
 }
+
+func TestBTCPermissionAuditBlockersByPermission(t *testing.T) {
+	counts := map[agent1.Permission]map[string]int{
+		agent1.Armed: {BlockerTrendBelow60: 2, BlockerFlowNeutral: 1},
+		agent1.Watch: {BlockerTrendBelow45: 3},
+	}
+	permissionCounts := map[agent1.Permission]int{agent1.Armed: 4, agent1.Watch: 6}
+	rows := finalizeBTCPermissionBlockersByPermission(counts, permissionCounts)
+	if len(rows) != 3 {
+		t.Fatalf("rows=%d want 3: %+v", len(rows), rows)
+	}
+	if rows[0].Permission != agent1.Armed || rows[0].Blocker != BlockerTrendBelow60 || rows[0].RateWithinPermission != 0.5 {
+		t.Fatalf("unexpected first row: %+v", rows[0])
+	}
+}

@@ -80,6 +80,17 @@ ai:
   temperature: 0
   telegram_enabled: true
 
+research:
+  enabled: false
+  brief_interval_minutes: 360
+  max_sources_per_cycle: 20
+  request_timeout_seconds: 12
+  rss:
+    enabled: true
+    feeds:
+      - "https://www.coindesk.com/arc/outboundfeeds/rss/"
+      - "https://cointelegraph.com/rss"
+
 live:
   enabled: false
   exchange: "okx"
@@ -93,6 +104,11 @@ live:
   auto_execute: false
   canary_mode: false
   canary_max_notional_usdt: 2.0
+  supervisor_enabled: false
+  management_interval_minutes: 15
+  heartbeat_interval_minutes: 360
+  auto_halt_after_errors: 3
+  notify_on_no_action: false
   proof_only: true
 
 execution:

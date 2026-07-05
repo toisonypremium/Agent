@@ -40,6 +40,7 @@ type Config struct {
 		DisableAssetFlowEntryFilter   bool    `yaml:"disable_asset_flow_entry_filter"`
 		MinAssetFlowBullScore         float64 `yaml:"min_asset_flow_bull_score"`
 		AllowNeutralReclaimEntry      bool    `yaml:"allow_neutral_reclaim_entry"`
+		DiscountZonePremiumPct        float64 `yaml:"discount_zone_premium_pct"`
 		NoFutures                     bool    `yaml:"no_futures"`
 		NoLeverage                    bool    `yaml:"no_leverage"`
 		SpotLimitOnly                 bool    `yaml:"spot_limit_only"`
@@ -84,20 +85,51 @@ type Config struct {
 		Temperature     float64 `yaml:"temperature"`
 		TelegramEnabled bool    `yaml:"telegram_enabled"`
 	} `yaml:"ai"`
+	Research struct {
+		Enabled               bool `yaml:"enabled"`
+		BriefIntervalMinutes  int  `yaml:"brief_interval_minutes"`
+		MaxSourcesPerCycle    int  `yaml:"max_sources_per_cycle"`
+		RequestTimeoutSeconds int  `yaml:"request_timeout_seconds"`
+		RSS                   struct {
+			Enabled bool     `yaml:"enabled"`
+			Feeds   []string `yaml:"feeds"`
+		} `yaml:"rss"`
+	} `yaml:"research"`
 	Live struct {
-		Enabled               bool    `yaml:"enabled"`
-		Exchange              string  `yaml:"exchange"`
-		APIKeyEnv             string  `yaml:"api_key_env"`
-		APISecretEnv          string  `yaml:"api_secret_env"`
-		APIPassphraseEnv      string  `yaml:"api_passphrase_env"`
-		MaxOrderNotionalUSDT  float64 `yaml:"max_order_notional_usdt"`
-		MinAccountFreeUSDT    float64 `yaml:"min_account_free_usdt"`
-		RequirePostOnly       bool    `yaml:"require_post_only"`
-		RequireManualConfirm  bool    `yaml:"require_manual_confirm"`
-		AutoExecute           bool    `yaml:"auto_execute"`
-		CanaryMode            bool    `yaml:"canary_mode"`
-		CanaryMaxNotionalUSDT float64 `yaml:"canary_max_notional_usdt"`
-		ProofOnly             bool    `yaml:"proof_only"`
+		Enabled                           bool    `yaml:"enabled"`
+		Exchange                          string  `yaml:"exchange"`
+		APIKeyEnv                         string  `yaml:"api_key_env"`
+		APISecretEnv                      string  `yaml:"api_secret_env"`
+		APIPassphraseEnv                  string  `yaml:"api_passphrase_env"`
+		MaxOrderNotionalUSDT              float64 `yaml:"max_order_notional_usdt"`
+		MinAccountFreeUSDT                float64 `yaml:"min_account_free_usdt"`
+		RequirePostOnly                   bool    `yaml:"require_post_only"`
+		RequireManualConfirm              bool    `yaml:"require_manual_confirm"`
+		AutoExecute                       bool    `yaml:"auto_execute"`
+		CanaryMode                        bool    `yaml:"canary_mode"`
+		CanaryMaxNotionalUSDT             float64 `yaml:"canary_max_notional_usdt"`
+		AutoLadderEnabled                 bool    `yaml:"auto_ladder_enabled"`
+		MaxAutoLayersPerCycle             int     `yaml:"max_auto_layers_per_cycle"`
+		MaxOpenLiveOrders                 int     `yaml:"max_open_live_orders"`
+		AutoLadderMaxNotionalUSDT         float64 `yaml:"auto_ladder_max_notional_usdt"`
+		OrderManagementEnabled            bool    `yaml:"order_management_enabled"`
+		MaxAutoLayersPerAsset             int     `yaml:"max_auto_layers_per_asset"`
+		MaxOpenLiveOrdersPerAsset         int     `yaml:"max_open_live_orders_per_asset"`
+		MaxOpenLiveOrdersTotal            int     `yaml:"max_open_live_orders_total"`
+		MaxLiveNotionalPerOrderUSDT       float64 `yaml:"max_live_notional_per_order_usdt"`
+		MaxLiveNotionalPerAssetUSDT       float64 `yaml:"max_live_notional_per_asset_usdt"`
+		MaxLiveNotionalTotalUSDT          float64 `yaml:"max_live_notional_total_usdt"`
+		CancelIfPlanNotActive             bool    `yaml:"cancel_if_plan_not_active"`
+		CancelIfPriceAboveDiscountZonePct float64 `yaml:"cancel_if_price_above_discount_zone_pct"`
+		ReplaceIfPriceDriftPct            float64 `yaml:"replace_if_price_drift_pct"`
+		CancelStaleAfterMinutes           int     `yaml:"cancel_stale_after_minutes"`
+		CancelOnBTCPermissionNotAllowed   bool    `yaml:"cancel_on_btc_permission_not_allowed"`
+		SupervisorEnabled                 bool    `yaml:"supervisor_enabled"`
+		ManagementIntervalMinutes         int     `yaml:"management_interval_minutes"`
+		HeartbeatIntervalMinutes          int     `yaml:"heartbeat_interval_minutes"`
+		AutoHaltAfterErrors               int     `yaml:"auto_halt_after_errors"`
+		NotifyOnNoAction                  bool    `yaml:"notify_on_no_action"`
+		ProofOnly                         bool    `yaml:"proof_only"`
 	} `yaml:"live"`
 	Execution struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
@@ -157,6 +189,9 @@ func (c Config) Validate() error {
 			if c.Live.RequireManualConfirm {
 				return errors.New("auto live execution requires live.require_manual_confirm=false")
 			}
+			if !c.Live.CanaryMode {
+				return errors.New("auto live execution requires live.canary_mode=true")
+			}
 		} else if !c.Live.RequireManualConfirm {
 			return errors.New("manual live execution requires live.require_manual_confirm=true unless live.auto_execute=true")
 		}
@@ -175,6 +210,84 @@ func (c Config) Validate() error {
 			return fmt.Errorf("live canary_max_notional_usdt (%.2f) cannot exceed max_order_notional_usdt (%.2f)", c.Live.CanaryMaxNotionalUSDT, c.Live.MaxOrderNotionalUSDT)
 		}
 	}
+	if c.Live.AutoLadderEnabled {
+		if !c.Live.AutoExecute {
+			return errors.New("auto ladder requires live.auto_execute=true")
+		}
+		if !c.Live.CanaryMode {
+			return errors.New("auto ladder requires live.canary_mode=true")
+		}
+		if c.Live.MaxAutoLayersPerCycle < 1 || c.Live.MaxAutoLayersPerCycle > 3 {
+			return errors.New("live.max_auto_layers_per_cycle must be between 1 and 3")
+		}
+		if c.Live.MaxOpenLiveOrders < 1 || c.Live.MaxOpenLiveOrders > 3 {
+			return errors.New("live.max_open_live_orders must be between 1 and 3")
+		}
+		if c.Live.AutoLadderMaxNotionalUSDT <= 0 {
+			return errors.New("live.auto_ladder_max_notional_usdt must be positive")
+		}
+		if c.Live.AutoLadderMaxNotionalUSDT > c.Live.MaxOrderNotionalUSDT {
+			return errors.New("live.auto_ladder_max_notional_usdt cannot exceed live.max_order_notional_usdt")
+		}
+	}
+	if c.Live.OrderManagementEnabled {
+		if !c.Live.AutoExecute {
+			return errors.New("order management requires live.auto_execute=true")
+		}
+		if !c.Live.CanaryMode {
+			return errors.New("order management requires live.canary_mode=true")
+		}
+		if c.Live.MaxAutoLayersPerAsset < 1 || c.Live.MaxAutoLayersPerAsset > 3 {
+			return errors.New("live.max_auto_layers_per_asset must be between 1 and 3")
+		}
+		if c.Live.MaxOpenLiveOrdersPerAsset < 1 || c.Live.MaxOpenLiveOrdersPerAsset > 3 {
+			return errors.New("live.max_open_live_orders_per_asset must be between 1 and 3")
+		}
+		if c.Live.MaxOpenLiveOrdersTotal < c.Live.MaxOpenLiveOrdersPerAsset {
+			return errors.New("live.max_open_live_orders_total must be >= live.max_open_live_orders_per_asset")
+		}
+		if c.Live.MaxLiveNotionalPerOrderUSDT <= 0 || c.Live.MaxLiveNotionalPerOrderUSDT > c.Live.MaxOrderNotionalUSDT {
+			return errors.New("live.max_live_notional_per_order_usdt must be >0 and <= live.max_order_notional_usdt")
+		}
+		if c.Live.MaxLiveNotionalPerAssetUSDT < c.Live.MaxLiveNotionalPerOrderUSDT {
+			return errors.New("live.max_live_notional_per_asset_usdt must be >= live.max_live_notional_per_order_usdt")
+		}
+		if c.Live.MaxLiveNotionalTotalUSDT < c.Live.MaxLiveNotionalPerAssetUSDT {
+			return errors.New("live.max_live_notional_total_usdt must be >= live.max_live_notional_per_asset_usdt")
+		}
+		if c.Live.CancelIfPriceAboveDiscountZonePct < 0 {
+			return errors.New("live.cancel_if_price_above_discount_zone_pct cannot be negative")
+		}
+		if c.Live.ReplaceIfPriceDriftPct < 0 {
+			return errors.New("live.replace_if_price_drift_pct cannot be negative")
+		}
+		if c.Live.CancelStaleAfterMinutes < 0 {
+			return errors.New("live.cancel_stale_after_minutes cannot be negative")
+		}
+	}
+	if c.Live.HeartbeatIntervalMinutes < 0 {
+		return errors.New("live.heartbeat_interval_minutes cannot be negative")
+	}
+	if c.Live.AutoHaltAfterErrors < 0 {
+		return errors.New("live.auto_halt_after_errors cannot be negative")
+	}
+	if c.Live.SupervisorEnabled {
+		if !c.Live.Enabled {
+			return errors.New("live supervisor requires live.enabled=true")
+		}
+		if !c.Live.AutoExecute {
+			return errors.New("live supervisor requires live.auto_execute=true")
+		}
+		if !c.Live.CanaryMode {
+			return errors.New("live supervisor requires live.canary_mode=true")
+		}
+		if !c.Live.OrderManagementEnabled {
+			return errors.New("live supervisor requires live.order_management_enabled=true")
+		}
+		if c.Live.ManagementIntervalMinutes < 1 {
+			return errors.New("live.management_interval_minutes must be >=1 when supervisor is enabled")
+		}
+	}
 	if !c.Risk.NoFutures || !c.Risk.NoLeverage || !c.Risk.SpotLimitOnly {
 		return errors.New("risk flags must enforce no futures, no leverage, spot limit only")
 	}
@@ -184,7 +297,7 @@ func (c Config) Validate() error {
 	if strings.ToUpper(c.Portfolio.BaseCurrency) != "USDT" {
 		return errors.New("only USDT base currency supported")
 	}
-	for _, s := range []string{"ETHUSDT", "SOLUSDT", "RENDERUSDT"} {
+	for _, s := range c.Data.Symbols.Assets {
 		if c.Portfolio.Allocation[s] <= 0 {
 			return fmt.Errorf("missing allocation for %s", s)
 		}
@@ -202,6 +315,9 @@ func (c Config) Validate() error {
 	if c.Risk.MinRewardRisk <= 0 {
 		return errors.New("risk.min_reward_risk must be positive")
 	}
+	if c.Risk.DiscountZonePremiumPct < 0 {
+		return errors.New("risk.discount_zone_premium_pct cannot be negative")
+	}
 	if c.Data.BinanceBaseURL == "" || c.Data.Symbols.BTC == "" || len(c.Data.Symbols.Assets) == 0 || len(c.Data.Intervals) == 0 {
 		return errors.New("data source/symbols/intervals required")
 	}
@@ -213,6 +329,20 @@ func (c Config) Validate() error {
 	}
 	if c.Maintenance.SchedulerTime != "" && !validClockTime(c.Maintenance.SchedulerTime) {
 		return errors.New("maintenance.scheduler_time must be HH:MM")
+	}
+	if c.Research.BriefIntervalMinutes < 0 {
+		return errors.New("research.brief_interval_minutes cannot be negative")
+	}
+	if c.Research.MaxSourcesPerCycle < 0 {
+		return errors.New("research.max_sources_per_cycle cannot be negative")
+	}
+	if c.Research.Enabled {
+		if c.Research.RequestTimeoutSeconds < 1 {
+			return errors.New("research.request_timeout_seconds must be >=1 when research is enabled")
+		}
+		if c.Research.RSS.Enabled && len(c.Research.RSS.Feeds) == 0 {
+			return errors.New("research.rss.feeds required when research RSS is enabled")
+		}
 	}
 	if len(c.Execution.LayerDistribution) == 0 {
 		return errors.New("execution.layer_distribution required")

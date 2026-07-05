@@ -23,6 +23,8 @@ func TestValidateAutoLiveTradingRequiresAutoConfirmShape(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.RequireManualConfirm = false
 	cfg.Live.AutoExecute = true
+	cfg.Live.CanaryMode = true
+	cfg.Live.CanaryMaxNotionalUSDT = 2
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
@@ -36,8 +38,82 @@ func TestValidateAutoLiveTradingRejectsManualConfirm(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.RequireManualConfirm = true
 	cfg.Live.AutoExecute = true
+	cfg.Live.CanaryMode = true
+	cfg.Live.CanaryMaxNotionalUSDT = 2
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected auto/manual confirm conflict")
+	}
+}
+
+func TestValidateAutoLiveTradingRequiresCanaryMode(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Execution.RealTradingEnabled = true
+	cfg.Execution.PaperTrading = false
+	cfg.Live.Enabled = true
+	cfg.Live.ProofOnly = false
+	cfg.Live.RequireManualConfirm = false
+	cfg.Live.AutoExecute = true
+	cfg.Live.CanaryMode = false
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected auto live to require canary mode")
+	}
+}
+
+func TestValidateAutoLadderRequiresAutoExecute(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Execution.RealTradingEnabled = true
+	cfg.Execution.PaperTrading = false
+	cfg.Live.Enabled = true
+	cfg.Live.ProofOnly = false
+	cfg.Live.RequireManualConfirm = true
+	cfg.Live.AutoExecute = false
+	cfg.Live.CanaryMode = true
+	cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.AutoLadderEnabled = true
+	cfg.Live.MaxAutoLayersPerCycle = 1
+	cfg.Live.MaxOpenLiveOrders = 1
+	cfg.Live.AutoLadderMaxNotionalUSDT = 2
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected auto ladder to require auto execute")
+	}
+}
+
+func TestValidateAutoLadderBounds(t *testing.T) {
+	base := validTestConfig()
+	base.Execution.RealTradingEnabled = true
+	base.Execution.PaperTrading = false
+	base.Live.Enabled = true
+	base.Live.ProofOnly = false
+	base.Live.RequireManualConfirm = false
+	base.Live.AutoExecute = true
+	base.Live.CanaryMode = true
+	base.Live.CanaryMaxNotionalUSDT = 2
+	base.Live.AutoLadderEnabled = true
+	base.Live.MaxAutoLayersPerCycle = 1
+	base.Live.MaxOpenLiveOrders = 1
+	base.Live.AutoLadderMaxNotionalUSDT = 2
+	if err := base.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"zero layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerCycle = 0 }},
+		{"too many layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerCycle = 4 }},
+		{"zero open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 0 }},
+		{"too many open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 4 }},
+		{"zero notional", func(cfg *Config) { cfg.Live.AutoLadderMaxNotionalUSDT = 0 }},
+		{"too much notional", func(cfg *Config) { cfg.Live.AutoLadderMaxNotionalUSDT = 11 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 
@@ -163,6 +239,162 @@ func TestValidateMaintenanceSchedulerTime(t *testing.T) {
 				t.Fatal("expected validation error")
 			}
 		})
+	}
+}
+
+func TestValidateOrderManagementBounds(t *testing.T) {
+	base := validTestConfig()
+	base.Execution.RealTradingEnabled = true
+	base.Execution.PaperTrading = false
+	base.Live.Enabled = true
+	base.Live.ProofOnly = false
+	base.Live.RequireManualConfirm = false
+	base.Live.AutoExecute = true
+	base.Live.CanaryMode = true
+	base.Live.CanaryMaxNotionalUSDT = 2
+	base.Live.OrderManagementEnabled = true
+	base.Live.MaxAutoLayersPerAsset = 3
+	base.Live.MaxOpenLiveOrdersPerAsset = 3
+	base.Live.MaxOpenLiveOrdersTotal = 9
+	base.Live.MaxLiveNotionalPerOrderUSDT = 2
+	base.Live.MaxLiveNotionalPerAssetUSDT = 6
+	base.Live.MaxLiveNotionalTotalUSDT = 18
+	if err := base.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"zero layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerAsset = 0 }},
+		{"asset cap below order", func(cfg *Config) { cfg.Live.MaxLiveNotionalPerAssetUSDT = 1 }},
+		{"total cap below asset", func(cfg *Config) { cfg.Live.MaxLiveNotionalTotalUSDT = 5 }},
+		{"negative cancel pct", func(cfg *Config) { cfg.Live.CancelIfPriceAboveDiscountZonePct = -1 }},
+		{"negative stale", func(cfg *Config) { cfg.Live.CancelStaleAfterMinutes = -1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateSupervisorDefaultsDisabled(t *testing.T) {
+	cfg := validTestConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateSupervisorRequiresManagedLiveShape(t *testing.T) {
+	base := validTestConfig()
+	base.Execution.RealTradingEnabled = true
+	base.Execution.PaperTrading = false
+	base.Live.Enabled = true
+	base.Live.ProofOnly = false
+	base.Live.RequireManualConfirm = false
+	base.Live.AutoExecute = true
+	base.Live.CanaryMode = true
+	base.Live.CanaryMaxNotionalUSDT = 2
+	base.Live.OrderManagementEnabled = true
+	base.Live.MaxAutoLayersPerAsset = 3
+	base.Live.MaxOpenLiveOrdersPerAsset = 3
+	base.Live.MaxOpenLiveOrdersTotal = 9
+	base.Live.MaxLiveNotionalPerOrderUSDT = 2
+	base.Live.MaxLiveNotionalPerAssetUSDT = 6
+	base.Live.MaxLiveNotionalTotalUSDT = 18
+	base.Live.SupervisorEnabled = true
+	base.Live.ManagementIntervalMinutes = 15
+	base.Live.HeartbeatIntervalMinutes = 360
+	base.Live.AutoHaltAfterErrors = 3
+	if err := base.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"live disabled", func(cfg *Config) { cfg.Live.Enabled = false }},
+		{"auto disabled", func(cfg *Config) { cfg.Live.AutoExecute = false }},
+		{"canary disabled", func(cfg *Config) { cfg.Live.CanaryMode = false }},
+		{"management disabled", func(cfg *Config) { cfg.Live.OrderManagementEnabled = false }},
+		{"zero interval", func(cfg *Config) { cfg.Live.ManagementIntervalMinutes = 0 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateSupervisorRejectsNegativeOptionalValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"heartbeat", func(cfg *Config) { cfg.Live.HeartbeatIntervalMinutes = -1 }},
+		{"auto halt", func(cfg *Config) { cfg.Live.AutoHaltAfterErrors = -1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateResearchDefaultsDisabled(t *testing.T) {
+	cfg := validTestConfig()
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateResearchRejectsInvalidValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"negative interval", func(cfg *Config) { cfg.Research.BriefIntervalMinutes = -1 }},
+		{"negative max sources", func(cfg *Config) { cfg.Research.MaxSourcesPerCycle = -1 }},
+		{"zero timeout enabled", func(cfg *Config) { cfg.Research.Enabled = true; cfg.Research.RequestTimeoutSeconds = 0 }},
+		{"rss enabled without feeds", func(cfg *Config) {
+			cfg.Research.Enabled = true
+			cfg.Research.RequestTimeoutSeconds = 1
+			cfg.Research.RSS.Enabled = true
+			cfg.Research.RSS.Feeds = nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
+func TestValidateResearchEnabledValid(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Research.Enabled = true
+	cfg.Research.BriefIntervalMinutes = 360
+	cfg.Research.MaxSourcesPerCycle = 20
+	cfg.Research.RequestTimeoutSeconds = 12
+	cfg.Research.RSS.Enabled = true
+	cfg.Research.RSS.Feeds = []string{"https://example.com/rss"}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
 

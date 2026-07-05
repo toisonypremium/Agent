@@ -12,6 +12,7 @@ import (
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
 	_ "modernc.org/sqlite"
 )
@@ -52,7 +53,48 @@ func (d *DB) Migrate() error {
 			return err
 		}
 	}
+	for _, col := range []struct {
+		name string
+		def  string
+	}{
+		{"layer_index", "INTEGER"},
+		{"source", "TEXT"},
+		{"invalidation_price", "REAL"},
+		{"expires_at", "INTEGER"},
+		{"decision_reason", "TEXT"},
+		{"last_management_action", "TEXT"},
+	} {
+		if err := d.ensureColumn("live_orders", col.name, col.def); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func (d *DB) ensureColumn(table, name, def string) error {
+	rows, err := d.Query("PRAGMA table_info(" + table + ")")
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var colName, colType string
+		var notNull int
+		var defaultValue any
+		var pk int
+		if err := rows.Scan(&cid, &colName, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return err
+		}
+		if colName == name {
+			return nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	_, err = d.Exec("ALTER TABLE " + table + " ADD COLUMN " + name + " " + def)
+	return err
 }
 func (d *DB) SaveCandles(cs []market.Candle) error {
 	tx, err := d.Begin()
@@ -160,17 +202,33 @@ func (d *DB) SaveReport(t, content string) error {
 	return err
 }
 
+func (d *DB) SaveManagedCycleReport(result liveguard.ManagedCycleResult) error {
+	b, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return d.SaveReport("auto_live_management", string(b))
+}
+
 func (d *DB) SaveLiveOrderFromParams(clientOrderID, orderID, instID, symbol, side, ordType string, price, quantity, notional float64, status string) error {
+	return d.SaveManagedLiveOrder(clientOrderID, orderID, instID, symbol, side, ordType, price, quantity, notional, status, live.OrderStatus{})
+}
+
+func (d *DB) SaveManagedLiveOrder(clientOrderID, orderID, instID, symbol, side, ordType string, price, quantity, notional float64, status string, meta live.OrderStatus) error {
 	now := time.Now().Unix()
 	_, err := d.Exec(
-		`INSERT OR REPLACE INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
-		clientOrderID, orderID, instID, symbol, side, ordType, price, quantity, notional, status, now, now,
+		`INSERT OR REPLACE INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		clientOrderID, orderID, instID, symbol, side, ordType, price, quantity, notional, status, now, now, meta.LayerIndex, meta.Source, meta.InvalidationPrice, meta.ExpiresAt, meta.DecisionReason, meta.LastManagementAction,
 	)
 	return err
 }
 
 func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
-	rows, err := d.Query(`SELECT client_order_id, order_id, inst_id, type, side, price, quantity, status, updated_at FROM live_orders WHERE status IN ('LIVE_OPEN', 'PARTIALLY_FILLED', 'SUBMITTED')`)
+	return d.OpenLiveOrdersDetailed()
+}
+
+func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
+	rows, err := d.Query(`SELECT client_order_id, order_id, inst_id, symbol, type, side, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action FROM live_orders WHERE status IN ('LIVE_OPEN', 'PARTIALLY_FILLED', 'SUBMITTED')`)
 	if err != nil {
 		return nil, err
 	}
@@ -178,11 +236,39 @@ func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
 	out := []live.OrderStatus{}
 	for rows.Next() {
 		var o live.OrderStatus
-		var uTime int64
-		if err := rows.Scan(&o.ClientOrderID, &o.OrderID, &o.InstID, &o.OrderType, &o.Side, &o.Price, &o.Quantity, &o.Status, &uTime); err != nil {
+		var symbol, source, decisionReason, lastAction sql.NullString
+		var notional, invalidation sql.NullFloat64
+		var submittedAt, layerIndex, expiresAt sql.NullInt64
+		if err := rows.Scan(&o.ClientOrderID, &o.OrderID, &o.InstID, &symbol, &o.OrderType, &o.Side, &o.Price, &o.Quantity, &notional, &o.Status, &submittedAt, &o.UpdatedAt, &layerIndex, &source, &invalidation, &expiresAt, &decisionReason, &lastAction); err != nil {
 			return nil, err
 		}
-		o.UpdatedAt = uTime
+		if symbol.Valid {
+			o.Symbol = symbol.String
+		}
+		if notional.Valid {
+			o.Notional = notional.Float64
+		}
+		if submittedAt.Valid {
+			o.SubmittedAt = submittedAt.Int64
+		}
+		if layerIndex.Valid {
+			o.LayerIndex = int(layerIndex.Int64)
+		}
+		if source.Valid {
+			o.Source = source.String
+		}
+		if invalidation.Valid {
+			o.InvalidationPrice = invalidation.Float64
+		}
+		if expiresAt.Valid {
+			o.ExpiresAt = expiresAt.Int64
+		}
+		if decisionReason.Valid {
+			o.DecisionReason = decisionReason.String
+		}
+		if lastAction.Valid {
+			o.LastManagementAction = lastAction.String
+		}
 		out = append(out, o)
 	}
 	return out, rows.Err()

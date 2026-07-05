@@ -202,3 +202,44 @@ func TestPendingOrdersSignsFullQueryPath(t *testing.T) {
 		t.Fatalf("bad pending statuses: %+v", statuses)
 	}
 }
+
+func TestParseCancelOrderResultSuccess(t *testing.T) {
+	data := []byte(`{"code":"0","msg":"","data":[{"ordId":"123","clOrdId":"client-1","sCode":"0","sMsg":""}]}`)
+	got, err := parseCancelOrderResult(data, "ETH-USDT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Canceled || got.OrderID != "123" || got.ClientOrderID != "client-1" {
+		t.Fatalf("bad cancel result: %+v", got)
+	}
+}
+
+func TestCancelOrderSignsBody(t *testing.T) {
+	const secret = "test-secret"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RequestURI() != "/api/v5/trade/cancel-order" || r.Method != http.MethodPost {
+			t.Fatalf("bad request %s %s", r.Method, r.URL.RequestURI())
+		}
+		body := `{"clOrdId":"client-123","instId":"ETH-USDT"}`
+		buf := make([]byte, len(body))
+		_, _ = r.Body.Read(buf)
+		if string(buf) != body {
+			t.Fatalf("body=%s", string(buf))
+		}
+		ts := r.Header.Get("OK-ACCESS-TIMESTAMP")
+		wantSign := okxSign(ts, http.MethodPost, "/api/v5/trade/cancel-order", body, secret)
+		if r.Header.Get("OK-ACCESS-SIGN") != wantSign {
+			t.Fatalf("signature did not include cancel body")
+		}
+		_, _ = w.Write([]byte(`{"code":"0","msg":"","data":[{"ordId":"","clOrdId":"client-123","sCode":"0","sMsg":""}]}`))
+	}))
+	defer server.Close()
+	client := &OKXClient{baseURL: server.URL, key: "key", secret: secret, passphrase: "pass", http: server.Client()}
+	got, err := client.CancelOrder(context.Background(), CancelOrderRequest{InstID: "ETH-USDT", ClientOrderID: "client-123"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Canceled || got.ClientOrderID != "client-123" {
+		t.Fatalf("bad cancel: %+v", got)
+	}
+}

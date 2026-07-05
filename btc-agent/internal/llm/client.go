@@ -55,6 +55,18 @@ func NewFromEnv(baseEnv, keyEnv, model string, maxTokens int, temp float64) (*Cl
 }
 
 func (c *Client) ChatJSON(ctx context.Context, prompt string, out any) error {
+	content, err := c.ChatText(ctx, prompt)
+	if err != nil {
+		return err
+	}
+	content = extractJSONObject(content)
+	if err := json.Unmarshal([]byte(content), out); err != nil {
+		return fmt.Errorf("llm json parse failed: %w", err)
+	}
+	return nil
+}
+
+func (c *Client) ChatText(ctx context.Context, prompt string) (string, error) {
 	reqBody := map[string]any{
 		"model":       c.cfg.Model,
 		"temperature": c.cfg.Temp,
@@ -68,7 +80,7 @@ func (c *Client) ChatJSON(ctx context.Context, prompt string, out any) error {
 	}
 	b, err := json.Marshal(reqBody)
 	if err != nil {
-		return err
+		return "", err
 	}
 	base := strings.TrimRight(c.cfg.BaseURL, "/")
 	if !strings.HasSuffix(base, "/v1") {
@@ -77,31 +89,23 @@ func (c *Client) ChatJSON(ctx context.Context, prompt string, out any) error {
 	url := base + "/chat/completions"
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
-		return err
+		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("llm request failed: %w", err)
+		return "", fmt.Errorf("llm request failed: %w", err)
 	}
 	defer resp.Body.Close()
 	data, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("llm http %d: %s", resp.StatusCode, redact(string(data), c.cfg.APIKey))
+		return "", fmt.Errorf("llm http %d: %s", resp.StatusCode, redact(string(data), c.cfg.APIKey))
 	}
-	content, err := responseContent(data)
-	if err != nil {
-		return err
-	}
-	content = extractJSONObject(content)
-	if err := json.Unmarshal([]byte(content), out); err != nil {
-		return fmt.Errorf("llm json parse failed: %w", err)
-	}
-	return nil
+	return responseContent(data)
 }
 
 func responseContent(data []byte) (string, error) {

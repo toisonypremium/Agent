@@ -10,7 +10,7 @@ import (
 
 // AIBriefCaller is satisfied by *llm.Client (ChatJSON).
 type AIBriefCaller interface {
-	ChatJSON(ctx context.Context, prompt string, out any) error
+	ChatText(ctx context.Context, prompt string) (string, error)
 }
 
 // AIBriefAnalysis is the structured output from the AI model.
@@ -18,10 +18,10 @@ type AIBriefAnalysis struct {
 	MarketSentiment string   `json:"market_sentiment"` // BULLISH / BEARISH / NEUTRAL / MIXED
 	KeyRisks        []string `json:"key_risks"`
 	KeyOpportunity  []string `json:"key_opportunity"`
-	BTCImpact       string   `json:"btc_impact"`   // SHORT summary ≤80 chars
+	BTCImpact       string   `json:"btc_impact"`     // SHORT summary ≤80 chars
 	AltcoinImpact   string   `json:"altcoin_impact"` // SHORT summary ≤80 chars
-	ActionBias      string   `json:"action_bias"`  // HOLD / ACCUMULATE_ON_DIP / REDUCE / WATCH
-	TelegramText    string   `json:"telegram_text"` // formatted Telegram message ≤1800 chars
+	ActionBias      string   `json:"action_bias"`    // HOLD / ACCUMULATE_ON_DIP / REDUCE / WATCH
+	TelegramText    string   `json:"telegram_text"`  // formatted Telegram message ≤1800 chars
 }
 
 // AnalyzeBriefWithAI sends RSS items to the LLM for strategy-level analysis.
@@ -35,21 +35,19 @@ func AnalyzeBriefWithAI(ctx context.Context, caller AIBriefCaller, result BriefR
 	type compactItem struct {
 		Source  string `json:"source"`
 		Title   string `json:"title"`
-		URL     string `json:"url"`
 		Risk    string `json:"risk"`
 		Tags    string `json:"tags"`
 		Summary string `json:"summary,omitempty"`
 	}
 	items := []compactItem{}
 	limit := len(result.Items)
-	if limit > 15 {
-		limit = 15
+	if limit > 10 {
+		limit = 10
 	}
 	for _, it := range result.Items[:limit] {
 		items = append(items, compactItem{
 			Source:  it.Source,
 			Title:   it.Title,
-			URL:     it.URL,
 			Risk:    it.Risk,
 			Tags:    strings.Join(it.Tags, ","),
 			Summary: it.Summary,
@@ -58,47 +56,44 @@ func AnalyzeBriefWithAI(ctx context.Context, caller AIBriefCaller, result BriefR
 	payload, _ := json.MarshalIndent(items, "", "  ")
 
 	now := time.Now().UTC().Format("02/01 15:04 UTC")
-	prompt := fmt.Sprintf(`Return exactly one valid JSON object. No markdown, no explanation outside JSON.
-You are an expert crypto trading analyst for a spot-only BTC/altcoin accumulation bot (NO futures, NO leverage, NO market orders).
-Analyze these %d news/RSS items collected at %s and produce a brief strategy-aware assessment.
+	prompt := fmt.Sprintf(`You are an institutional crypto trading desk analyst for a spot-only BTC/altcoin accumulation bot (NO futures, NO leverage, NO market orders).
+Analyze these %d news/RSS items collected at %s. News is EVIDENCE ONLY; do not dump links or raw headlines unless needed.
+Return ONLY the Telegram-ready Vietnamese text, no JSON, no markdown fences.
+Expert report style:
+- Start with one clear market stance: Risk-on / Neutral / Risk-off / Mixed.
+- Explain WHY in 2-3 sentences: flows, macro/policy, exchange risk, ETF/institutional demand, derivatives/options tone, on-chain/whale accumulation if mentioned.
+- Separate BTC impact from altcoin impact (ETH/SOL/RENDER if present).
+- Map risk vs opportunity: what can improve setup, what can invalidate it.
+- Provide action bias for this bot: WAIT / WATCH / ACCUMULATE_ON_DIP / HOLD_CASH. Must stay under deterministic Agent 1/2 authority.
 Rules:
 - ONLY spot BUY limit post-only. Never recommend futures, shorting, leverage, or market orders.
-- Focus on BTC regime impact and altcoin (ETH/SOL/RENDER) opportunity/risk.
-- Be concise. telegram_text max 1800 chars, written in Vietnamese.
-- telegram_text must contain: sentiment header, 1-2 key risk lines, 1-2 opportunity lines, action_bias, and top 3-5 news items with URL.
+- No URLs in telegram_text. Do not paste source links. Mention evidence as "Tin nền:" short bullet titles only if useful.
+- Be concise. telegram_text max 1900 chars, written in Vietnamese, expert tone, no hype.
+- telegram_text must have sections: "Kết luận", "Luận điểm", "Rủi ro", "Cơ hội", "Kế hoạch bot".
 - telegram_text must end with: "Research-only: không đặt lệnh, không override Agent 1/2."
 - Never include API keys, secrets, or credential values.
-
-JSON schema:
-{
-  "market_sentiment": "BULLISH|BEARISH|NEUTRAL|MIXED",
-  "key_risks": ["..."],
-  "key_opportunity": ["..."],
-  "btc_impact": "short string ≤80 chars",
-  "altcoin_impact": "short string ≤80 chars",
-  "action_bias": "HOLD|ACCUMULATE_ON_DIP|REDUCE|WATCH",
-  "telegram_text": "full Vietnamese Telegram message"
-}
 
 News items:
 %s`, limit, now, string(payload))
 
-	var analysis AIBriefAnalysis
-	if err := caller.ChatJSON(ctx, prompt, &analysis); err != nil {
+	text, err := caller.ChatText(ctx, prompt)
+	if err != nil {
 		return "", fmt.Errorf("ai brief analysis: %w", err)
 	}
+	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(text, "```"), "```"))
 
 	// Safety: ensure required footer present
-	if !strings.Contains(analysis.TelegramText, "Research-only") {
-		analysis.TelegramText += "\nResearch-only: không đặt lệnh, không override Agent 1/2."
+	if !strings.Contains(text, "Research-only") {
+		text += "\nResearch-only: không đặt lệnh, không override Agent 1/2."
 	}
 
-	// Safety: never expose secret-like strings
-	if containsSecretLike(analysis.TelegramText) {
+	// Safety: never expose secret-like strings or raw URLs in Telegram.
+	if containsSecretLike(text) {
 		return "", fmt.Errorf("ai brief output failed safety check")
 	}
+	text = stripURLs(text)
 
-	return analysis.TelegramText, nil
+	return text, nil
 }
 
 func containsSecretLike(s string) bool {
@@ -109,4 +104,21 @@ func containsSecretLike(s string) bool {
 		}
 	}
 	return false
+}
+
+func stripURLs(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		words := strings.Fields(line)
+		kept := []string{}
+		for _, word := range words {
+			lower := strings.ToLower(strings.Trim(word, "()[]{}.,;"))
+			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "www.") {
+				continue
+			}
+			kept = append(kept, word)
+		}
+		lines[i] = strings.Join(kept, " ")
+	}
+	return strings.Join(lines, "\n")
 }

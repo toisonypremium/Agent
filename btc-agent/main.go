@@ -10,7 +10,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"btc-agent/internal/agent1"
@@ -26,17 +25,13 @@ import (
 	"btc-agent/internal/llm"
 	"btc-agent/internal/market"
 	"btc-agent/internal/notify"
+	"btc-agent/internal/reportio"
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/telegramreport"
 )
 
-// telegramMessageIDs tracks the last sent message_id per label so we can
-// delete the old message before sending a new one (prevents accumulation).
-var (
-	telegramMsgMu  sync.Mutex
-	telegramMsgIDs = map[string]int{}
-)
+var telegramManager = notify.NewTelegramManager("reports", nil)
 
 func main() {
 	if err := run(context.Background(), os.Args); err != nil {
@@ -2003,6 +1998,7 @@ func protectedReportFiles() []string {
 		"live_manager_simulation_latest.json",
 		"cancel_all_live_orders_latest.md",
 		"cancel_all_live_orders_latest.json",
+		"telegram_state.json",
 	}
 }
 
@@ -2015,14 +2011,7 @@ func maintenanceMarkdown(result storage.MaintenanceResult) string {
 }
 
 func saveJSONFile(dir, name string, v any) error {
-	if err := os.MkdirAll(dir, 0700); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(v, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, name), b, 0600)
+	return reportio.WriteJSON(dir, name, v)
 }
 
 func argValue(args []string, key string) string {
@@ -2082,32 +2071,10 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-func saveTelegramCopy(label, text string) error {
-	if err := os.MkdirAll("reports", 0700); err != nil {
-		return err
-	}
-	safeLabel := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(label)
-	return os.WriteFile(filepath.Join("reports", "telegram_"+safeLabel+"_latest.md"), []byte(text), 0600)
-}
-
 func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 	token := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
-	if err := saveTelegramCopy(label, text); err != nil {
-		log.Printf("telegram copy warning [%s]: %v", label, err)
-	}
-
-	// Delete previous message for this label to avoid accumulation of old messages.
-	telegramMsgMu.Lock()
-	oldID := telegramMsgIDs[label]
-	telegramMsgMu.Unlock()
-	if oldID != 0 {
-		if err := notify.TelegramDelete(ctx, token, chatID, oldID); err != nil {
-			log.Printf("telegram delete old [%s] msg_id=%d: %v", label, oldID, err)
-		}
-	}
-
-	result, err := notify.TelegramSend(ctx, token, chatID, text)
+	result, err := telegramManager.Send(ctx, token, chatID, label, text)
 	if err != nil {
 		if errors.Is(err, notify.ErrTelegramSkipped) {
 			log.Printf("telegram skipped [%s]: missing token/chat", label)
@@ -2115,11 +2082,6 @@ func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 		}
 		log.Printf("telegram warning [%s]: %v", label, err)
 		return
-	}
-	if result.MessageID != 0 {
-		telegramMsgMu.Lock()
-		telegramMsgIDs[label] = result.MessageID
-		telegramMsgMu.Unlock()
 	}
 	log.Printf("telegram sent ok [%s] msg_id=%d", label, result.MessageID)
 }

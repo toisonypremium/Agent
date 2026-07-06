@@ -13,6 +13,8 @@ import (
 
 var ErrTelegramSkipped = errors.New("telegram skipped: missing token/chat")
 
+var telegramAPIBaseURL = "https://api.telegram.org"
+
 // SendResult holds the message_id returned by Telegram after a successful send.
 type SendResult struct {
 	MessageID int
@@ -30,7 +32,7 @@ func TelegramSend(ctx context.Context, token, chatID, text string) (SendResult, 
 		return SendResult{}, ErrTelegramSkipped
 	}
 	body, _ := json.Marshal(map[string]string{"chat_id": chatID, "text": text})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", token), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBaseURL, token), bytes.NewReader(body))
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -60,7 +62,7 @@ func TelegramDelete(ctx context.Context, token, chatID string, messageID int) er
 		return nil
 	}
 	body, _ := json.Marshal(map[string]interface{}{"chat_id": chatID, "message_id": messageID})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/deleteMessage", token), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/deleteMessage", telegramAPIBaseURL, token), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -71,6 +73,10 @@ func TelegramDelete(ctx context.Context, token, chatID string, messageID int) er
 		return err
 	}
 	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode/100 != 2 {
+		return fmt.Errorf("telegram delete http %d: %s", resp.StatusCode, string(data))
+	}
 	return nil
 }
 
@@ -80,7 +86,7 @@ func TelegramEdit(ctx context.Context, token, chatID string, messageID int, text
 		return fmt.Errorf("missing token/chat/messageID")
 	}
 	body, _ := json.Marshal(map[string]interface{}{"chat_id": chatID, "message_id": messageID, "text": text})
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("https://api.telegram.org/bot%s/editMessageText", token), bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/editMessageText", telegramAPIBaseURL, token), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}

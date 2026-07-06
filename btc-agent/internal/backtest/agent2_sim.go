@@ -25,6 +25,8 @@ type Agent2Simulation struct {
 
 type AssetSimStats struct {
 	Symbol        string  `json:"symbol"`
+	ScoutPlans    int     `json:"scout_plans"`
+	ArmedPlans    int     `json:"armed_plans"`
 	PlansCreated  int     `json:"plans_created"`
 	OrdersPlaced  int     `json:"orders_placed"`
 	OrdersFilled  int     `json:"orders_filled"`
@@ -40,10 +42,15 @@ type AssetSimStats struct {
 
 type Agent2Diagnostics struct {
 	WindowsTested         int                       `json:"windows_tested"`
+	ScoutCandidates       int                       `json:"scout_candidates"`
+	ArmedCandidates       int                       `json:"armed_candidates"`
+	ActiveLimitPlans      int                       `json:"active_limit_plans"`
 	Agent1PermissionCount map[agent1.Permission]int `json:"agent1_permission_counts"`
 	Agent1RegimeCounts    map[string]int            `json:"agent1_regime_counts"`
 	Agent1RiskCounts      map[string]int            `json:"agent1_risk_counts"`
 	AssetReasonCounts     map[string]map[string]int `json:"asset_reason_counts"`
+	HardReasonCounts      map[string]int            `json:"hard_reason_counts"`
+	SoftReasonCounts      map[string]int            `json:"soft_reason_counts"`
 	Events                []Agent2SimEvent          `json:"events"`
 	Notes                 []string                  `json:"notes"`
 }
@@ -204,6 +211,8 @@ func newAgent2Diagnostics(symbols []string) Agent2Diagnostics {
 		Agent1RegimeCounts:    map[string]int{},
 		Agent1RiskCounts:      map[string]int{},
 		AssetReasonCounts:     map[string]map[string]int{},
+		HardReasonCounts:      map[string]int{},
+		SoftReasonCounts:      map[string]int{},
 		Notes: []string{
 			"Historical Agent 1 simulation uses BTC 1D candles as fallback for 4H and 1W; this keeps backtest local but is not true multi-timeframe alignment.",
 			"Limit orders become active from the next candle to avoid same-candle lookahead.",
@@ -223,7 +232,7 @@ func recordAgent1Diagnostics(sim *Agent2Simulation, analysis agent1.MarketAnalys
 }
 
 func recordPlanReasons(sim *Agent2Simulation, cfg config.Config, analysis agent1.MarketAnalysis, plan agent2.Plan) {
-	if analysis.ActionPermission != agent1.Allowed {
+	if len(plan.Assets) == 0 && analysis.ActionPermission != agent1.Allowed {
 		for _, sym := range cfg.Data.Symbols.Assets {
 			if sim.Assets[sym].Symbol != "" {
 				incAssetReason(sim, sym, "BTC_PERMISSION_"+string(analysis.ActionPermission))
@@ -237,6 +246,37 @@ func recordPlanReasons(sim *Agent2Simulation, cfg config.Config, analysis agent1
 			continue
 		}
 		seen[asset.Symbol] = true
+		stats := sim.Assets[asset.Symbol]
+		switch asset.State {
+		case agent2.StateScout:
+			stats.ScoutPlans++
+			sim.Diagnostics.ScoutCandidates++
+		case agent2.StateArmed:
+			stats.ArmedPlans++
+			sim.Diagnostics.ArmedCandidates++
+		case agent2.StateActiveLimit:
+			sim.Diagnostics.ActiveLimitPlans++
+		}
+		sim.Assets[asset.Symbol] = stats
+		if len(asset.Reasons) > 0 {
+			for _, reason := range asset.Reasons {
+				key := string(reason.Code)
+				if key == "" {
+					key = reason.Message
+				}
+				if key == "" {
+					continue
+				}
+				incAssetReason(sim, asset.Symbol, key)
+				switch reason.Severity {
+				case agent2.ReasonHardBlock:
+					sim.Diagnostics.HardReasonCounts[key]++
+				case agent2.ReasonSoftWait:
+					sim.Diagnostics.SoftReasonCounts[key]++
+				}
+			}
+			continue
+		}
 		reason := asset.Reason
 		if reason == "" {
 			reason = string(asset.State)

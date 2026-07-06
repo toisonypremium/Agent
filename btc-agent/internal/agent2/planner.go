@@ -18,6 +18,7 @@ type State string
 const (
 	StateNoTrade     State = "NO_TRADE"
 	StateWatch       State = "WATCH"
+	StateScout       State = "SCOUT"
 	StateArmed       State = "ARMED"
 	StateActiveLimit State = "ACTIVE_LIMIT"
 )
@@ -56,6 +57,7 @@ type AssetPlan struct {
 	LiquidityQuality liquidity.Quality `json:"liquidity_quality,omitempty"`
 	SetupScore       float64           `json:"setup_score,omitempty"`
 	SetupGates       []SetupGateResult `json:"setup_gates,omitempty"`
+	Reasons          []DecisionReason  `json:"reasons,omitempty"`
 	Layers           []Layer           `json:"layers"`
 	Reason           string            `json:"reason"`
 	HardBlockers     []string          `json:"hard_blockers,omitempty"`
@@ -88,77 +90,122 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 		rotationBySymbol[r.Symbol] = r
 	}
 	useAssetFlowEntry := len(benchmark) > 0
-	if a.FallingKnifeRisk == agent1.High || a.FomoRisk == agent1.High || a.MarketRegime == "PANIC_SELLING" {
-		p.Summary = "Risk filter chặn gom."
-		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, nil)
-		AddWatchlistMissing(&p.Watchlist, "BTC risk/regime chưa cho phép gom", cfg)
-		return p
-	}
-	if a.ActionPermission != agent1.Allowed {
-		if a.ActionPermission == agent1.Armed {
-			anyProbe := false
-			for _, sym := range assetSymbols {
-				ap := planProbeAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
-				p.Assets = append(p.Assets, ap)
-				if ap.State == StateArmed {
-					anyProbe = true
-				}
-			}
-			p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
-			AddWatchlistMissing(&p.Watchlist, "BTC permission ARMED; chỉ cho phép probe nhỏ khi mọi gate con đạt", cfg)
-			if anyProbe {
-				p.State = StateArmed
-				p.Summary = "BTC ARMED và có probe candidate chất lượng cao."
-			} else {
-				p.State = StateWatch
-				p.Summary = "BTC ARMED nhưng chưa có coin đủ đẹp để tạo probe."
-			}
-			return p
-		}
-		p.Summary = "BTC permission WATCH/NO_TRADE; không tạo probe."
-		p.State = StateWatch
-		for _, sym := range assetSymbols {
-			ap := AssetPlan{Symbol: sym, State: StateWatch, Reason: "BTC permission WATCH; không tạo probe", HardBlockers: []string{"BTC permission WATCH; không tạo probe"}, NextTrigger: "Chờ BTC chuyển ARMED hoặc ALLOWED trước khi tạo live order."}
-			if c := candles[sym]; len(c) >= 25 {
-				mm := AnalyzeMMAccumulation(sym, c)
-				ap.MMCase = mm.Case
-				ap.MMScore = mm.Score
-				ap.MMReasons = mm.Reasons
-				ap.MMMissing = mm.Missing
-				ap.AssetFlowBias = mm.FlowBias
-				ap.AssetFlowScore = mm.BullScore
-				ap.LiquidityQuality = liquidity.EvaluateCandleProxy(cfg, sym, c, desiredLiquidityNotional(cfg, sym))
-			}
-			p.Assets = append(p.Assets, ap)
-		}
-		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
-		AddWatchlistMissing(&p.Watchlist, "BTC permission WATCH; không tạo probe", cfg)
-		return p
-	}
-	if a.MarketRegime == "DOWNTREND" {
-		p.Summary = "Risk filter chặn gom."
-		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, nil)
-		AddWatchlistMissing(&p.Watchlist, "BTC risk/regime chưa cho phép gom", cfg)
-		return p
-	}
 
 	anyActive := false
+	anyArmed := false
+	anyScout := false
+	anyHard := false
 	for _, sym := range assetSymbols {
 		ap := planAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
+		ap = applyBTCGateToAsset(cfg, a, ap)
 		p.Assets = append(p.Assets, ap)
-		if ap.State == StateActiveLimit {
+		switch ap.State {
+		case StateActiveLimit:
 			anyActive = true
+		case StateArmed:
+			anyArmed = true
+		case StateScout:
+			anyScout = true
+		case StateNoTrade:
+			if HasHardBlock(ap.Reasons) {
+				anyHard = true
+			}
 		}
 	}
 	p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
-	if anyActive {
+	switch {
+	case anyActive:
 		p.State = StateActiveLimit
 		p.Summary = "Có paper limit plan hợp lệ."
-	} else {
+	case anyArmed:
+		p.State = StateArmed
+		p.Summary = "BTC ARMED và có asset candidate đủ mạnh; SCOUT/ARMED không tự tạo order."
+	case anyScout:
+		p.State = StateScout
+		p.Summary = "Có SCOUT candidate gần đạt; chưa tạo order vì còn soft wait."
+	case anyHard:
+		p.State = StateNoTrade
+		p.Summary = "Có hard blocker; không tạo order."
+	default:
 		p.State = StateWatch
 		p.Summary = "Chưa có asset đủ discount/reward-risk."
 	}
 	return p
+}
+
+func btcHardBlocks(a agent1.MarketAnalysis) bool {
+	return a.MarketRegime == "PANIC_SELLING" || a.FallingKnifeRisk == agent1.High
+}
+
+func btcGateReasons(a agent1.MarketAnalysis) []DecisionReason {
+	reasons := []DecisionReason{}
+	if a.MarketRegime == "PANIC_SELLING" {
+		reasons = AddReason(reasons, NewDecisionReason(ReasonBTCPanic, ReasonHardBlock, ReasonScopeBTC, "BTC panic selling hard block"))
+	}
+	if a.FallingKnifeRisk == agent1.High {
+		reasons = AddReason(reasons, NewDecisionReason(ReasonFallingKnife, ReasonHardBlock, ReasonScopeBTC, "BTC falling knife high hard block"))
+	}
+	if a.FomoRisk == agent1.High {
+		reasons = AddReason(reasons, NewDecisionReason(ReasonFOMO, ReasonHardBlock, ReasonScopeBTC, "BTC FOMO high hard block"))
+	}
+	if a.MarketRegime == "DOWNTREND" {
+		reasons = AddReason(reasons, NewDecisionReason(ReasonBTCDowntrend, ReasonSoftWait, ReasonScopeBTC, "BTC downtrend; chỉ scout/watch, không full deploy"))
+	}
+	if btcPermissionNeedsSoftWait(a) {
+		reasons = AddReason(reasons, NewDecisionReason(ReasonBTCPermission, ReasonSoftWait, ReasonScopeBTC, "BTC permission "+string(a.ActionPermission)+"; chưa cho phép ACTIVE_LIMIT"))
+	}
+	return reasons
+}
+
+func btcPermissionNeedsSoftWait(a agent1.MarketAnalysis) bool {
+	return !(a.ActionPermission == agent1.Allowed)
+}
+
+func applyBTCGateToAsset(cfg config.Config, a agent1.MarketAnalysis, ap AssetPlan) AssetPlan {
+	gateReasons := btcGateReasons(a)
+	ap.Reasons = append(ap.Reasons, gateReasons...)
+	ap.HardBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonHardBlock))
+	ap.SoftBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonSoftWait))
+	if HasHardBlock(gateReasons) {
+		ap.State = StateNoTrade
+		ap.Layers = nil
+		ap.Reason = firstNonEmptyMM(PrimaryReason(gateReasons), ap.Reason, "BTC hard blocker")
+		ap.NextTrigger = "Chờ BTC hết panic/falling knife/FOMO hard risk trước khi tạo setup."
+		return ap
+	}
+	if a.ActionPermission == agent1.Allowed && (a.MarketRegime != "DOWNTREND" || cfg.Risk.AllowScoutInDowntrend) {
+		if a.MarketRegime != "DOWNTREND" {
+			return ap
+		}
+	}
+	if ap.State == StateActiveLimit {
+		if a.ActionPermission == agent1.Armed {
+			ap.State = StateArmed
+			ap.Reason = "BTC ARMED và coin setup đủ gate; giữ ARMED candidate, không tự tạo order"
+			ap.NextTrigger = "Chờ BTC chuyển ALLOWED để full ladder; SCOUT/ARMED không tạo order."
+			ap.Layers = ap.Layers[:min(1, len(ap.Layers))]
+			return ap
+		}
+		ap.State = StateScout
+		ap.Layers = nil
+		ap.Reason = firstNonEmptyMM(PrimaryReason(gateReasons), "setup đủ asset gate nhưng BTC chưa ALLOWED")
+		ap.NextTrigger = "SCOUT: chờ BTC chuyển ALLOWED; không tạo order."
+		return ap
+	}
+	if ap.State == StateWatch && !HasHardBlock(ap.Reasons) && nearActionableSetup(cfg, ap) {
+		ap.State = StateScout
+		ap.Reason = firstNonEmptyMM(ap.Reason, "setup gần đạt; chỉ scout")
+		ap.NextTrigger = firstNonEmptyMM(ap.NextTrigger, "SCOUT: theo dõi trigger còn thiếu; không tạo order.")
+	}
+	return ap
+}
+
+func nearActionableSetup(cfg config.Config, ap AssetPlan) bool {
+	minNear := cfg.Risk.MinWatchReadinessForProbe
+	if minNear <= 0 {
+		minNear = 0.70
+	}
+	return ap.SetupScore >= minNear
 }
 
 func planProbeAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
@@ -200,13 +247,13 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	ap, eval := evaluateAssetSetup(cfg, sym, c, benchmark, rotation, useAssetFlowEntry)
 	if len(eval.HardBlockers) > 0 {
 		ap.State = StateNoTrade
-		ap.Reason = firstNonEmptyMM(firstReason(eval.HardBlockers), "setup hard blocker")
+		ap.Reason = firstNonEmptyMM(PrimaryReason(ap.Reasons), firstReason(eval.HardBlockers), "setup hard blocker")
 		ap.NextTrigger = eval.NextTrigger
 		return ap
 	}
 	if len(eval.SoftBlockers) > 0 {
 		ap.State = StateWatch
-		ap.Reason = firstNonEmptyMM(primarySetupReason(eval.SoftBlockers), "setup chưa đủ gate")
+		ap.Reason = firstNonEmptyMM(primarySetupReason(eval.SoftBlockers), PrimaryReason(ap.Reasons), "setup chưa đủ gate")
 		ap.NextTrigger = eval.NextTrigger
 		return ap
 	}
@@ -218,7 +265,8 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	if len(ap.Layers) == 0 {
 		ap.State = StateWatch
 		ap.Reason = "không có layer nào đạt reward/risk tối thiểu"
-		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+		ap.Reasons = AddReason(ap.Reasons, NewDecisionReason(ReasonExecutionLayer, ReasonSoftWait, ReasonScopeExecution, ap.Reason))
+		ap.SoftBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonSoftWait))
 		ap.NextTrigger = "Chờ entry sâu hơn để layer đạt reward/risk."
 		return ap
 	}
@@ -243,11 +291,6 @@ func firstReason(items []string) string {
 }
 
 func primarySetupReason(items []string) string {
-	for _, item := range items {
-		if strings.Contains(item, "rotation score") || strings.Contains(item, "asset flow entry") || strings.Contains(item, "discount") || strings.Contains(item, "reward/risk") {
-			return item
-		}
-	}
 	return firstReason(items)
 }
 
@@ -405,7 +448,14 @@ func discountZonePremiumPct(cfg config.Config) float64 {
 	if cfg.Risk.DiscountZonePremiumPct > 0 {
 		return cfg.Risk.DiscountZonePremiumPct
 	}
-	return 0.05
+	return 0.10
+}
+
+func minScoutRewardRisk(cfg config.Config) float64 {
+	if cfg.Risk.MinScoutRewardRisk > 0 {
+		return cfg.Risk.MinScoutRewardRisk
+	}
+	return 1.5
 }
 
 func min(a, b int) int {

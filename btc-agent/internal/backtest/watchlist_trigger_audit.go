@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"math"
 	"sort"
-	"strings"
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
@@ -185,29 +184,59 @@ func normalizeWatchlistTriggerAuditConfig(cfg config.Config, auditCfg WatchlistT
 }
 
 func watchlistTrigger(c agent2.WatchCandidate) string {
-	joined := strings.ToLower(strings.Join(c.Missing, " ") + " " + c.BlockReason)
-	switch {
-	case strings.Contains(joined, "falling knife"):
-		return TriggerFallingKnife
-	case strings.Contains(joined, "fomo"):
-		return TriggerFOMORisk
-	case strings.Contains(joined, "relative"):
-		return TriggerRelativeWeak
-	case strings.Contains(joined, "btc permission") || strings.Contains(joined, "btc risk"):
-		return TriggerBTCNotAllowed
-	case strings.Contains(joined, "rotation"):
-		return TriggerRotationNotReady
-	case strings.Contains(joined, "flow") || strings.Contains(joined, "reclaim") || strings.Contains(joined, "absorption"):
-		return TriggerFlowNotConfirmed
-	case strings.Contains(joined, "discount"):
-		return TriggerDiscountNotReady
-	case strings.Contains(joined, "reward/risk"):
-		return TriggerRRNotReady
-	case c.State == agent2.StateActiveLimit:
-		return TriggerActiveLimit
-	default:
-		return TriggerReadyButNoPlan
+	for _, reason := range c.Reasons {
+		switch reason.Code {
+		case agent2.ReasonFallingKnife:
+			return TriggerFallingKnife
+		case agent2.ReasonFOMO:
+			return TriggerFOMORisk
+		case agent2.ReasonRelativeStrength:
+			return TriggerRelativeWeak
+		case agent2.ReasonBTCPermission, agent2.ReasonBTCPanic, agent2.ReasonBTCDowntrend:
+			return TriggerBTCNotAllowed
+		case agent2.ReasonRotationScore, agent2.ReasonRotationRank:
+			return TriggerRotationNotReady
+		case agent2.ReasonAssetFlowEntry, agent2.ReasonMMAccumulation:
+			return TriggerFlowNotConfirmed
+		case agent2.ReasonDiscountZone:
+			return TriggerDiscountNotReady
+		case agent2.ReasonRewardRisk, agent2.ReasonExecutionLayer:
+			return TriggerRRNotReady
+		}
 	}
+	for _, item := range c.EntryChecklist {
+		if item.Pass {
+			continue
+		}
+		switch item.Name {
+		case agent2.EntryCheckFallingKnife:
+			return TriggerFallingKnife
+		case agent2.EntryCheckFOMO:
+			return TriggerFOMORisk
+		case agent2.EntryCheckRelativeStrength:
+			return TriggerRelativeWeak
+		case agent2.EntryCheckBTCPermission:
+			return TriggerBTCNotAllowed
+		case agent2.EntryCheckRotationScore, agent2.EntryCheckRotationRank:
+			return TriggerRotationNotReady
+		case agent2.EntryCheckAssetFlowEntry, agent2.EntryCheckMMAccumulation:
+			return TriggerFlowNotConfirmed
+		case agent2.EntryCheckDiscountZone:
+			return TriggerDiscountNotReady
+		case agent2.EntryCheckRewardRisk:
+			return TriggerRRNotReady
+		}
+	}
+	if c.State == agent2.StateScout {
+		return "SCOUT"
+	}
+	if c.State == agent2.StateArmed {
+		return "ARMED"
+	}
+	if c.State == agent2.StateActiveLimit {
+		return TriggerActiveLimit
+	}
+	return TriggerReadyButNoPlan
 }
 
 func newWatchAuditAcc(horizons []int) *watchAuditAcc {

@@ -437,6 +437,16 @@ func TestValidateDecisionThresholdBounds(t *testing.T) {
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected readiness probe threshold validation error")
 	}
+	cfg = validTestConfig()
+	cfg.Risk.FlowBearHardBlockScore = 1.1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected flow bear hard-block threshold validation error")
+	}
+	cfg = validTestConfig()
+	cfg.Risk.MinScoutRewardRisk = 4
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected scout RR above full RR validation error")
+	}
 }
 
 func validTestConfig() Config {

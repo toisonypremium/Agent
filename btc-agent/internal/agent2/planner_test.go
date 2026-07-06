@@ -110,7 +110,7 @@ func TestBuildPlanCreatesThreeLayersWhenAllowed(t *testing.T) {
 	}
 }
 
-func TestBuildPlanWithBenchmarksBlocksWeakRelativeStrength(t *testing.T) {
+func TestBuildPlanWithBenchmarksSoftWaitsWeakRelativeStrength(t *testing.T) {
 	cfg := testConfig()
 	asset := assetCandles(80, true)
 	btc := assetCandles(80, false)
@@ -131,8 +131,8 @@ func TestBuildPlanWithBenchmarksBlocksWeakRelativeStrength(t *testing.T) {
 		btc[i].Low = btc[i].Close * 0.99
 	}
 	got := BuildPlanWithBenchmarks(cfg, allowedAnalysis(), map[string][]market.Candle{"ETHUSDT": asset, "SOLUSDT": nil, "RENDERUSDT": nil}, map[string][]market.Candle{"BTCUSDT": btc})
-	if len(got.Assets) == 0 || got.Assets[0].State != StateNoTrade || !strings.Contains(got.Assets[0].Reason, "relative strength filter") {
-		t.Fatalf("expected relative strength block: %+v", got)
+	if len(got.Assets) == 0 || got.Assets[0].State == StateNoTrade || !strings.Contains(got.Assets[0].Reason, "relative strength filter") {
+		t.Fatalf("expected relative strength soft wait, not hard block: %+v", got)
 	}
 }
 
@@ -201,8 +201,8 @@ func TestBuildPlanWithBenchmarksBlocksNeutralAssetFlowEntry(t *testing.T) {
 	asset := assetCandles(80, true)
 	btc := assetCandles(80, false)
 	got := BuildPlanWithBenchmarks(cfg, allowedAnalysis(), map[string][]market.Candle{"ETHUSDT": asset, "SOLUSDT": nil, "RENDERUSDT": nil}, map[string][]market.Candle{"BTCUSDT": btc})
-	if len(got.Assets) == 0 || got.Assets[0].State != StateWatch || !strings.Contains(got.Assets[0].Reason, "asset flow entry") {
-		t.Fatalf("expected neutral flow entry watch: %+v", got)
+	if len(got.Assets) == 0 || got.Assets[0].State != StateWatch || !hasReason(got.Assets[0].Reasons, ReasonAssetFlowEntry, ReasonSoftWait) {
+		t.Fatalf("expected neutral flow entry soft-wait watch: %+v", got)
 	}
 }
 
@@ -221,7 +221,7 @@ func TestBuildPlanWithBenchmarksAllowsBullishAssetFlowEntry(t *testing.T) {
 	}
 }
 
-func TestBuildPlanWatchPermissionNeverCreatesProbe(t *testing.T) {
+func TestBuildPlanWatchPermissionCreatesScoutNoOrders(t *testing.T) {
 	cfg := testConfig()
 	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
 	cfg.Risk.DisableRelativeStrengthFilter = true
@@ -233,9 +233,59 @@ func TestBuildPlanWatchPermissionNeverCreatesProbe(t *testing.T) {
 	if got.State == StateArmed || got.State == StateActiveLimit {
 		t.Fatalf("WATCH must not create ARMED/ACTIVE plan: %+v", got)
 	}
-	if len(got.Assets) != 1 || got.Assets[0].State != StateWatch || len(got.Assets[0].HardBlockers) == 0 {
-		t.Fatalf("expected WATCH hard blocker asset: %+v", got)
+	if len(got.Assets) != 1 || got.Assets[0].State != StateScout || len(got.Assets[0].SoftBlockers) == 0 || len(got.Assets[0].HardBlockers) != 0 {
+		t.Fatalf("expected WATCH soft-gated scout asset: %+v", got)
 	}
+	if !hasReason(got.Assets[0].Reasons, ReasonBTCPermission, ReasonSoftWait) {
+		t.Fatalf("expected typed BTC permission soft wait: %+v", got.Assets[0].Reasons)
+	}
+	if orders := OrdersFromPlan(got, 48); len(orders) != 0 {
+		t.Fatalf("SCOUT must not create orders: %+v", orders)
+	}
+}
+
+func TestBuildPlanDowntrendNoPanicAllowsScout(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	cfg.Risk.DisableRelativeStrengthFilter = true
+	cfg.Risk.DisableRotationScoreFilter = true
+	cfg.Risk.DisableAssetFlowEntryFilter = true
+	analysis := allowedAnalysis()
+	analysis.MarketRegime = "DOWNTREND"
+	analysis.ActionPermission = agent1.Watch
+	analysis.FallingKnifeRisk = agent1.Low
+	analysis.FomoRisk = agent1.Low
+	got := BuildPlanWithBenchmarks(cfg, analysis, map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)}, nil)
+	if got.State != StateScout || len(got.Assets) != 1 || got.Assets[0].State != StateScout {
+		t.Fatalf("DOWNTREND without panic should allow scout: %+v", got)
+	}
+	if !hasReason(got.Assets[0].Reasons, ReasonBTCDowntrend, ReasonSoftWait) {
+		t.Fatalf("expected BTC downtrend soft wait: %+v", got.Assets[0].Reasons)
+	}
+	if orders := OrdersFromPlan(got, 48); len(orders) != 0 {
+		t.Fatalf("DOWNTREND scout must not create orders: %+v", orders)
+	}
+}
+
+func TestPaperOrdersFromPlanSkipsScoutAndArmed(t *testing.T) {
+	p := Plan{Assets: []AssetPlan{
+		{Symbol: "ETHUSDT", State: StateScout, Invalidation: 90, Layers: []Layer{{Index: 1, Price: 100, Quantity: 1, Notional: 100}}},
+		{Symbol: "RENDERUSDT", State: StateArmed, Invalidation: 90, Layers: []Layer{{Index: 1, Price: 100, Quantity: 1, Notional: 100}}},
+		{Symbol: "SOLUSDT", State: StateActiveLimit, Invalidation: 90, Layers: []Layer{{Index: 1, Price: 100, Quantity: 1, Notional: 100}}},
+	}}
+	orders := OrdersFromPlan(p, 48)
+	if len(orders) != 1 || orders[0].Symbol != "SOLUSDT" {
+		t.Fatalf("only ACTIVE_LIMIT should create orders: %+v", orders)
+	}
+}
+
+func hasReason(reasons []DecisionReason, code ReasonCode, severity ReasonSeverity) bool {
+	for _, reason := range reasons {
+		if reason.Code == code && reason.Severity == severity {
+			return true
+		}
+	}
+	return false
 }
 
 func TestBuildPlanLayersIncludeAuditFields(t *testing.T) {
@@ -264,14 +314,42 @@ func TestPaperOrdersFromPlanOnlyActiveLimit(t *testing.T) {
 	}
 }
 
-func TestFallingKnifeFilterBlocksLowerLows(t *testing.T) {
+func TestFallingKnifeClassifierSoftLowerLows(t *testing.T) {
 	candles := assetCandles(10, false)
 	for i := 6; i < 10; i++ {
 		candles[i].Low = candles[i-1].Low - 5
 		candles[i].Close = candles[i].Low + 1
 	}
+	got := ClassifyAssetRisk(candles, 0, 0, market.Zone{})
+	if got.FallingKnife != ReasonSoftWait {
+		t.Fatalf("expected soft falling knife wait: %+v", got)
+	}
+	if FallingKnife(candles) {
+		t.Fatal("mild lower lows should not hard block")
+	}
+}
+
+func TestFallingKnifeClassifierHardBreakdownVolume(t *testing.T) {
+	candles := assetCandles(10, false)
+	last := len(candles) - 1
+	candles[last].Close = candles[last-1].Low - 5
+	candles[last].Low = candles[last].Close - 2
+	candles[last].High = candles[last].Close + 1
+	candles[last].Volume = candles[last-1].Volume * 2
 	if !FallingKnife(candles) {
-		t.Fatal("expected falling knife")
+		t.Fatal("expected confirmed falling knife hard block")
+	}
+}
+
+func TestFOMOClassifierSoftGreenCandles(t *testing.T) {
+	candles := assetCandles(10, false)
+	for i := 6; i < 10; i++ {
+		candles[i].Open = 100
+		candles[i].Close = 101
+	}
+	got := ClassifyAssetRisk(candles, 100, 50, market.Zone{})
+	if got.FOMO != ReasonSoftWait {
+		t.Fatalf("expected soft FOMO wait: %+v", got)
 	}
 }
 
@@ -281,7 +359,7 @@ func TestFOMOFilterBlocksHotExtension(t *testing.T) {
 		candles[i].Open = float64(i) * 10
 		candles[i].Close = candles[i].Open + 20
 	}
-	if !FOMO(candles, 100, 50, market.Zone{}) {
+	if !FOMO(candles, 100, 75, market.Zone{Low: 100, High: 120}) {
 		t.Fatal("expected FOMO block")
 	}
 }
@@ -314,8 +392,11 @@ func TestBuildPlanDoesNotProbeWhenBTCHardRisk(t *testing.T) {
 	analysis.ActionPermission = agent1.Armed
 	analysis.MarketRegime = "PANIC_SELLING"
 	got := BuildPlanWithBenchmarks(cfg, analysis, map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)}, nil)
-	if got.State == StateArmed || len(got.Assets) != 0 {
+	if got.State == StateArmed || got.State == StateActiveLimit || len(got.Assets) != 1 || got.Assets[0].State != StateNoTrade {
 		t.Fatalf("hard BTC risk must not create probe: %+v", got)
+	}
+	if orders := OrdersFromPlan(got, 48); len(orders) != 0 {
+		t.Fatalf("hard BTC risk must not create orders: %+v", orders)
 	}
 }
 

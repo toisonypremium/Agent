@@ -46,6 +46,11 @@ type Config struct {
 		DisableAssetFlowEntryFilter   bool    `yaml:"disable_asset_flow_entry_filter"`
 		MinAssetFlowBullScore         float64 `yaml:"min_asset_flow_bull_score"`
 		AllowNeutralReclaimEntry      bool    `yaml:"allow_neutral_reclaim_entry"`
+		StrictAssetFlowEntry          bool    `yaml:"strict_asset_flow_entry"`
+		FlowBearHardBlockScore        float64 `yaml:"flow_bear_hard_block_score"`
+		MinScoutRewardRisk            float64 `yaml:"min_scout_reward_risk"`
+		StrictRotationRank            bool    `yaml:"strict_rotation_rank"`
+		AllowScoutInDowntrend         bool    `yaml:"allow_scout_in_downtrend"`
 		DiscountZonePremiumPct        float64 `yaml:"discount_zone_premium_pct"`
 		NoFutures                     bool    `yaml:"no_futures"`
 		NoLeverage                    bool    `yaml:"no_leverage"`
@@ -365,6 +370,15 @@ func (c Config) Validate() error {
 	}
 	if c.Risk.MinWatchReadinessForProbe < 0 || c.Risk.MinWatchReadinessForProbe > 1 {
 		return errors.New("risk.min_watch_readiness_for_probe must be between 0 and 1")
+	}
+	if c.Risk.FlowBearHardBlockScore < 0 || c.Risk.FlowBearHardBlockScore > 1 {
+		return errors.New("risk.flow_bear_hard_block_score must be between 0 and 1")
+	}
+	if c.Risk.MinScoutRewardRisk < 0 {
+		return errors.New("risk.min_scout_reward_risk cannot be negative")
+	}
+	if c.Risk.MinScoutRewardRisk > 0 && c.Risk.MinScoutRewardRisk > c.Risk.MinRewardRisk {
+		return errors.New("risk.min_scout_reward_risk must be <= risk.min_reward_risk")
 	}
 	if c.Risk.DiscountZonePremiumPct < 0 {
 		return errors.New("risk.discount_zone_premium_pct cannot be negative")

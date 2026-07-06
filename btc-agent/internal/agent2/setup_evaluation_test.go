@@ -28,13 +28,30 @@ func TestSetupEvaluationAccumulatesSoftMisses(t *testing.T) {
 	}
 }
 
-func TestSetupEvaluationHardDangerBlocks(t *testing.T) {
+func TestSetupEvaluationSoftLowerLowsDoNotHardBlock(t *testing.T) {
 	cfg := testConfig()
 	candles := assetCandles(80, false)
 	for i := 76; i < 80; i++ {
 		candles[i].Low = candles[i-1].Low - 5
 		candles[i].Close = candles[i].Low + 1
 	}
+	ap := planAsset(cfg, "ETHUSDT", candles, nil, AssetRotationScore{}, false)
+	if ap.State == StateNoTrade || len(ap.HardBlockers) != 0 || len(ap.Layers) != 0 {
+		t.Fatalf("mild lower lows should soft wait without layers: %+v", ap)
+	}
+	if !setupGateFailed(ap.SetupGates, EntryCheckFallingKnife) {
+		t.Fatalf("expected falling knife soft gate fail: %+v", ap.SetupGates)
+	}
+}
+
+func TestSetupEvaluationHardDangerBlocks(t *testing.T) {
+	cfg := testConfig()
+	candles := assetCandles(80, false)
+	last := len(candles) - 1
+	candles[last].Close = candles[last-1].Low - 5
+	candles[last].Low = candles[last].Close - 2
+	candles[last].High = candles[last].Close + 1
+	candles[last].Volume = candles[last-1].Volume * 2
 	ap := planAsset(cfg, "ETHUSDT", candles, nil, AssetRotationScore{}, false)
 	if ap.State != StateNoTrade || len(ap.HardBlockers) == 0 || len(ap.Layers) != 0 {
 		t.Fatalf("hard danger should block without layers: %+v", ap)

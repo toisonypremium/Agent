@@ -16,12 +16,12 @@ func DailyReport(a MarketAnalysis, planSummary string) string {
 - 1D: %s
 - 4H: %s
 
-3. Vùng quan trọng
+3. Vùng BTC làm market gate, không phải target gom
 - Hỗ trợ gần: %.2f - %.2f
 - Hỗ trợ sâu: %.2f - %.2f
 - Kháng cự: %.2f - %.2f
-- Vùng gom active: %.2f - %.2f
-- Vùng gom macro/stress: %.2f - %.2f
+- Vùng xác nhận đáy/accumulation gate: %.2f - %.2f
+- Vùng macro/stress benchmark: %.2f - %.2f
 - Vùng invalidation: %.2f - %.2f
 
 4. Rủi ro

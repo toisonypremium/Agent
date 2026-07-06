@@ -310,15 +310,38 @@ func (c Config) Validate() error {
 	if strings.ToUpper(c.Portfolio.BaseCurrency) != "USDT" {
 		return errors.New("only USDT base currency supported")
 	}
+	if len(c.Data.Symbols.Assets) != 3 {
+		return errors.New("data.symbols.assets must contain exactly 3 accumulation assets")
+	}
+	assetSet := map[string]bool{}
+	btcSymbol := strings.ToUpper(strings.TrimSpace(c.Data.Symbols.BTC))
 	for _, s := range c.Data.Symbols.Assets {
+		sym := strings.ToUpper(strings.TrimSpace(s))
+		if sym == "" {
+			return errors.New("asset symbol cannot be empty")
+		}
+		if sym == btcSymbol {
+			return errors.New("BTC symbol must not be included in accumulation assets")
+		}
+		if assetSet[sym] {
+			return fmt.Errorf("duplicate asset symbol %s", s)
+		}
+		assetSet[sym] = true
 		if c.Portfolio.Allocation[s] <= 0 {
 			return fmt.Errorf("missing allocation for %s", s)
 		}
 	}
 	sum := 0.0
-	for _, v := range c.Portfolio.Allocation {
+	for sym, v := range c.Portfolio.Allocation {
 		if v < 0 {
 			return errors.New("allocation cannot be negative")
+		}
+		normalized := strings.ToUpper(strings.TrimSpace(sym))
+		if normalized == btcSymbol {
+			return errors.New("portfolio allocation must not include BTC; BTC is market gate only")
+		}
+		if !assetSet[normalized] {
+			return fmt.Errorf("allocation for %s is not in data.symbols.assets", sym)
 		}
 		sum += v
 	}

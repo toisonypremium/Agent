@@ -112,7 +112,7 @@ func RunLiveManagerHistorySimulationWithOptions(cfg config.Config, btc map[strin
 		ProductionArmedProbe:              opts.ProductionArmedProbe,
 		PerCoin:                           map[string]LiveManagerHistoryStats{},
 		Notes: []string{
-			"Historical live manager simulation uses 1D candles and BTC 1D as fallback for 4H/1W frames; this is a local lifecycle audit, not exact intraday execution.",
+			"Historical live manager simulation aligns BTC 1D/4H/1W frames by daily close time; missing 4H/1W frames fall back to 1D for compatibility.",
 			"New simulated orders become active from the next candle to avoid same-candle lookahead.",
 			"No OKX calls are made; no real order is placed or canceled.",
 		},
@@ -149,7 +149,7 @@ func RunLiveManagerHistorySimulationWithOptions(cfg config.Config, btc map[strin
 	for i := warmup; i <= lastIndex; i++ {
 		eventAt := historyEventTime(btc1d[i].CloseTime)
 		processHistoryExpiry(&result, &openOrders, cfg, opts, i, eventAt)
-		btcWindow := map[string][]market.Candle{"1d": btc1d[:i+1], "4h": btc1d[:i+1], "1w": btc1d[:i+1]}
+		btcWindow := btcHistoryTimeframeWindow(btc, i)
 		analysis, err := agent1.Analyze(cfg, btcWindow, neutralFG)
 		if err != nil {
 			continue

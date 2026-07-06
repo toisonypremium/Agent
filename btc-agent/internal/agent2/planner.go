@@ -3,6 +3,7 @@ package agent2
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"btc-agent/internal/agent1"
@@ -78,8 +79,9 @@ func BuildPlan(cfg config.Config, a agent1.MarketAnalysis, candles map[string][]
 
 func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles map[string][]market.Candle, benchmarks map[string][]market.Candle) Plan {
 	p := Plan{Timestamp: time.Now(), ActionPermission: a.ActionPermission, State: StateNoTrade}
+	assetSymbols := accumulationAssets(cfg)
 	benchmark := benchmarkCandles(cfg, benchmarks)
-	p.Rotation = RankAssets(cfg, candles, benchmark)
+	p.Rotation = RankAssets(cfg, targetAssetCandles(assetSymbols, candles), benchmark)
 	rotationBySymbol := map[string]AssetRotationScore{}
 	for _, r := range p.Rotation {
 		rotationBySymbol[r.Symbol] = r
@@ -94,7 +96,7 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 	if a.ActionPermission != agent1.Allowed {
 		if a.ActionPermission == agent1.Armed {
 			anyProbe := false
-			for _, sym := range cfg.Data.Symbols.Assets {
+			for _, sym := range assetSymbols {
 				ap := planProbeAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
 				p.Assets = append(p.Assets, ap)
 				if ap.State == StateArmed {
@@ -114,7 +116,7 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 		}
 		p.Summary = "BTC permission WATCH/NO_TRADE; không tạo probe."
 		p.State = StateWatch
-		for _, sym := range cfg.Data.Symbols.Assets {
+		for _, sym := range assetSymbols {
 			ap := AssetPlan{Symbol: sym, State: StateWatch, Reason: "BTC permission WATCH; không tạo probe", HardBlockers: []string{"BTC permission WATCH; không tạo probe"}, NextTrigger: "Chờ BTC chuyển ARMED hoặc ALLOWED trước khi tạo live order."}
 			if c := candles[sym]; len(c) >= 25 {
 				mm := AnalyzeMMAccumulation(sym, c)
@@ -140,7 +142,7 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 	}
 
 	anyActive := false
-	for _, sym := range cfg.Data.Symbols.Assets {
+	for _, sym := range assetSymbols {
 		ap := planAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
 		p.Assets = append(p.Assets, ap)
 		if ap.State == StateActiveLimit {
@@ -423,6 +425,29 @@ func benchmarkCandles(cfg config.Config, benchmarks map[string][]market.Candle) 
 	return benchmarks["BTCUSDT"]
 }
 
+func accumulationAssets(cfg config.Config) []string {
+	btc := strings.ToUpper(strings.TrimSpace(cfg.Data.Symbols.BTC))
+	seen := map[string]bool{}
+	out := []string{}
+	for _, sym := range cfg.Data.Symbols.Assets {
+		normalized := strings.ToUpper(strings.TrimSpace(sym))
+		if normalized == "" || normalized == btc || seen[normalized] {
+			continue
+		}
+		seen[normalized] = true
+		out = append(out, sym)
+	}
+	return out
+}
+
+func targetAssetCandles(symbols []string, candles map[string][]market.Candle) map[string][]market.Candle {
+	out := map[string][]market.Candle{}
+	for _, sym := range symbols {
+		out[sym] = candles[sym]
+	}
+	return out
+}
+
 func relativeStrengthParams(cfg config.Config) (bool, int, float64, float64) {
 	if cfg.Risk.DisableRelativeStrengthFilter {
 		return false, 0, 0, 0
@@ -487,7 +512,7 @@ func (p Plan) JSON() string {
 }
 
 func Summary(p Plan) string {
-	s := fmt.Sprintf("- Trạng thái: %s\n- Có đặt lệnh không? %v\n", p.State, p.State == StateActiveLimit)
+	s := fmt.Sprintf("- Trạng thái: %s\n- BTC là market gate/benchmark, không phải target gom.\n- Có đặt lệnh không? %v\n", p.State, p.State == StateActiveLimit)
 	if len(p.Rotation) > 0 {
 		s += "- Asset ranking:\n"
 		for _, r := range p.Rotation {

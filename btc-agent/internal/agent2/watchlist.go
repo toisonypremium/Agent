@@ -84,6 +84,7 @@ type WatchlistReport struct {
 }
 
 func BuildWatchlist(cfg config.Config, assets map[string][]market.Candle, benchmark []market.Candle, rotation []AssetRotationScore, plans []AssetPlan) WatchlistReport {
+	assetSymbols := accumulationAssets(cfg)
 	rotationBySymbol := map[string]AssetRotationScore{}
 	for _, r := range rotation {
 		rotationBySymbol[r.Symbol] = r
@@ -94,7 +95,7 @@ func BuildWatchlist(cfg config.Config, assets map[string][]market.Candle, benchm
 	}
 
 	out := WatchlistReport{}
-	for _, sym := range cfg.Data.Symbols.Assets {
+	for _, sym := range assetSymbols {
 		out.Candidates = append(out.Candidates, buildWatchCandidate(cfg, sym, assets[sym], benchmark, rotationBySymbol[sym], planBySymbol[sym]))
 	}
 	sortWatchCandidates(out.Candidates)

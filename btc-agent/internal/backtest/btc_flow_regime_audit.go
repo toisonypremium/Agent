@@ -70,7 +70,7 @@ func RunBTCFlowRegimeAudit(cfg config.Config, btc map[string][]market.Candle, au
 	neutralFG := exchange.FearGreed{Value: 50, Classification: "Neutral"}
 	windows := 0
 	for i := auditCfg.MinWindow1D; i+maxH < len(btc1d); i++ {
-		btcWindow := map[string][]market.Candle{"1d": btc1d[:i+1], "4h": btc1d[:i+1], "1w": btc1d[:i+1]}
+		btcWindow := btcTimeframeWindow(btc, i)
 		analysis, err := agent1.Analyze(cfg, btcWindow, neutralFG)
 		if err != nil {
 			continue

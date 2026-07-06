@@ -40,6 +40,33 @@ func assetCandles(n int, lastNearSupport bool) []market.Candle {
 	return out
 }
 
+func TestBuildPlanTargetsConfiguredThreeCoinsAndExcludesBTC(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.BTC = "BTCUSDT"
+	assets := map[string][]market.Candle{
+		"BTCUSDT":    assetCandles(80, true),
+		"ETHUSDT":    assetCandles(80, true),
+		"SOLUSDT":    assetCandles(80, true),
+		"RENDERUSDT": assetCandles(80, true),
+		"DOGEUSDT":   assetCandles(80, true),
+	}
+	got := BuildPlanWithBenchmarks(cfg, allowedAnalysis(), assets, map[string][]market.Candle{"BTCUSDT": assetCandles(80, false)})
+	if len(got.Assets) != 3 {
+		t.Fatalf("expected 3 configured asset plans, got %+v", got.Assets)
+	}
+	for _, asset := range got.Assets {
+		if asset.Symbol == "BTCUSDT" || asset.Symbol == "DOGEUSDT" {
+			t.Fatalf("unexpected non-target asset in plan: %+v", got.Assets)
+		}
+	}
+	if len(got.Watchlist.Candidates) != 3 {
+		t.Fatalf("expected 3 configured watch candidates, got %+v", got.Watchlist.Candidates)
+	}
+	if len(got.Rotation) != 3 {
+		t.Fatalf("expected 3 configured rotation rows, got %+v", got.Rotation)
+	}
+}
+
 func TestBuildPlanRequiresAgent1Allowed(t *testing.T) {
 	analysis := allowedAnalysis()
 	analysis.ActionPermission = agent1.Watch

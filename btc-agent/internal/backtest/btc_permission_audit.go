@@ -350,11 +350,13 @@ func btcPermissionBlockers(a agent1.MarketAnalysis) []string {
 	if a.Flow.Bias == flow.BiasBullTrap || a.Flow.Daily.FailedBreakout {
 		out = append(out, BlockerFlowBullTrap)
 	}
-	if a.Flow.Bias == flow.BiasNeutral {
-		out = append(out, BlockerFlowNeutral)
-	}
-	if a.Flow.Score < 0.25 {
-		out = append(out, BlockerFlowWeakScore)
+	if missingFlowConfirmationIsActionable(a) {
+		if a.Flow.Bias == flow.BiasNeutral {
+			out = append(out, BlockerFlowNeutral)
+		}
+		if a.Flow.Score < 0.25 {
+			out = append(out, BlockerFlowWeakScore)
+		}
 	}
 	if a.TrendScore < 45 {
 		out = append(out, BlockerTrendBelow45)
@@ -374,6 +376,25 @@ func btcPermissionBlockers(a agent1.MarketAnalysis) []string {
 		}
 	}
 	return uniqueBlockers(out)
+}
+
+func missingFlowConfirmationIsActionable(a agent1.MarketAnalysis) bool {
+	if a.ActionPermission != agent1.Watch && a.ActionPermission != agent1.Armed {
+		return false
+	}
+	if a.RiskLevel == agent1.High || a.FallingKnifeRisk == agent1.High || a.FomoRisk == agent1.High {
+		return false
+	}
+	if a.Flow.Bias == flow.BiasDistribution || a.Flow.Bias == flow.BiasBullTrap || a.Flow.Daily.Distribution || a.Flow.Daily.FailedBreakout {
+		return false
+	}
+	if !a.PrimarySupportZone.Valid() || !a.ResistanceZone.Valid() {
+		return false
+	}
+	if btcPermissionRRProxy(a) < 2 {
+		return false
+	}
+	return a.TrendScore >= 45
 }
 
 func uniqueBlockers(in []string) []string {

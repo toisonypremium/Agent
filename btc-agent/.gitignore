@@ -1,6 +1,11 @@
 config.yaml
 data/*.db
 data/*.db-*
+data/training/*.jsonl
+data/training/*.csv
+data/ai_eval/*.jsonl
+backups/*.db
+backups/*.db-*
 bin/
 *.log
 .env

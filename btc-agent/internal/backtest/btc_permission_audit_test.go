@@ -30,22 +30,74 @@ func TestRunBTCPermissionAuditProducesRows(t *testing.T) {
 	}
 }
 
-func TestBTCPermissionAuditCountsBlockers(t *testing.T) {
+func TestBTCPermissionAuditCountsHardBlockersWithoutNeutralNoise(t *testing.T) {
 	analysis := agent1.MarketAnalysis{
-		ActionPermission: agent1.Watch,
+		ActionPermission: agent1.NoTrade,
 		MarketRegime:     "DOWNTREND",
-		RiskLevel:        agent1.Medium,
-		FallingKnifeRisk: agent1.Medium,
+		RiskLevel:        agent1.High,
+		FallingKnifeRisk: agent1.High,
 		Flow: flow.MultiFrame{
 			Bias:  flow.BiasNeutral,
 			Score: 0.10,
 		},
 	}
 	blockers := btcPermissionBlockers(analysis)
-	for _, want := range []string{BlockerRegimeDowntrend, BlockerRiskMedium, BlockerFallingKnifeMedium, BlockerFlowNeutral, BlockerFlowWeakScore} {
+	for _, want := range []string{BlockerRegimeDowntrend, BlockerRiskHigh, BlockerFallingKnifeHigh, BlockerTrendBelow45} {
 		if !hasString(blockers, want) {
 			t.Fatalf("blockers=%v missing %s", blockers, want)
 		}
+	}
+	for _, notWant := range []string{BlockerFlowNeutral, BlockerFlowWeakScore} {
+		if hasString(blockers, notWant) {
+			t.Fatalf("blockers=%v should not include %s when hard blockers dominate", blockers, notWant)
+		}
+	}
+}
+
+func TestBTCPermissionAuditCountsNeutralWhenFlowIsActionableGap(t *testing.T) {
+	analysis := agent1.MarketAnalysis{
+		ActionPermission:   agent1.Armed,
+		MarketRegime:       "RANGE",
+		RiskLevel:          agent1.Medium,
+		FallingKnifeRisk:   agent1.Low,
+		FomoRisk:           agent1.Low,
+		TrendScore:         55,
+		PrimarySupportZone: market.Zone{Low: 90, High: 100},
+		ResistanceZone:     market.Zone{Low: 150, High: 160},
+		Flow: flow.MultiFrame{
+			Bias:  flow.BiasNeutral,
+			Score: 0.10,
+		},
+	}
+	blockers := btcPermissionBlockers(analysis)
+	for _, want := range []string{BlockerRiskMedium, BlockerFlowNeutral, BlockerFlowWeakScore, BlockerTrendBelow60} {
+		if !hasString(blockers, want) {
+			t.Fatalf("blockers=%v missing %s", blockers, want)
+		}
+	}
+}
+
+func TestBTCPermissionAuditKeepsBearishFlowBlockers(t *testing.T) {
+	analysis := agent1.MarketAnalysis{
+		ActionPermission:   agent1.Watch,
+		MarketRegime:       "RANGE",
+		RiskLevel:          agent1.Low,
+		FallingKnifeRisk:   agent1.Low,
+		FomoRisk:           agent1.Low,
+		TrendScore:         65,
+		PrimarySupportZone: market.Zone{Low: 90, High: 100},
+		ResistanceZone:     market.Zone{Low: 150, High: 160},
+		Flow: flow.MultiFrame{
+			Bias:  flow.BiasDistribution,
+			Score: 0.40,
+		},
+	}
+	blockers := btcPermissionBlockers(analysis)
+	if !hasString(blockers, BlockerFlowDistribution) {
+		t.Fatalf("blockers=%v missing bearish flow blocker", blockers)
+	}
+	if hasString(blockers, BlockerFlowNeutral) || hasString(blockers, BlockerFlowWeakScore) {
+		t.Fatalf("blockers=%v should not include neutral/weak flow for bearish flow", blockers)
 	}
 }
 

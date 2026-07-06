@@ -118,20 +118,6 @@ func AnalyzeMMAccumulation(symbol string, candles []market.Candle) MMAccumulatio
 		s.NextTrigger = "Chờ reclaim/retest giữ support và volume bán cạn."
 		return s
 	}
-	if s.SweepLow && s.ReclaimSupport && (s.Absorption || s.EffortVsResult || s.FailedBreakdown) {
-		if s.Score >= 75 && s.RetestHold {
-			s.Case = MMCaseArmedProbeCandidate
-			s.Pass = true
-			s.Reasons = append(s.Reasons, "MM case ARMED_PROBE_CANDIDATE: spring/reclaim + retest đủ mạnh")
-			s.NextTrigger = "MM footprint đã tốt; chờ BTC permission, discount, RR, rotation và liquidity cùng pass."
-			return s
-		}
-		s.Case = MMCaseSpringReclaim
-		s.Pass = true
-		s.Reasons = append(s.Reasons, "MM case SPRING_RECLAIM: sweep low, reclaim support, có hấp thụ")
-		s.NextTrigger = "Chờ các gate còn lại pass; không chase ngoài discount zone."
-		return s
-	}
 	if s.Score >= 60 && s.ReclaimSupport && (s.Absorption || s.EffortVsResult) {
 		s.Case = MMCaseSpringReclaim
 		s.Pass = true

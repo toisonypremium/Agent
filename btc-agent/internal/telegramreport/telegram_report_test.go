@@ -4,10 +4,26 @@ import (
 	"strings"
 	"testing"
 
+	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/research"
 )
+
+func TestDailyHumanTextIncludesMMLiquidityWatchlist(t *testing.T) {
+	plan := agent2.Plan{State: agent2.StateWatch, Watchlist: agent2.WatchlistReport{Candidates: []agent2.WatchCandidate{{
+		Symbol: "ETHUSDT", ReadinessScore: 0.49, MMCase: agent2.MMCaseNoEdge, MMScore: 11,
+		LiquidityQuality: liquidity.Quality{Grade: liquidity.GradeD, Score: 22, Reasons: []string{"liquidity thin"}},
+		DiscountGap:      0.12, RewardRisk: 2.2, Missing: []string{"MM case NO_EDGE chưa đủ footprint"}, NextTrigger: "Chờ reclaim.",
+	}}}}
+	got := DailyHumanText(agent1.MarketAnalysis{ActionPermission: agent1.Watch}, plan)
+	for _, want := range []string{"MM=NO_EDGE", "Liq=D", "gap 12.00%", "RR 2.20", "trigger: Chờ reclaim"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("missing %q in %s", want, got)
+		}
+	}
+}
 
 func TestLiveReadinessHumanTextExplainsNotReady(t *testing.T) {
 	text := LiveReadinessHumanText(LiveReadinessView{

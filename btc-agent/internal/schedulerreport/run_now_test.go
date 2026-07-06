@@ -7,6 +7,7 @@ import (
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
 )
@@ -32,7 +33,7 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 			InvalidationZone:   market.Zone{Low: 54000, High: 55000},
 			ScenarioMain:       "đi ngang chờ xác nhận",
 		},
-		Plan:            agent2.Plan{State: agent2.StateWatch},
+		Plan:            agent2.Plan{State: agent2.StateWatch, Watchlist: agent2.WatchlistReport{Candidates: []agent2.WatchCandidate{{Symbol: "ETHUSDT", State: agent2.StateWatch, ReadinessScore: 0.49, Tier: agent2.WatchTierEarly, MMCase: agent2.MMCaseNoEdge, MMScore: 10, MMMissing: []string{"chưa thấy sweep/reclaim/absorption đủ rõ"}, LiquidityQuality: liquidity.Quality{Enabled: true, Grade: liquidity.GradeD, Score: 22, Reasons: []string{"liquidity gate: order quá lớn"}}, DiscountGap: 0.12, RewardRisk: 2.2, NextTrigger: "Chờ sweep low + close reclaim support + retest giữ vùng."}}}},
 		ShadowProbe:     liveguard.ShadowProbeJournal{Profile: liveguard.ShadowProfileArmedProbeLight, ProductionPermission: agent1.Watch, ResearchPermission: agent1.Watch, Blockers: []string{"BTC research profile not ARMED"}},
 		ResearchSummary: "Tin nền trung lập",
 		DailyOK:         true,
@@ -45,7 +46,11 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 		"IV. KẾ HOẠCH BOT",
 		"V. TIN TỨC / RESEARCH",
 		"VI. TRẠNG THÁI THỰC THI",
-		"Chưa có coin ACTIVE_LIMIT. Bot không đặt lệnh.",
+		"Không có ACTIVE_LIMIT. Bot không đặt lệnh",
+		"Kịch bản mở khóa",
+		"MM=NO_EDGE",
+		"Liq=D",
+		"trigger:",
 		"Shadow ARMED_PROBE_LIGHT",
 		"Shadow only — không đặt lệnh thật",
 		"không futures, không leverage, không market order",
@@ -68,9 +73,33 @@ func TestCompactPlanLimitsWatchlist(t *testing.T) {
 	}
 }
 
+func TestCompactPlanIncludesMMLiquidityEvidence(t *testing.T) {
+	plan := agent2.Plan{
+		Assets: []agent2.AssetPlan{{
+			Symbol: "ETHUSDT", State: agent2.StateWatch, MMCase: agent2.MMCaseNoEdge, MMScore: 12,
+			MMMissing: []string{"missing mm"}, LiquidityQuality: liquidity.Quality{Grade: liquidity.GradeD, Score: 33, Reasons: []string{"thin liquidity"}},
+			HardBlockers: []string{"BTC permission WATCH"}, NextTrigger: "Chờ BTC.",
+		}},
+		Watchlist: agent2.WatchlistReport{Candidates: []agent2.WatchCandidate{{
+			Symbol: "ETHUSDT", MMCase: agent2.MMCaseNoEdge, MMScore: 12, MMMissing: []string{"missing mm"},
+			LiquidityQuality: liquidity.Quality{Grade: liquidity.GradeD, Score: 33, Reasons: []string{"thin liquidity"}},
+			EntryChecklist:   []agent2.EntryChecklistItem{{Name: agent2.EntryCheckMMAccumulation, Pass: false}},
+		}}},
+	}
+	got := CompactPlan(plan)
+	assets := got["assets"].([]map[string]any)
+	watch := got["watchlist"].([]map[string]any)
+	if assets[0]["mm_case"] != agent2.MMCaseNoEdge || assets[0]["liquidity_grade"] != liquidity.GradeD {
+		t.Fatalf("asset compact missing MM/liquidity: %+v", assets[0])
+	}
+	if watch[0]["mm_score"] != float64(12) || watch[0]["liquidity_reasons"] == nil || watch[0]["entry_checklist"] == nil {
+		t.Fatalf("watch compact missing evidence: %+v", watch[0])
+	}
+}
+
 func TestBuildDeterministicIncludesUnlockConditions(t *testing.T) {
 	text := BuildDeterministic(RunNowSnapshot{Analysis: agent1.MarketAnalysis{TrendScore: 19.8, MarketRegime: "DOWNTREND", ActionPermission: agent1.Watch}, Plan: agent2.Plan{State: agent2.StateWatch}, DailyOK: true, ReconcileOK: true})
-	for _, want := range []string{"Điều kiện mở khóa", "Trend score cần", "WATCH không tạo probe", "không futures, không leverage, không market order"} {
+	for _, want := range []string{"Điều kiện mở khóa", "Trend score cần", "WATCH không tạo probe", "Kịch bản chính", "Kịch bản vô hiệu", "không futures, không leverage, không market order"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
 		}

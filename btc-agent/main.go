@@ -2082,9 +2082,20 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
+func saveTelegramCopy(label, text string) error {
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		return err
+	}
+	safeLabel := strings.NewReplacer("/", "_", "\\", "_", "..", "_").Replace(label)
+	return os.WriteFile(filepath.Join("reports", "telegram_"+safeLabel+"_latest.md"), []byte(text), 0600)
+}
+
 func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 	token := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
+	if err := saveTelegramCopy(label, text); err != nil {
+		log.Printf("telegram copy warning [%s]: %v", label, err)
+	}
 
 	// Delete previous message for this label to avoid accumulation of old messages.
 	telegramMsgMu.Lock()

@@ -420,6 +420,7 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 		result.DataSanity = liveguard.CheckDataSanity(cfg, btc, assets, analysis, time.Now())
 	}
 	result.ZoneEntrySanity = backtest.RunZoneEntrySanity(cfg, assets)
+	result.MMAccumulationAudit = backtest.RunMMAccumulationAudit(cfg, assets)
 	sim, err := backtest.RunAgent2Simulation(cfg, btc, assets)
 	if err != nil {
 		result.Agent2Simulation = backtest.Agent2Simulation{Enabled: false, Assets: map[string]backtest.AssetSimStats{}, Summary: err.Error()}

@@ -500,6 +500,11 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 			continue
 		}
 		allocation := allocationBySymbol[symbol]
+		if cfg.Live.LiquidityGateEnabled && asset.LiquidityQuality.Enabled && !asset.LiquidityQuality.Pass {
+			reason := "liquidity gate blocked: " + firstManagedString(asset.LiquidityQuality.Reasons)
+			blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: reason})
+			continue
+		}
 		if allocation.Tier == OpportunityBlock || allocation.MaxLayers <= 0 || allocation.BudgetUSDT <= 0 {
 			reason := "live allocation blocked: " + allocation.Reason
 			if strings.EqualFold(allocation.QualityGrade, "D") {
@@ -723,6 +728,13 @@ func normalizedMaxLiveNotionalTotal(cfg config.Config) float64 {
 		return cfg.Live.MaxLiveNotionalTotalUSDT
 	}
 	return normalizedMaxLiveNotionalPerAsset(cfg) * float64(len(cfg.Data.Symbols.Assets))
+}
+
+func firstManagedString(items []string) string {
+	if len(items) == 0 {
+		return "liquidity quality chưa đạt"
+	}
+	return items[0]
 }
 
 func firstNonEmptyString(values ...string) string {

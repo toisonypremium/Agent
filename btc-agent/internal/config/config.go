@@ -134,6 +134,12 @@ type Config struct {
 		AutoHaltAfterErrors               int     `yaml:"auto_halt_after_errors"`
 		NotifyOnNoAction                  bool    `yaml:"notify_on_no_action"`
 		ProofOnly                         bool    `yaml:"proof_only"`
+		LiquidityGateEnabled              bool    `yaml:"liquidity_gate_enabled"`
+		RequireOrderBookLiquidity         bool    `yaml:"require_orderbook_liquidity"`
+		MaxSpreadBps                      float64 `yaml:"max_spread_bps"`
+		MaxSlippageBps                    float64 `yaml:"max_slippage_bps"`
+		MinBidDepthToOrderRatio           float64 `yaml:"min_bid_depth_to_order_ratio"`
+		MaxOrderToAvg5mQuoteVolumePct     float64 `yaml:"max_order_to_avg_5m_quote_volume_pct"`
 	} `yaml:"live"`
 	Execution struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
@@ -271,6 +277,9 @@ func (c Config) Validate() error {
 	}
 	if c.Live.HeartbeatIntervalMinutes < 0 {
 		return errors.New("live.heartbeat_interval_minutes cannot be negative")
+	}
+	if c.Live.MaxSpreadBps < 0 || c.Live.MaxSlippageBps < 0 || c.Live.MinBidDepthToOrderRatio < 0 || c.Live.MaxOrderToAvg5mQuoteVolumePct < 0 {
+		return errors.New("live liquidity gate values cannot be negative")
 	}
 	if c.Live.AutoHaltAfterErrors < 0 {
 		return errors.New("live.auto_halt_after_errors cannot be negative")

@@ -194,6 +194,41 @@ func TestBuildPlanWithBenchmarksAllowsBullishAssetFlowEntry(t *testing.T) {
 	}
 }
 
+func TestBuildPlanWatchPermissionNeverCreatesProbe(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	cfg.Risk.DisableRelativeStrengthFilter = true
+	cfg.Risk.DisableRotationScoreFilter = true
+	cfg.Risk.DisableAssetFlowEntryFilter = true
+	analysis := allowedAnalysis()
+	analysis.ActionPermission = agent1.Watch
+	got := BuildPlanWithBenchmarks(cfg, analysis, map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)}, nil)
+	if got.State == StateArmed || got.State == StateActiveLimit {
+		t.Fatalf("WATCH must not create ARMED/ACTIVE plan: %+v", got)
+	}
+	if len(got.Assets) != 1 || got.Assets[0].State != StateWatch || len(got.Assets[0].HardBlockers) == 0 {
+		t.Fatalf("expected WATCH hard blocker asset: %+v", got)
+	}
+}
+
+func TestBuildPlanLayersIncludeAuditFields(t *testing.T) {
+	cfg := testConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	cfg.Risk.DisableRelativeStrengthFilter = true
+	cfg.Risk.DisableRotationScoreFilter = true
+	cfg.Risk.DisableAssetFlowEntryFilter = true
+	cfg.Risk.MinRewardRisk = 0.1
+	got := BuildPlanWithBenchmarks(cfg, allowedAnalysis(), map[string][]market.Candle{"ETHUSDT": assetCandles(80, true)}, nil)
+	if len(got.Assets) != 1 || len(got.Assets[0].Layers) == 0 {
+		t.Fatalf("expected layers: %+v", got)
+	}
+	for _, layer := range got.Assets[0].Layers {
+		if layer.Price <= 0 || layer.Notional <= 0 || layer.Quantity <= 0 || layer.Invalidation <= 0 || layer.Target <= 0 || layer.RewardRisk <= 0 || layer.Reason == "" || layer.ExpiresAt.IsZero() {
+			t.Fatalf("layer missing audit fields: %+v", layer)
+		}
+	}
+}
+
 func TestPaperOrdersFromPlanOnlyActiveLimit(t *testing.T) {
 	p := Plan{Assets: []AssetPlan{{Symbol: "ETHUSDT", State: StateWatch}, {Symbol: "SOLUSDT", State: StateActiveLimit, Invalidation: 90, Layers: []Layer{{Index: 1, Price: 100, Quantity: 1, Notional: 100}}}}}
 	orders := OrdersFromPlan(p, 48)

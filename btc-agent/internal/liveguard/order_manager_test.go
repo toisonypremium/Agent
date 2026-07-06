@@ -264,6 +264,68 @@ func TestBuildManagedDesiredOrdersAllowsArmedProbeAsset(t *testing.T) {
 	}
 }
 
+func TestBuildManagedDesiredOrdersBlocksWatchPermission(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	plan.ActionPermission = agent1.Watch
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(desired) != 0 {
+		t.Fatalf("WATCH permission must not create desired orders: %+v", desired)
+	}
+	if len(blocked) == 0 {
+		t.Fatalf("expected BTC budget block")
+	}
+}
+
+func TestAllocateLiveCapitalSubtractsPositionsAndOpenOrders(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.MaxLiveNotionalPerAssetUSDT = 6
+	plan := managedPlan()
+	positions := []live.LivePosition{{Symbol: "ETHUSDT", CostBasis: 4}}
+	open := []live.OrderStatus{{Symbol: "ETHUSDT", Notional: 2}}
+	alloc := AllocateLiveCapital(cfg, plan, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}}, positions, open)
+	if alloc["ETHUSDT"].Tier != OpportunityBlock || alloc["ETHUSDT"].BudgetUSDT != 0 {
+		t.Fatalf("ETH budget should be exhausted by position+open: %+v", alloc["ETHUSDT"])
+	}
+}
+
+func TestBuildManagedDesiredOrderCarriesLayerAuditFields(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	plan.Assets[0].Layers[0].Invalidation = 88
+	plan.Assets[0].Layers[0].Target = 130
+	plan.Assets[0].Layers[0].RewardRisk = 3.5
+	plan.Assets[0].Layers[0].Reason = "support retest RR 3.5"
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(blocked) != 0 || len(desired) == 0 {
+		t.Fatalf("bad desired=%+v blocked=%+v", desired, blocked)
+	}
+	found := false
+	for _, d := range desired {
+		if d.Symbol == "ETHUSDT" && d.LayerIndex == 1 {
+			found = true
+			if d.TargetPrice != 130 || d.RewardRisk != 3.5 || d.LayerReason == "" {
+				t.Fatalf("missing layer audit fields: %+v", d)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing ETH layer 1: %+v", desired)
+	}
+}
+
+func TestManagedCoinSummaryIncludesHardSoftBlockers(t *testing.T) {
+	cfg := managedConfig()
+	plan := agent2.Plan{State: agent2.StateWatch, ActionPermission: agent1.Watch, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateWatch, Reason: "BTC permission WATCH; không tạo probe", HardBlockers: []string{"BTC permission WATCH; không tạo probe"}, SoftBlockers: []string{"asset flow chưa reclaim/absorption"}, NextTrigger: "Chờ BTC chuyển ARMED."}}}
+	got := ManageLiveOrdersDryRun(context.Background(), cfg, plan, nil, nil, nil, nil, nil, fakeHaltReader{halted: false}, true)
+	eth := managedCoinForTest(t, got.PerCoin, "ETHUSDT")
+	if !containsManagedString(eth.HardBlockers, "BTC permission WATCH; không tạo probe") || !containsManagedString(eth.SoftBlockers, "asset flow chưa reclaim/absorption") || len(eth.WhyNoOrder) == 0 || eth.NextTrigger == "" {
+		t.Fatalf("missing blockers in summary: %+v", eth)
+	}
+}
+
 func writeHistoryQualityReportForTest(t *testing.T, scores map[string]historyQualityScore) {
 	t.Helper()
 	perCoin := map[string]map[string]any{}
@@ -292,4 +354,13 @@ func managedCoinForTest(t *testing.T, coins []ManagedCoinSummary, symbol string)
 	}
 	t.Fatalf("missing coin summary %s in %+v", symbol, coins)
 	return ManagedCoinSummary{}
+}
+
+func containsManagedString(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }

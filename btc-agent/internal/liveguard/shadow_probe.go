@@ -1,0 +1,166 @@
+package liveguard
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"btc-agent/internal/agent1"
+	"btc-agent/internal/agent2"
+	"btc-agent/internal/config"
+	"btc-agent/internal/market"
+	"btc-agent/internal/researchprofile"
+)
+
+const ShadowProfileArmedProbeLight = "ARMED_PROBE_LIGHT"
+
+type ShadowProbeJournal struct {
+	GeneratedAt          time.Time              `json:"generated_at"`
+	Profile              string                 `json:"profile"`
+	ProductionPermission agent1.Permission      `json:"production_permission"`
+	ProductionPlanState  agent2.State           `json:"production_plan_state"`
+	ResearchPermission   agent1.Permission      `json:"research_permission"`
+	ResearchPlanState    agent2.State           `json:"research_plan_state"`
+	DataSanityStatus     string                 `json:"data_sanity_status,omitempty"`
+	WouldProbe           bool                   `json:"would_probe"`
+	Candidates           []ShadowProbeCandidate `json:"candidates,omitempty"`
+	Blockers             []string               `json:"blockers,omitempty"`
+	Summary              string                 `json:"summary"`
+	Note                 string                 `json:"note"`
+}
+
+type ShadowProbeCandidate struct {
+	Symbol       string       `json:"symbol"`
+	Layer        int          `json:"layer"`
+	Entry        float64      `json:"entry"`
+	Invalidation float64      `json:"invalidation"`
+	Target       float64      `json:"target"`
+	RewardRisk   float64      `json:"reward_risk"`
+	Notional     float64      `json:"notional"`
+	Quantity     float64      `json:"quantity"`
+	State        agent2.State `json:"state"`
+	Reason       string       `json:"reason"`
+	NextTrigger  string       `json:"next_trigger,omitempty"`
+	WouldPlace   bool         `json:"would_place"`
+}
+
+func BuildShadowProbeJournal(cfg config.Config, production agent1.MarketAnalysis, productionPlan agent2.Plan, assets map[string][]market.Candle, benchmarks map[string][]market.Candle, dataSanity DataSanityResult, now time.Time) ShadowProbeJournal {
+	if now.IsZero() {
+		now = time.Now()
+	}
+	j := ShadowProbeJournal{GeneratedAt: now, Profile: ShadowProfileArmedProbeLight, ProductionPermission: production.ActionPermission, ProductionPlanState: productionPlan.State, DataSanityStatus: dataSanity.Status, Note: "Shadow only — không đặt lệnh thật."}
+	profile, ok := researchprofile.ProfileByName(ShadowProfileArmedProbeLight)
+	if !ok {
+		j.Blockers = []string{"research profile ARMED_PROBE_LIGHT unavailable"}
+		j.refreshSummary()
+		return j
+	}
+	j.ResearchPermission = researchprofile.EvaluatePermission(production, profile)
+	if j.ResearchPermission != agent1.Armed && j.ResearchPermission != agent1.Allowed {
+		j.Blockers = append(j.Blockers, fmt.Sprintf("BTC research profile not ARMED: %s", j.ResearchPermission))
+		j.Blockers = append(j.Blockers, production.PermissionReason)
+		for _, c := range productionPlan.Watchlist.Candidates {
+			j.Blockers = append(j.Blockers, shadowCandidateBlockers(c)...)
+		}
+		j.refreshSummary()
+		return j
+	}
+	shadowAnalysis := production
+	shadowAnalysis.ActionPermission = agent1.Armed
+	shadowAnalysis.PermissionReason = "shadow ARMED_PROBE_LIGHT research-only; production permission unchanged"
+	shadowPlan := agent2.BuildPlanWithBenchmarks(cfg, shadowAnalysis, assets, benchmarks)
+	j.ResearchPlanState = shadowPlan.State
+	for _, asset := range shadowPlan.Assets {
+		if asset.State != agent2.StateArmed || len(asset.Layers) == 0 {
+			if asset.Reason != "" {
+				j.Blockers = append(j.Blockers, fmt.Sprintf("%s: %s", asset.Symbol, asset.Reason))
+			}
+			continue
+		}
+		layer := asset.Layers[0]
+		j.Candidates = append(j.Candidates, ShadowProbeCandidate{Symbol: asset.Symbol, Layer: layer.Index, Entry: layer.Price, Invalidation: firstShadowFloat(layer.Invalidation, asset.Invalidation), Target: layer.Target, RewardRisk: firstShadowFloat(layer.RewardRisk, asset.RewardRisk), Notional: layer.Notional, Quantity: layer.Quantity, State: asset.State, Reason: asset.Reason, NextTrigger: asset.NextTrigger, WouldPlace: true})
+	}
+	if len(j.Candidates) == 0 {
+		for _, c := range shadowPlan.Watchlist.Candidates {
+			j.Blockers = append(j.Blockers, shadowCandidateBlockers(c)...)
+		}
+	}
+	j.refreshSummary()
+	return j
+}
+
+func SaveShadowProbeJournal(dir string, j ShadowProbeJournal) error {
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(j, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "shadow_probe_latest.json"), b, 0600); err != nil {
+		return err
+	}
+	line, err := json.Marshal(j)
+	if err != nil {
+		return err
+	}
+	f, err := os.OpenFile(filepath.Join(dir, "shadow_probe_journal.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.Write(append(line, '\n'))
+	return err
+}
+
+func LoadShadowProbeLatest(path string) (ShadowProbeJournal, bool) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return ShadowProbeJournal{}, false
+	}
+	var j ShadowProbeJournal
+	if err := json.Unmarshal(b, &j); err != nil {
+		return ShadowProbeJournal{}, false
+	}
+	return j, true
+}
+
+func (j *ShadowProbeJournal) refreshSummary() {
+	j.Blockers = uniqueHealthStrings(j.Blockers)
+	j.WouldProbe = len(j.Candidates) > 0
+	if j.WouldProbe {
+		j.Summary = fmt.Sprintf("SHADOW_%s: would_probe=%d production=%s research=%s; no real order", j.Profile, len(j.Candidates), j.ProductionPermission, j.ResearchPermission)
+		return
+	}
+	j.Summary = fmt.Sprintf("SHADOW_%s: would_probe=0 production=%s research=%s blockers=%d; no real order", j.Profile, j.ProductionPermission, j.ResearchPermission, len(j.Blockers))
+}
+
+func shadowCandidateBlockers(c agent2.WatchCandidate) []string {
+	out := []string{}
+	for _, item := range c.EntryChecklist {
+		if !item.Pass && item.Reason != "" {
+			out = append(out, fmt.Sprintf("%s %s: %s", c.Symbol, item.Name, item.Reason))
+		}
+	}
+	if len(out) == 0 && len(c.Missing) > 0 {
+		for _, m := range c.Missing {
+			out = append(out, c.Symbol+": "+m)
+		}
+	}
+	if len(out) == 0 && strings.TrimSpace(c.BlockReason) != "" {
+		out = append(out, c.Symbol+": "+c.BlockReason)
+	}
+	return out
+}
+
+func firstShadowFloat(values ...float64) float64 {
+	for _, v := range values {
+		if v > 0 {
+			return v
+		}
+	}
+	return 0
+}

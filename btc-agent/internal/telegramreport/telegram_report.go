@@ -86,8 +86,12 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 	// ── III. Vùng giá then chốt ───────────────────────────────────────────
 	b.WriteString("III. VÙNG GIÁ\n")
 	if analysis.AccumulationZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("🟢 Gom: $%.0f – $%.0f\n",
+		b.WriteString(fmt.Sprintf("🟢 Gom active: $%.0f – $%.0f\n",
 			analysis.AccumulationZone.Low, analysis.AccumulationZone.High))
+	}
+	if analysis.MacroAccumulationZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("🧭 Macro/stress: $%.0f – $%.0f (context only)\n",
+			analysis.MacroAccumulationZone.Low, analysis.MacroAccumulationZone.High))
 	}
 	if analysis.PrimarySupportZone.Low > 0 {
 		b.WriteString(fmt.Sprintf("🔵 Support: $%.0f – $%.0f\n",

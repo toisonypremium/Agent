@@ -35,20 +35,24 @@ type Layer struct {
 }
 
 type AssetPlan struct {
-	Symbol         string      `json:"symbol"`
-	State          State       `json:"state"`
-	DiscountZone   market.Zone `json:"discount_zone"`
-	Invalidation   float64     `json:"invalidation"`
-	RewardRisk     float64     `json:"reward_risk"`
-	RotationRank   int         `json:"rotation_rank,omitempty"`
-	RotationScore  float64     `json:"rotation_score,omitempty"`
-	AssetFlowBias  flow.Bias   `json:"asset_flow_bias,omitempty"`
-	AssetFlowScore float64     `json:"asset_flow_score,omitempty"`
-	Layers         []Layer     `json:"layers"`
-	Reason         string      `json:"reason"`
-	HardBlockers   []string    `json:"hard_blockers,omitempty"`
-	SoftBlockers   []string    `json:"soft_blockers,omitempty"`
-	NextTrigger    string      `json:"next_trigger,omitempty"`
+	Symbol           string           `json:"symbol"`
+	State            State            `json:"state"`
+	DiscountZone     market.Zone      `json:"discount_zone"`
+	Invalidation     float64          `json:"invalidation"`
+	RewardRisk       float64          `json:"reward_risk"`
+	RewardRiskDetail RewardRiskResult `json:"reward_risk_detail,omitempty"`
+	ZoneWidthPct     float64          `json:"zone_width_pct,omitempty"`
+	DiscountGapPct   float64          `json:"discount_gap_pct,omitempty"`
+	ZoneQuality      string           `json:"zone_quality,omitempty"`
+	RotationRank     int              `json:"rotation_rank,omitempty"`
+	RotationScore    float64          `json:"rotation_score,omitempty"`
+	AssetFlowBias    flow.Bias        `json:"asset_flow_bias,omitempty"`
+	AssetFlowScore   float64          `json:"asset_flow_score,omitempty"`
+	Layers           []Layer          `json:"layers"`
+	Reason           string           `json:"reason"`
+	HardBlockers     []string         `json:"hard_blockers,omitempty"`
+	SoftBlockers     []string         `json:"soft_blockers,omitempty"`
+	NextTrigger      string           `json:"next_trigger,omitempty"`
 }
 
 type Plan struct {
@@ -180,13 +184,25 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		return ap
 	}
 	price := market.LastClose(c)
-	support, resistance := market.RangeZone(c, 60)
+	support, resistance := actionSupportResistanceZones(c)
 	closes := make([]float64, len(c))
 	for i, candle := range c {
 		closes[i] = candle.Close
 	}
 	ema20 := indicators.Last(indicators.EMA(closes, 20))
 	rsi := indicators.Last(indicators.RSI(closes, 14))
+
+	ap.DiscountZone = support
+	ap.ZoneWidthPct = zoneWidthPct(support)
+	ap.DiscountGapPct = discountGapPct(price, support)
+	ap.ZoneQuality = zoneQuality(support)
+	if ap.ZoneQuality != "ZONE_OK" {
+		ap.State = StateWatch
+		ap.Reason = zoneQualityReason(ap.ZoneQuality, ap.ZoneWidthPct)
+		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+		ap.NextTrigger = "Chờ vùng support/discount hẹp và rõ hơn để tính entry/RR."
+		return ap
+	}
 
 	if FallingKnife(c) {
 		ap.State = StateNoTrade
@@ -243,14 +259,15 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	if !support.Valid() || price > support.High*(1+discountZonePremiumPct(cfg)) {
 		ap.State = StateWatch
 		ap.DiscountZone = support
-		ap.Reason = "giá chưa vào discount zone"
-		ap.SoftBlockers = append(ap.SoftBlockers, "giá chưa vào discount zone")
+		ap.Reason = fmt.Sprintf("giá chưa vào discount zone: cao hơn support %.2f%%", ap.DiscountGapPct*100)
+		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
 		ap.NextTrigger = "Chờ giá về support/discount zone mà không tạo falling knife."
 		return ap
 	}
 
 	invalidation := support.Low * 0.985
 	rr := RewardRiskBreakdown(RewardRiskInput{Entry: price, Invalidation: invalidation, Target: resistance.High})
+	ap.RewardRiskDetail = rr
 	if !rr.Valid {
 		ap.Reason = "reward/risk không hợp lệ: " + rr.Reason
 		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
@@ -262,7 +279,7 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	ap.RewardRisk = rr.Ratio
 	if ap.RewardRisk < cfg.Risk.MinRewardRisk {
 		ap.State = StateWatch
-		ap.Reason = fmt.Sprintf("reward/risk %.2f thấp hơn %.2f", ap.RewardRisk, cfg.Risk.MinRewardRisk)
+		ap.Reason = fmt.Sprintf("reward/risk %.2f thấp hơn %.2f; risk %.4f reward %.4f", ap.RewardRisk, cfg.Risk.MinRewardRisk, rr.Risk, rr.Reward)
 		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
 		ap.NextTrigger = "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng."
 		return ap
@@ -284,6 +301,49 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	ap.Reason = "đủ discount zone và reward/risk; tạo paper limit layers"
 	ap.NextTrigger = "Layer hợp lệ; live manager kiểm tra preflight/caps trước khi đặt post-only."
 	return ap
+}
+
+func actionSupportResistanceZones(c []market.Candle) (market.Zone, market.Zone) {
+	support, resistance := market.RangeZone(c, 60)
+	return market.CapZoneWidth(support, 1.25), resistance
+}
+
+func zoneWidthPct(z market.Zone) float64 {
+	return market.ZoneWidthPct(z)
+}
+
+func discountGapPct(price float64, support market.Zone) float64 {
+	if price <= 0 || !support.Valid() {
+		return 0
+	}
+	if price > support.High {
+		return price/support.High - 1
+	}
+	if price < support.Low {
+		return price/support.Low - 1
+	}
+	return 0
+}
+
+func zoneQuality(z market.Zone) string {
+	if !z.Valid() {
+		return "ZONE_INVALID"
+	}
+	if zoneWidthPct(z) > 0.25 {
+		return "ZONE_WARN_WIDE"
+	}
+	return "ZONE_OK"
+}
+
+func zoneQualityReason(quality string, width float64) string {
+	switch quality {
+	case "ZONE_INVALID":
+		return "support zone invalid"
+	case "ZONE_WARN_WIDE":
+		return fmt.Sprintf("support zone rộng %.1f%%; cần vùng entry hẹp hơn", width*100)
+	default:
+		return "support zone OK"
+	}
 }
 
 func buildEntryLayers(cfg config.Config, support, resistance market.Zone, invalidation, budget float64) []Layer {

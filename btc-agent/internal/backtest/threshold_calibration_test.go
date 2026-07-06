@@ -8,6 +8,7 @@ import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/market"
+	"btc-agent/internal/researchprofile"
 )
 
 func TestRunThresholdCalibrationProfilesStable(t *testing.T) {
@@ -39,8 +40,8 @@ func TestThresholdStrictMatchesProductionPermission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	strict := thresholdProfiles()[0]
-	if got := evaluateThresholdProfile(analysis, strict); got != analysis.ActionPermission {
+	strict := researchprofile.Profiles()[0]
+	if got := researchprofile.EvaluatePermission(analysis, strict); got != analysis.ActionPermission {
 		t.Fatalf("strict permission=%s production=%s analysis=%+v", got, analysis.ActionPermission, analysis)
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
-	"btc-agent/internal/flow"
 	"btc-agent/internal/market"
+	"btc-agent/internal/researchprofile"
 )
 
 const (
@@ -29,14 +29,7 @@ type ThresholdCalibrationResult struct {
 	Summary string                `json:"summary"`
 }
 
-type ThresholdProfile struct {
-	Name                  string  `json:"name"`
-	TrendArmedThreshold   float64 `json:"trend_armed_threshold"`
-	TrendAllowedThreshold float64 `json:"trend_allowed_threshold"`
-	FlowPromoteThreshold  float64 `json:"flow_promote_threshold"`
-	MinRewardRisk         float64 `json:"min_reward_risk"`
-	ResearchNote          string  `json:"research_note"`
-}
+type ThresholdProfile = researchprofile.Profile
 
 type ThresholdProfileRow struct {
 	Profile       ThresholdProfile          `json:"profile"`
@@ -73,7 +66,7 @@ func RunThresholdCalibration(cfg config.Config, btc map[string][]market.Candle, 
 	if len(btc1d) < need {
 		return ThresholdCalibrationResult{}, fmt.Errorf("not enough BTC 1d candles for threshold calibration; need %d got %d", need, len(btc1d))
 	}
-	profiles := thresholdProfiles()
+	profiles := researchprofile.Profiles()
 	accs := make([]*thresholdProfileAcc, len(profiles))
 	for i := range profiles {
 		accs[i] = newThresholdProfileAcc(auditCfg.HorizonDays)
@@ -90,7 +83,7 @@ func RunThresholdCalibration(cfg config.Config, btc map[string][]market.Candle, 
 			continue
 		}
 		for j, profile := range profiles {
-			perm := evaluateThresholdProfile(analysis, profile)
+			perm := researchprofile.EvaluatePermission(analysis, profile)
 			acc := accs[j]
 			acc.counts[perm]++
 			if perm != agent1.Allowed {
@@ -123,37 +116,6 @@ func RunThresholdCalibration(cfg config.Config, btc map[string][]market.Candle, 
 	}
 	result.Summary = summarizeThresholdCalibration(result.Rows)
 	return result, nil
-}
-
-func thresholdProfiles() []ThresholdProfile {
-	return []ThresholdProfile{
-		{Name: "STRICT_CURRENT", TrendArmedThreshold: 45, TrendAllowedThreshold: 60, FlowPromoteThreshold: 0.25, MinRewardRisk: 2.0, ResearchNote: "current production thresholds"},
-		{Name: "BALANCED_SAFE", TrendArmedThreshold: 42, TrendAllowedThreshold: 58, FlowPromoteThreshold: 0.22, MinRewardRisk: 2.0, ResearchNote: "research-only mild threshold relaxation"},
-		{Name: "ARMED_PROBE_LIGHT", TrendArmedThreshold: 40, TrendAllowedThreshold: 60, FlowPromoteThreshold: 0.20, MinRewardRisk: 2.0, ResearchNote: "research-only probe candidate density"},
-		{Name: "FLOW_RELAXED", TrendArmedThreshold: 45, TrendAllowedThreshold: 60, FlowPromoteThreshold: 0.15, MinRewardRisk: 2.0, ResearchNote: "research-only flow promotion sensitivity"},
-		{Name: "RR_RELAXED_SMALL_PROBE", TrendArmedThreshold: 42, TrendAllowedThreshold: 60, FlowPromoteThreshold: 0.22, MinRewardRisk: 1.5, ResearchNote: "research-only lower RR for small probe review"},
-	}
-}
-
-func evaluateThresholdProfile(a agent1.MarketAnalysis, p ThresholdProfile) agent1.Permission {
-	if a.MarketRegime == "PANIC_SELLING" || a.RiskLevel == agent1.High || a.FallingKnifeRisk == agent1.High || a.FomoRisk == agent1.High || !a.PrimarySupportZone.Valid() || !a.ResistanceZone.Valid() {
-		return agent1.NoTrade
-	}
-	if btcPermissionRRProxy(a) < p.MinRewardRisk {
-		return agent1.Watch
-	}
-	allowedRegime := a.MarketRegime == "ACCUMULATION" || a.MarketRegime == "WEAK_UPTREND" || a.MarketRegime == "RANGE"
-	if a.TrendScore >= p.TrendAllowedThreshold && allowedRegime {
-		return agent1.Allowed
-	}
-	if a.TrendScore >= p.TrendArmedThreshold {
-		return agent1.Armed
-	}
-	flowOK := (a.Flow.Bias == flow.BiasAccumulation || a.Flow.Bias == flow.BiasBearTrap) && a.Flow.Score >= p.FlowPromoteThreshold
-	if flowOK {
-		return agent1.Armed
-	}
-	return agent1.Watch
 }
 
 func normalizeThresholdCalibrationConfig(auditCfg ThresholdCalibrationConfig) ThresholdCalibrationConfig {

@@ -419,6 +419,7 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 	if analysis, err := agent1.Analyze(cfg, btc, exchange.FearGreed{Value: 50, Classification: "Neutral"}); err == nil {
 		result.DataSanity = liveguard.CheckDataSanity(cfg, btc, assets, analysis, time.Now())
 	}
+	result.ZoneEntrySanity = backtest.RunZoneEntrySanity(cfg, assets)
 	sim, err := backtest.RunAgent2Simulation(cfg, btc, assets)
 	if err != nil {
 		result.Agent2Simulation = backtest.Agent2Simulation{Enabled: false, Assets: map[string]backtest.AssetSimStats{}, Summary: err.Error()}
@@ -1462,6 +1463,19 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		return fmt.Errorf("load assets for safety gates: %w", err)
 	}
 	dataHealth := liveguard.CheckDataHealth(cfg, analysis, p, assets, open, positions, time.Now())
+	dataSanity := liveguard.DataSanityResult{}
+	benchmarks := map[string][]market.Candle{}
+	if btc, err := loadBTC(cfg, db); err == nil {
+		dataSanity = liveguard.CheckDataSanity(cfg, btc, assets, analysis, time.Now())
+		if btc1d := btc["1d"]; len(btc1d) > 0 {
+			benchmarks[cfg.Data.Symbols.BTC] = btc1d
+			benchmarks["BTCUSDT"] = btc1d
+		}
+	}
+	shadow := liveguard.BuildShadowProbeJournal(cfg, analysis, p, assets, benchmarks, dataSanity, time.Now())
+	if err := liveguard.SaveShadowProbeJournal("reports", shadow); err != nil {
+		log.Printf("shadow probe journal warning: %v", err)
+	}
 	reconcileSafety := liveguard.ReconcileSafety(liveguard.ReconcileResult{Checked: len(open), Orders: open})
 	riskGovernor := liveguard.EvaluateRiskGovernor(cfg, analysis, p, open, positions, dataHealth, reconcileSafety)
 	if dataHealth.Status == liveguard.DataHealthBlock || reconcileSafety.Status == liveguard.ReconcileBlock || riskGovernor.Status == liveguard.RiskGovernorBlock {
@@ -2114,6 +2128,8 @@ func protectedReportFiles() []string {
 		"live_manager_history_latest.json",
 		"live_manager_simulation_latest.md",
 		"live_manager_simulation_latest.json",
+		"shadow_probe_latest.json",
+		"shadow_probe_journal.jsonl",
 		"cancel_all_live_orders_latest.md",
 		"cancel_all_live_orders_latest.json",
 		"telegram_state.json",

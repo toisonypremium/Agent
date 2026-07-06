@@ -19,6 +19,7 @@ type RunNowSnapshot struct {
 	ReconcileOK     bool
 	Supervisor      liveguard.SupervisorResult
 	SupervisorSet   bool
+	ShadowProbe     liveguard.ShadowProbeJournal
 	Notes           []string
 }
 
@@ -41,7 +42,8 @@ func BuildDeterministic(s RunNowSnapshot) string {
 	b.WriteString(fmt.Sprintf("Flow: %s %.2f — %s\n", s.Analysis.Flow.Bias, s.Analysis.Flow.Score, vietnameseFlowNote(fmt.Sprint(s.Analysis.Flow.Bias))))
 	b.WriteString(fmt.Sprintf("Rủi ro: tổng=%s | falling knife=%s | FOMO=%s\n", vietnameseRisk(s.Analysis.RiskLevel), vietnameseRisk(s.Analysis.FallingKnifeRisk), vietnameseRisk(s.Analysis.FomoRisk)))
 	b.WriteString("\nVùng giá quan trọng:\n")
-	writeZoneVI(&b, "Gom", s.Analysis.AccumulationZone.Low, s.Analysis.AccumulationZone.High)
+	writeZoneVI(&b, "Gom active", s.Analysis.AccumulationZone.Low, s.Analysis.AccumulationZone.High)
+	writeZoneVI(&b, "Gom macro/stress", s.Analysis.MacroAccumulationZone.Low, s.Analysis.MacroAccumulationZone.High)
 	writeZoneVI(&b, "Support chính", s.Analysis.PrimarySupportZone.Low, s.Analysis.PrimarySupportZone.High)
 	writeZoneVI(&b, "Support sâu", s.Analysis.DeepSupportZone.Low, s.Analysis.DeepSupportZone.High)
 	writeZoneVI(&b, "Kháng cự", s.Analysis.ResistanceZone.Low, s.Analysis.ResistanceZone.High)
@@ -94,6 +96,19 @@ func BuildDeterministic(s RunNowSnapshot) string {
 			b.WriteString(fmt.Sprintf("- %s: readiness %.0f%% | chờ: %s\n", c.Symbol, c.ReadinessScore*100, emptyScheduler(c.NextTrigger, "thêm xác nhận")))
 		}
 	}
+	if s.ShadowProbe.Profile != "" {
+		b.WriteString("Shadow ARMED_PROBE_LIGHT:\n")
+		b.WriteString(fmt.Sprintf("- production=%s, research=%s | Shadow only — không đặt lệnh thật.\n", s.ShadowProbe.ProductionPermission, s.ShadowProbe.ResearchPermission))
+		if len(s.ShadowProbe.Candidates) > 0 {
+			for _, c := range s.ShadowProbe.Candidates {
+				b.WriteString(fmt.Sprintf("- would_probe: %s layer %d entry %.4f RR %.2f notional %.2f\n", c.Symbol, c.Layer, c.Entry, c.RewardRisk, c.Notional))
+			}
+		} else if len(s.ShadowProbe.Blockers) > 0 {
+			b.WriteString("- would_probe: none | blocker chính: " + strings.Join(limitStrings(s.ShadowProbe.Blockers, 3), "; ") + "\n")
+		} else {
+			b.WriteString("- would_probe: none\n")
+		}
+	}
 	b.WriteString("───────────────────\n")
 
 	b.WriteString("V. TIN TỨC / RESEARCH\n")
@@ -138,7 +153,8 @@ func CompactPlan(plan agent2.Plan) map[string]any {
 		assets = append(assets, map[string]any{
 			"symbol": a.Symbol, "state": a.State, "reason": a.Reason,
 			"rotation_rank": a.RotationRank, "rotation_score": a.RotationScore,
-			"reward_risk": a.RewardRisk, "layers": layers,
+			"reward_risk": a.RewardRisk, "reward_risk_detail": a.RewardRiskDetail,
+			"zone_width_pct": a.ZoneWidthPct, "discount_gap_pct": a.DiscountGapPct, "zone_quality": a.ZoneQuality, "layers": layers,
 		})
 	}
 	watch := []map[string]any{}
@@ -150,6 +166,7 @@ func CompactPlan(plan agent2.Plan) map[string]any {
 		watch = append(watch, map[string]any{
 			"symbol": c.Symbol, "readiness_score": c.ReadinessScore, "tier": c.Tier,
 			"actionable": c.Actionable, "missing": c.Missing, "next_trigger": c.NextTrigger,
+			"zone_width_pct": c.ZoneWidthPct, "discount_gap": c.DiscountGap, "zone_quality": c.ZoneQuality, "reward_risk": c.RewardRisk,
 		})
 	}
 	return map[string]any{"state": plan.State, "summary": plan.Summary, "assets": assets, "watchlist": watch}

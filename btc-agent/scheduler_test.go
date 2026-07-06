@@ -1,9 +1,34 @@
 package main
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestValidateSchedulerTelegramAI(t *testing.T) {
+	base := `📊 BTC Agent — Bản tin chiến lược
+I. Kết luận: không đặt lệnh vì BTC WATCH và chưa có ACTIVE_LIMIT. Chờ trigger rõ, không chase giá.
+II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score và risk đều được trình bày đủ để chủ tài khoản hiểu vì sao bot đứng ngoài lúc này.
+III. Vùng giá & kịch bản: support, deep support, kháng cự, invalidation, kịch bản chính, kịch bản tốt, kịch bản xấu đều rõ ràng.
+IV. Kế hoạch bot: permission WATCH, plan WATCH, watchlist chờ BTC ALLOWED, flow reclaim, discount zone và reward/risk đủ chuẩn.
+V. Research context: tin tức chỉ là bối cảnh phụ, không override Agent 1/2, không dùng URL trong Telegram.
+VI. Trạng thái an toàn: daily OK, reconcile OK, supervisor OK. An toàn: spot limit BUY post-only only; không futures, không leverage, không market order.
+`
+	long := base + strings.Repeat("Nội dung phân tích bổ sung bằng tiếng Việt để vượt ngưỡng độ dài kiểm tra. ", 20)
+	if err := validateSchedulerTelegramAI(long); err != nil {
+		t.Fatalf("expected valid output: %v", err)
+	}
+	if err := validateSchedulerTelegramAI(long + "..."); err == nil {
+		t.Fatal("expected truncated output rejected")
+	}
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "VI.", "")); err == nil {
+		t.Fatal("expected missing section rejected")
+	}
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "không market", "")); err == nil {
+		t.Fatal("expected missing safety rejected")
+	}
+}
 
 func TestGetNextRunTime(t *testing.T) {
 	// Setup timezone locations

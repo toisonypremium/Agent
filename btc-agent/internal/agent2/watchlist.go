@@ -184,10 +184,9 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 
 	rrReady := 0.50
 	if c.RewardRisk <= 0 && c.Support.Valid() && c.Resistance.Valid() && c.Price > 0 {
-		invalidation := c.Support.Low * 0.985
-		risk := c.Price - invalidation
-		if risk > 0 {
-			c.RewardRisk = (c.Resistance.High - c.Price) / risk
+		rr := RewardRiskFromZones(c.Price, c.Support, c.Resistance)
+		if rr.Valid {
+			c.RewardRisk = rr.Ratio
 		}
 	}
 	if cfg.Risk.MinRewardRisk > 0 && c.RewardRisk > 0 {

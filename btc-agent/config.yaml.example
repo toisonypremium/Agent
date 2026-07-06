@@ -62,6 +62,10 @@ maintenance:
   event_retention_days: 90
   max_report_files: 50
   max_closed_paper_orders: 500
+  max_candles_per_symbol_interval: 1000
+  max_analysis_rows: 500
+  max_plan_rows: 500
+  wal_checkpoint_on_maintenance: true
 
 notify:
   enabled: false

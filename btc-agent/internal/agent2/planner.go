@@ -226,18 +226,17 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	}
 
 	invalidation := support.Low * 0.985
-	reward := resistance.High - price
-	risk := price - invalidation
-	if risk <= 0 {
+	rr := RewardRiskBreakdown(RewardRiskInput{Entry: price, Invalidation: invalidation, Target: resistance.High})
+	if !rr.Valid {
+		ap.Reason = "reward/risk không hợp lệ: " + rr.Reason
 		return ap
 	}
-	rr := reward / risk
 	ap.DiscountZone = support
 	ap.Invalidation = invalidation
-	ap.RewardRisk = rr
-	if rr < cfg.Risk.MinRewardRisk {
+	ap.RewardRisk = rr.Ratio
+	if ap.RewardRisk < cfg.Risk.MinRewardRisk {
 		ap.State = StateWatch
-		ap.Reason = fmt.Sprintf("reward/risk %.2f thấp hơn %.2f", rr, cfg.Risk.MinRewardRisk)
+		ap.Reason = fmt.Sprintf("reward/risk %.2f thấp hơn %.2f", ap.RewardRisk, cfg.Risk.MinRewardRisk)
 		return ap
 	}
 

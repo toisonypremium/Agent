@@ -144,8 +144,8 @@ func TestAnalyzeFlowAppearsInJSONAndReport(t *testing.T) {
 	if got.Flow.Bias == "" {
 		t.Fatalf("expected flow field: %+v", got.Flow)
 	}
-	if !strings.Contains(got.JSON(), "\"flow\"") {
-		t.Fatal("expected flow in JSON")
+	if !strings.Contains(got.JSON(), "\"flow\"") || !strings.Contains(got.JSON(), "\"score_breakdown\"") || got.PermissionReason == "" {
+		t.Fatal("expected flow, score breakdown, and permission reason in JSON")
 	}
 	if !strings.Contains(DailyReport(got, "test plan"), "MM / Liquidity Flow") {
 		t.Fatal("expected flow section in report")

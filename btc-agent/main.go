@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"btc-agent/internal/agent1"
@@ -149,18 +150,94 @@ func usage() error {
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	client := exchange.NewBinance(cfg.Data.BinanceBaseURL)
 	symbols := append([]string{cfg.Data.Symbols.BTC}, cfg.Data.Symbols.Assets...)
+	tasks := []fetchTask{}
 	for _, sym := range symbols {
 		for _, interval := range cfg.Data.Intervals {
-			candles, err := client.Klines(ctx, sym, interval, cfg.Data.CandleLimit)
-			if err != nil {
-				return fmt.Errorf("fetch %s %s: %w", sym, interval, err)
-			}
-			if err := db.SaveCandles(candles); err != nil {
-				return err
-			}
-			fmt.Printf("saved %d candles %s %s\n", len(candles), sym, interval)
+			tasks = append(tasks, fetchTask{Symbol: sym, Interval: interval})
 		}
 	}
+
+	workerCount := 4
+	if len(tasks) < workerCount {
+		workerCount = len(tasks)
+	}
+	if workerCount < 1 {
+		return nil
+	}
+
+	fetchCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	jobs := make(chan fetchTask)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var firstErr error
+	for i := 0; i < workerCount; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for task := range jobs {
+				if err := fetchOne(fetchCtx, cfg, db, client, task); err != nil {
+					mu.Lock()
+					if firstErr == nil {
+						firstErr = err
+						cancel()
+					}
+					mu.Unlock()
+				}
+			}
+		}()
+	}
+dispatch:
+	for _, task := range tasks {
+		select {
+		case <-fetchCtx.Done():
+			break dispatch
+		case jobs <- task:
+		}
+	}
+	close(jobs)
+	wg.Wait()
+	return firstErr
+}
+
+type fetchTask struct {
+	Symbol   string
+	Interval string
+}
+
+func fetchOne(ctx context.Context, cfg config.Config, db *storage.DB, client *exchange.BinanceClient, task fetchTask) error {
+	limit := cfg.Data.CandleLimit
+	mode := "cold"
+	latest, found, err := db.LatestCandleOpenTime(task.Symbol, task.Interval)
+	if err != nil {
+		return fmt.Errorf("latest candle %s %s: %w", task.Symbol, task.Interval, err)
+	}
+	if found {
+		mode = "incremental"
+		limit = 20
+		if cfg.Data.CandleLimit > 0 && cfg.Data.CandleLimit < limit {
+			limit = cfg.Data.CandleLimit
+		}
+	}
+	candles, err := client.Klines(ctx, task.Symbol, task.Interval, limit)
+	if err != nil {
+		return fmt.Errorf("fetch %s %s: %w", task.Symbol, task.Interval, err)
+	}
+	toSave := candles
+	if found {
+		toSave = toSave[:0]
+		for _, candle := range candles {
+			if !candle.OpenTime.Before(latest) {
+				toSave = append(toSave, candle)
+			}
+		}
+	}
+	if len(toSave) > 0 {
+		if err := db.SaveCandles(toSave); err != nil {
+			return fmt.Errorf("save candles %s %s: %w", task.Symbol, task.Interval, err)
+		}
+	}
+	log.Printf("fetch candles %s %s mode=%s fetched=%d saved=%d", task.Symbol, task.Interval, mode, len(candles), len(toSave))
 	return nil
 }
 
@@ -1919,10 +1996,14 @@ func liveOrderMarkdown(result liveguard.ExecutionResult) string {
 
 func runMaintenance(cfg config.Config, db *storage.DB) error {
 	mcfg := storage.MaintenanceConfig{
-		ReportRetentionDays:  cfg.Maintenance.ReportRetentionDays,
-		EventRetentionDays:   cfg.Maintenance.EventRetentionDays,
-		MaxReportFiles:       cfg.Maintenance.MaxReportFiles,
-		MaxClosedPaperOrders: cfg.Maintenance.MaxClosedPaperOrders,
+		ReportRetentionDays:         cfg.Maintenance.ReportRetentionDays,
+		EventRetentionDays:          cfg.Maintenance.EventRetentionDays,
+		MaxReportFiles:              cfg.Maintenance.MaxReportFiles,
+		MaxClosedPaperOrders:        cfg.Maintenance.MaxClosedPaperOrders,
+		MaxCandlesPerSymbolInterval: cfg.Maintenance.MaxCandlesPerSymbolInterval,
+		MaxAnalysisRows:             cfg.Maintenance.MaxAnalysisRows,
+		MaxPlanRows:                 cfg.Maintenance.MaxPlanRows,
+		WALCheckpoint:               cfg.Maintenance.WALCheckpoint,
 	}
 	if !cfg.Maintenance.Enabled {
 		result := storage.MaintenanceResult{Enabled: false, GeneratedAt: time.Now(), Config: storage.NormalizeMaintenanceConfig(mcfg)}
@@ -2004,9 +2085,12 @@ func protectedReportFiles() []string {
 
 func maintenanceMarkdown(result storage.MaintenanceResult) string {
 	md := fmt.Sprintf("MAINTENANCE REPORT\n\nGenerated: %s\nSummary: %s\n\n", result.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"), result.Summary)
-	md += fmt.Sprintf("Retention: reports=%dd events=%dd max_report_files=%d max_closed_paper_orders=%d\n", result.Config.ReportRetentionDays, result.Config.EventRetentionDays, result.Config.MaxReportFiles, result.Config.MaxClosedPaperOrders)
-	md += fmt.Sprintf("Deleted: reports=%d live_order_events=%d live_position_events=%d closed_paper_orders=%d report_files=%d\n", result.ReportsDeleted, result.LiveOrderEventsDeleted, result.LivePositionEventsDeleted, result.ClosedPaperOrdersDeleted, result.ReportFilesDeleted)
-	md += "No candles, live orders, live fills, live positions, or operator settings were pruned.\n"
+	md += fmt.Sprintf("Retention: reports=%dd events=%dd max_report_files=%d max_closed_paper_orders=%d max_candles_per_pair=%d max_analysis_rows=%d max_plan_rows=%d wal_checkpoint=%v\n", result.Config.ReportRetentionDays, result.Config.EventRetentionDays, result.Config.MaxReportFiles, result.Config.MaxClosedPaperOrders, result.Config.MaxCandlesPerSymbolInterval, result.Config.MaxAnalysisRows, result.Config.MaxPlanRows, result.Config.WALCheckpoint)
+	md += fmt.Sprintf("Deleted: reports=%d live_order_events=%d live_position_events=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d\n", result.ReportsDeleted, result.LiveOrderEventsDeleted, result.LivePositionEventsDeleted, result.ClosedPaperOrdersDeleted, result.CandlesDeleted, result.AnalysesDeleted, result.PlansDeleted, result.ReportFilesDeleted)
+	if result.WALCheckpointed {
+		md += "WAL checkpoint: done\n"
+	}
+	md += "Live orders, live fills, live positions, and operator settings were not pruned.\n"
 	return md
 }
 

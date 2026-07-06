@@ -100,9 +100,10 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 		risk = Low
 	}
 	breakdown.RiskBlockers = riskBlockers(regime, risk, falling, fomo, ps, rs)
-	perm := permission(regime, risk, falling, fomo, ps, rs, trend)
-	permissionReason := permissionReason(regime, risk, falling, fomo, ps, rs, trend, perm)
-	if perm == Watch && risk != High && falling != High && fomo != High && (fl.Bias == flow.BiasAccumulation || fl.Bias == flow.BiasBearTrap) && fl.Score >= 0.25 {
+	policy := PermissionPolicyFromConfig(cfg)
+	perm := policy.Permission(regime, risk, falling, fomo, ps, rs, trend)
+	permissionReason := policy.PermissionReason(regime, risk, falling, fomo, ps, rs, trend, perm)
+	if perm == Watch && risk != High && falling != High && fomo != High && policy.FlowPromotesToArmed(fl) {
 		perm = Armed
 		permissionReason = "flow accumulation/bear-trap đủ mạnh nên nâng từ WATCH lên ARMED"
 	}

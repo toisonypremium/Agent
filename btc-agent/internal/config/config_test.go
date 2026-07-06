@@ -425,6 +425,20 @@ func TestValidateRejectsAllocationOutsideAccumulationAssets(t *testing.T) {
 	}
 }
 
+func TestValidateDecisionThresholdBounds(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Risk.BTCTrendAllowedThreshold = 40
+	cfg.Risk.BTCTrendArmedThreshold = 45
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected allowed threshold below armed threshold validation error")
+	}
+	cfg = validTestConfig()
+	cfg.Risk.MinWatchReadinessForProbe = 1.1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected readiness probe threshold validation error")
+	}
+}
+
 func validTestConfig() Config {
 	var cfg Config
 	cfg.App.Mode = "live"

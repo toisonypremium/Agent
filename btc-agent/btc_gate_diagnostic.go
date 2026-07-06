@@ -34,6 +34,7 @@ type btcGateDiagnosticReport struct {
 	Resistance        market.Zone                `json:"resistance"`
 	RewardRiskProxy   float64                    `json:"reward_risk_proxy"`
 	FrameContribution []btcGateFrameContribution `json:"frame_contributions"`
+	Policy            agent1.PermissionPolicy    `json:"policy"`
 	UnlockConditions  []backtest.UnlockCondition `json:"unlock_conditions"`
 	Summary           string                     `json:"summary"`
 }
@@ -58,12 +59,11 @@ type btcGateFrameContribution struct {
 
 func runBTCGateDiagnostic(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	_ = ctx
-	_ = cfg
 	analysis, err := db.LatestAnalysis()
 	if err != nil {
 		return fmt.Errorf("load latest analysis: %w", err)
 	}
-	report := buildBTCGateDiagnosticReport(analysis)
+	report := buildBTCGateDiagnosticReport(cfg, analysis)
 	if err := saveJSONFile("reports", "btc_gate_diagnostic_latest.json", report); err != nil {
 		return err
 	}
@@ -78,7 +78,8 @@ func runBTCGateDiagnostic(ctx context.Context, cfg config.Config, db *storage.DB
 	return nil
 }
 
-func buildBTCGateDiagnosticReport(a agent1.MarketAnalysis) btcGateDiagnosticReport {
+func buildBTCGateDiagnosticReport(cfg config.Config, a agent1.MarketAnalysis) btcGateDiagnosticReport {
+	policy := agent1.PermissionPolicyFromConfig(cfg)
 	report := btcGateDiagnosticReport{
 		GeneratedAt:       time.Now(),
 		Permission:        a.ActionPermission,
@@ -96,7 +97,8 @@ func buildBTCGateDiagnosticReport(a agent1.MarketAnalysis) btcGateDiagnosticRepo
 		Resistance:        a.ResistanceZone,
 		RewardRiskProxy:   btcGateRRProxy(a),
 		FrameContribution: btcGateFrameContributions(a),
-		UnlockConditions:  normalizeBTCGateUnlockConditions(backtest.PermissionUnlockConditions(a)),
+		Policy:            policy,
+		UnlockConditions:  normalizeBTCGateUnlockConditions(btcGateUnlockConditions(a, policy)),
 	}
 	report.Summary = btcGateDiagnosticSummary(report)
 	return report
@@ -149,11 +151,11 @@ func btcGateFrameContributions(a agent1.MarketAnalysis) []btcGateFrameContributi
 }
 
 func btcGateDiagnosticSummary(r btcGateDiagnosticReport) string {
-	armedGap := math.Max(0, 45-r.TrendScore)
+	armedGap := math.Max(0, r.Policy.TrendArmedThreshold-r.TrendScore)
 	if r.Permission == agent1.Armed || r.Permission == agent1.Allowed {
 		return fmt.Sprintf("BTC gate already %s; trend route unlocked, keep checking flow/risk before sizing.", r.Permission)
 	}
-	flowPromote := (r.FlowBias == flow.BiasAccumulation || r.FlowBias == flow.BiasBearTrap) && r.FlowScore >= 0.25
+	flowPromote := (r.FlowBias == flow.BiasAccumulation || r.FlowBias == flow.BiasBearTrap) && r.FlowScore >= r.Policy.FlowPromoteThreshold
 	if armedGap == 0 && !flowPromote {
 		return fmt.Sprintf("%s because hard or reward/risk blockers still apply; trend route is not the bottleneck.", r.Permission)
 	}
@@ -161,6 +163,33 @@ func btcGateDiagnosticSummary(r btcGateDiagnosticReport) string {
 		return fmt.Sprintf("%s despite flow route being ready; inspect hard blockers before probe.", r.Permission)
 	}
 	return fmt.Sprintf("%s because trend is %.2f points below ARMED and flow has no accumulation/bear-trap confirmation. Do not accumulate until trend route or flow route unlocks.", r.Permission, armedGap)
+}
+
+func btcGateUnlockConditions(a agent1.MarketAnalysis, policy agent1.PermissionPolicy) []backtest.UnlockCondition {
+	items := backtest.PermissionUnlockConditions(a)
+	for i := range items {
+		switch items[i].Name {
+		case "TREND_TO_ARMED":
+			items[i].Target = fmt.Sprintf("%.1f", policy.TrendArmedThreshold)
+			items[i].Gap = math.Max(0, policy.TrendArmedThreshold-a.TrendScore)
+			items[i].Pass = items[i].Gap == 0
+			items[i].Reason = fmt.Sprintf("trend score cần +%.1f điểm để lên ARMED", items[i].Gap)
+		case "TREND_TO_ALLOWED":
+			items[i].Target = fmt.Sprintf("%.1f", policy.TrendAllowedThreshold)
+			items[i].Gap = math.Max(0, policy.TrendAllowedThreshold-a.TrendScore)
+			items[i].Pass = items[i].Gap == 0
+			items[i].Reason = fmt.Sprintf("trend score cần +%.1f điểm để đủ ALLOWED", items[i].Gap)
+		case "FLOW_PROMOTE_ARMED":
+			items[i].Target = fmt.Sprintf("ACCUMULATION/BEAR_TRAP >=%.2f", policy.FlowPromoteThreshold)
+			items[i].Gap = math.Max(0, policy.FlowPromoteThreshold-a.Flow.Score)
+			items[i].Pass = policy.FlowPromotesToArmed(a.Flow)
+		case "RR_PROXY":
+			items[i].Target = fmt.Sprintf("%.2f", policy.PermissionMinRewardRisk)
+			items[i].Gap = math.Max(0, policy.PermissionMinRewardRisk-btcGateRRProxy(a))
+			items[i].Pass = items[i].Gap == 0
+		}
+	}
+	return items
 }
 
 func normalizeBTCGateUnlockConditions(items []backtest.UnlockCondition) []backtest.UnlockCondition {
@@ -175,8 +204,8 @@ func normalizeBTCGateUnlockConditions(items []backtest.UnlockCondition) []backte
 }
 
 func btcGateDiagnosticMarkdown(r btcGateDiagnosticReport) string {
-	armedGap := math.Max(0, 45-r.TrendScore)
-	allowedGap := math.Max(0, 60-r.TrendScore)
+	armedGap := math.Max(0, r.Policy.TrendArmedThreshold-r.TrendScore)
+	allowedGap := math.Max(0, r.Policy.TrendAllowedThreshold-r.TrendScore)
 	md := "BTC GATE DIAGNOSTIC\n\n"
 	md += fmt.Sprintf("Generated: %s\n", r.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"))
 	md += fmt.Sprintf("Current: %s | reason=%s\n", r.Permission, emptyDefault(r.PermissionReason, "n/a"))
@@ -185,15 +214,15 @@ func btcGateDiagnosticMarkdown(r btcGateDiagnosticReport) string {
 	md += fmt.Sprintf("Support: %.8f-%.8f | Resistance: %.8f-%.8f | RR proxy: %.2f\n\n", r.Support.Low, r.Support.High, r.Resistance.Low, r.Resistance.High, r.RewardRiskProxy)
 	md += "Trend route:\n"
 	md += fmt.Sprintf("- Trend score: %.2f\n", r.TrendScore)
-	md += fmt.Sprintf("- Gap to ARMED: +%.2f (target 45.00)\n", armedGap)
-	md += fmt.Sprintf("- Gap to ALLOWED: +%.2f (target 60.00)\n\n", allowedGap)
+	md += fmt.Sprintf("- Gap to ARMED: +%.2f (target %.2f)\n", armedGap, r.Policy.TrendArmedThreshold)
+	md += fmt.Sprintf("- Gap to ALLOWED: +%.2f (target %.2f)\n\n", allowedGap, r.Policy.TrendAllowedThreshold)
 	md += "Frame contribution:\n"
 	for _, frame := range r.FrameContribution {
 		md += fmt.Sprintf("- %s: trend=%.2f weight=%.0f%% contribution=%.2f bias=%s %s RSI=%.1f structure=%s\n", frame.Timeframe, frame.TrendScore, frame.Weight*100, frame.Contribution, emptyDefault(frame.Bias, "UNKNOWN"), frameEMANote(frame, r.BTCPrice), frame.RSI14, emptyDefault(frame.StructureLabel, "UNKNOWN"))
 	}
 	md += "\nFlow route:\n"
 	md += fmt.Sprintf("- Flow: %s score=%.2f\n", r.FlowBias, r.FlowScore)
-	md += "- Promote to ARMED requires ACCUMULATION/BEAR_TRAP >=0.25\n"
+	md += fmt.Sprintf("- Promote to ARMED requires ACCUMULATION/BEAR_TRAP >=%.2f\n", r.Policy.FlowPromoteThreshold)
 	md += "- Next trigger: " + emptyDefault(r.FlowNextTrigger, "n/a") + "\n\n"
 	md += "Unlock checklist:\n"
 	for _, item := range r.UnlockConditions {

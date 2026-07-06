@@ -29,6 +29,12 @@ type Config struct {
 		MaxTotalDeploymentPerCycle    float64 `yaml:"max_total_deployment_per_cycle"`
 		MaxSingleAssetDeployment      float64 `yaml:"max_single_asset_deployment"`
 		MinRewardRisk                 float64 `yaml:"min_reward_risk"`
+		DecisionProfile               string  `yaml:"decision_profile"`
+		BTCTrendArmedThreshold        float64 `yaml:"btc_trend_armed_threshold"`
+		BTCTrendAllowedThreshold      float64 `yaml:"btc_trend_allowed_threshold"`
+		BTCFlowPromoteThreshold       float64 `yaml:"btc_flow_promote_threshold"`
+		BTCPermissionMinRewardRisk    float64 `yaml:"btc_permission_min_reward_risk"`
+		MinWatchReadinessForProbe     float64 `yaml:"min_watch_readiness_for_probe"`
 		StopOnPanicSelling            bool    `yaml:"stop_on_panic_selling"`
 		DisableRelativeStrengthFilter bool    `yaml:"disable_relative_strength_filter"`
 		RelativeStrengthLookbackDays  int     `yaml:"relative_strength_lookback_days"`
@@ -350,6 +356,15 @@ func (c Config) Validate() error {
 	}
 	if c.Risk.MinRewardRisk <= 0 {
 		return errors.New("risk.min_reward_risk must be positive")
+	}
+	if c.Risk.BTCTrendArmedThreshold < 0 || c.Risk.BTCTrendAllowedThreshold < 0 || c.Risk.BTCFlowPromoteThreshold < 0 || c.Risk.BTCPermissionMinRewardRisk < 0 {
+		return errors.New("BTC decision thresholds cannot be negative")
+	}
+	if c.Risk.BTCTrendArmedThreshold > 0 && c.Risk.BTCTrendAllowedThreshold > 0 && c.Risk.BTCTrendAllowedThreshold < c.Risk.BTCTrendArmedThreshold {
+		return errors.New("risk.btc_trend_allowed_threshold must be >= btc_trend_armed_threshold")
+	}
+	if c.Risk.MinWatchReadinessForProbe < 0 || c.Risk.MinWatchReadinessForProbe > 1 {
+		return errors.New("risk.min_watch_readiness_for_probe must be between 0 and 1")
 	}
 	if c.Risk.DiscountZonePremiumPct < 0 {
 		return errors.New("risk.discount_zone_premium_pct cannot be negative")

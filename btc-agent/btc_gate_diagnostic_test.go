@@ -10,7 +10,7 @@ import (
 )
 
 func TestBTCGateDiagnosticMarkdownShowsUnlockRoutes(t *testing.T) {
-	report := buildBTCGateDiagnosticReport(btcGateDiagnosticTestAnalysis())
+	report := buildBTCGateDiagnosticReport(readinessTestConfig(), btcGateDiagnosticTestAnalysis())
 	md := btcGateDiagnosticMarkdown(report)
 	for _, want := range []string{"BTC GATE DIAGNOSTIC", "Current: WATCH", "Gap to ARMED", "Gap to ALLOWED", "Frame contribution", "Flow route", "TREND_TO_ARMED", "FLOW_PROMOTE_ARMED", "HARD_BLOCKERS: pass current=none", "No order was placed"} {
 		if !strings.Contains(md, want) {

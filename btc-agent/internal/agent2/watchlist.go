@@ -7,6 +7,7 @@ import (
 
 	"btc-agent/internal/config"
 	"btc-agent/internal/flow"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/market"
 )
 
@@ -24,7 +25,9 @@ const (
 	EntryCheckRelativeStrength = "RELATIVE_STRENGTH"
 	EntryCheckRotationScore    = "ROTATION_SCORE"
 	EntryCheckRotationRank     = "ROTATION_RANK"
+	EntryCheckMMAccumulation   = "MM_ACCUMULATION"
 	EntryCheckAssetFlowEntry   = "ASSET_FLOW_ENTRY"
+	EntryCheckLiquidityQuality = "LIQUIDITY_QUALITY"
 	EntryCheckDiscountZone     = "DISCOUNT_ZONE"
 	EntryCheckRewardRisk       = "REWARD_RISK"
 )
@@ -57,6 +60,11 @@ type WatchCandidate struct {
 	FlowBias         flow.Bias            `json:"flow_bias,omitempty"`
 	FlowBullScore    float64              `json:"flow_bull_score"`
 	FlowBearScore    float64              `json:"flow_bear_score"`
+	MMCase           MMCase               `json:"mm_case,omitempty"`
+	MMScore          float64              `json:"mm_score,omitempty"`
+	MMReasons        []string             `json:"mm_reasons,omitempty"`
+	MMMissing        []string             `json:"mm_missing,omitempty"`
+	LiquidityQuality liquidity.Quality    `json:"liquidity_quality,omitempty"`
 	Price            float64              `json:"price"`
 	Support          market.Zone          `json:"support"`
 	Resistance       market.Zone          `json:"resistance"`
@@ -103,6 +111,11 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		c.RotationScore = plan.RotationScore
 		c.FlowBias = plan.AssetFlowBias
 		c.FlowBullScore = plan.AssetFlowScore
+		c.MMCase = plan.MMCase
+		c.MMScore = plan.MMScore
+		c.MMReasons = plan.MMReasons
+		c.MMMissing = plan.MMMissing
+		c.LiquidityQuality = plan.LiquidityQuality
 		c.RewardRisk = plan.RewardRisk
 		c.RewardRiskDetail = plan.RewardRiskDetail
 		c.ZoneWidthPct = plan.ZoneWidthPct
@@ -121,6 +134,16 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 
 	c.Price = market.LastClose(candles)
 	c.Support, c.Resistance = actionSupportResistanceZones(candles)
+	if c.MMCase == "" {
+		mm := AnalyzeMMAccumulation(sym, candles)
+		c.MMCase = mm.Case
+		c.MMScore = mm.Score
+		c.MMReasons = mm.Reasons
+		c.MMMissing = mm.Missing
+	}
+	if !c.LiquidityQuality.Enabled {
+		c.LiquidityQuality = liquidity.EvaluateCandleProxy(cfg, sym, candles, desiredLiquidityNotional(cfg, sym))
+	}
 	c.DiscountGap = discountGapPct(c.Price, c.Support)
 	c.ZoneWidthPct = zoneWidthPct(c.Support)
 	if c.ZoneQuality == "" {
@@ -176,6 +199,17 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 			c.Missing = append(c.Missing, "asset flow chưa reclaim/absorption")
 		}
 	}
+	mmReady := clamp01(c.MMScore / 100)
+	if c.MMCase == MMCaseFallingKnife || c.MMCase == MMCaseDistributionTrap {
+		mmReady = 0
+		c.Missing = append(c.Missing, fmt.Sprintf("MM case %s hard block", c.MMCase))
+	} else if c.MMCase != MMCaseSpringReclaim && c.MMCase != MMCaseArmedProbeCandidate {
+		c.Missing = append(c.Missing, fmt.Sprintf("MM case %s chưa đủ footprint", c.MMCase))
+	}
+	liquidityReady := clamp01(c.LiquidityQuality.Score / 100)
+	if c.LiquidityQuality.Enabled && !c.LiquidityQuality.Pass {
+		c.Missing = append(c.Missing, "liquidity gate chưa đạt")
+	}
 
 	discountReady := discountComponent(c.Price, c.Support)
 	if c.ZoneQuality != "ZONE_OK" {
@@ -207,7 +241,7 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		appendReasonMissing(&c)
 	}
 	c.Missing = uniqueStrings(c.Missing)
-	c.ReadinessScore = clamp01(relativeReady*0.25 + rotationReady*0.25 + flowReady*0.20 + discountReady*0.15 + rrReady*0.15)
+	c.ReadinessScore = clamp01(relativeReady*0.20 + rotationReady*0.20 + flowReady*0.15 + mmReady*0.15 + liquidityReady*0.10 + discountReady*0.10 + rrReady*0.10)
 	c = tuneWatchCandidate(c, cfg)
 	c.NextTrigger = nextTrigger(c)
 	c.EntryChecklist = buildEntryChecklist(c, cfg)
@@ -276,7 +310,11 @@ func tuneWatchCandidate(c WatchCandidate, cfg config.Config) WatchCandidate {
 		capScore = 0.50
 		capReason = "ROTATION_SCORE"
 		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "flow") || strings.Contains(joined, "reclaim") || strings.Contains(joined, "absorption") {
+	} else if strings.Contains(joined, "liquidity") {
+		capScore = 0.60
+		capReason = "LIQUIDITY_NOT_READY"
+		c.Tier = WatchTierEarly
+	} else if strings.Contains(joined, "mm case") || strings.Contains(joined, "flow") || strings.Contains(joined, "reclaim") || strings.Contains(joined, "absorption") {
 		capScore = 0.65
 		capReason = "FLOW_NOT_CONFIRMED"
 		c.Tier = WatchTierEarly
@@ -327,12 +365,21 @@ func buildEntryChecklist(c WatchCandidate, cfg config.Config) []EntryChecklistIt
 		entryChecklistItem(EntryCheckRotationRank, EntryCheckSoft, !containsAny(joined, "rotation rank"), firstMatchingReason(c, "rotation rank"), "Rotation rank nằm trong top được phép."),
 	)
 
-	flowFail := containsAny(joined, "flow", "reclaim", "absorption", "distribution", "bull-trap")
+	mmFail := containsAny(joined, "mm case", "reclaim", "absorption", "falling_knife", "distribution", "bull-trap")
+	mmSeverity := EntryCheckSoft
+	if containsAny(joined, "falling_knife", "distribution", "bull-trap") {
+		mmSeverity = EntryCheckHard
+	}
+	items = append(items, entryChecklistItem(EntryCheckMMAccumulation, mmSeverity, !mmFail, firstMatchingReason(c, "MM case", "reclaim", "absorption", "distribution", "bull-trap"), "MM accumulation footprint đã xác nhận."))
+
+	flowFail := containsAny(joined, "asset flow", "flow chưa", "distribution", "bull-trap")
 	flowSeverity := EntryCheckSoft
 	if containsAny(joined, "distribution", "bull-trap", "failed breakout") {
 		flowSeverity = EntryCheckHard
 	}
-	items = append(items, entryChecklistItem(EntryCheckAssetFlowEntry, flowSeverity, !flowFail, firstMatchingReason(c, "asset flow", "flow", "reclaim", "absorption", "distribution", "bull-trap"), "Asset flow entry đã xác nhận."))
+	items = append(items, entryChecklistItem(EntryCheckAssetFlowEntry, flowSeverity, !flowFail, firstMatchingReason(c, "asset flow", "flow", "distribution", "bull-trap"), "Asset flow entry đã xác nhận."))
+	liquidityFail := containsAny(joined, "liquidity")
+	items = append(items, entryChecklistItem(EntryCheckLiquidityQuality, EntryCheckSoft, !liquidityFail, firstMatchingReason(c, "liquidity"), "Liquidity đủ cho sizing hiện tại."))
 
 	discountFail := containsAny(joined, "discount", "support zone", "dưới support")
 	discountSeverity := EntryCheckSoft
@@ -418,6 +465,10 @@ func nextTrigger(c WatchCandidate) string {
 			return "Chờ BTC chuyển ALLOWED; asset chỉ nằm watchlist, không tạo lệnh."
 		case strings.Contains(m, "distribution") || strings.Contains(m, "bull-trap"):
 			return "Chờ hết distribution/bull-trap; cần reclaim lại support với bull flow."
+		case strings.Contains(m, "MM case"):
+			return "Chờ sweep low + close reclaim support + retest giữ vùng."
+		case strings.Contains(m, "liquidity"):
+			return "Chờ spread/depth/volume đủ dày trước khi tạo live layer."
 		case strings.Contains(m, "flow"):
 			return "Chờ sweep low + reclaim support hoặc absorption volume gần support."
 		case strings.Contains(m, "discount"):

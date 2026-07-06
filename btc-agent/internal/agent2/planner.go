@@ -9,6 +9,7 @@ import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/flow"
 	"btc-agent/internal/indicators"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/market"
 )
 
@@ -35,24 +36,29 @@ type Layer struct {
 }
 
 type AssetPlan struct {
-	Symbol           string           `json:"symbol"`
-	State            State            `json:"state"`
-	DiscountZone     market.Zone      `json:"discount_zone"`
-	Invalidation     float64          `json:"invalidation"`
-	RewardRisk       float64          `json:"reward_risk"`
-	RewardRiskDetail RewardRiskResult `json:"reward_risk_detail,omitempty"`
-	ZoneWidthPct     float64          `json:"zone_width_pct,omitempty"`
-	DiscountGapPct   float64          `json:"discount_gap_pct,omitempty"`
-	ZoneQuality      string           `json:"zone_quality,omitempty"`
-	RotationRank     int              `json:"rotation_rank,omitempty"`
-	RotationScore    float64          `json:"rotation_score,omitempty"`
-	AssetFlowBias    flow.Bias        `json:"asset_flow_bias,omitempty"`
-	AssetFlowScore   float64          `json:"asset_flow_score,omitempty"`
-	Layers           []Layer          `json:"layers"`
-	Reason           string           `json:"reason"`
-	HardBlockers     []string         `json:"hard_blockers,omitempty"`
-	SoftBlockers     []string         `json:"soft_blockers,omitempty"`
-	NextTrigger      string           `json:"next_trigger,omitempty"`
+	Symbol           string            `json:"symbol"`
+	State            State             `json:"state"`
+	DiscountZone     market.Zone       `json:"discount_zone"`
+	Invalidation     float64           `json:"invalidation"`
+	RewardRisk       float64           `json:"reward_risk"`
+	RewardRiskDetail RewardRiskResult  `json:"reward_risk_detail,omitempty"`
+	ZoneWidthPct     float64           `json:"zone_width_pct,omitempty"`
+	DiscountGapPct   float64           `json:"discount_gap_pct,omitempty"`
+	ZoneQuality      string            `json:"zone_quality,omitempty"`
+	RotationRank     int               `json:"rotation_rank,omitempty"`
+	RotationScore    float64           `json:"rotation_score,omitempty"`
+	AssetFlowBias    flow.Bias         `json:"asset_flow_bias,omitempty"`
+	AssetFlowScore   float64           `json:"asset_flow_score,omitempty"`
+	MMCase           MMCase            `json:"mm_case,omitempty"`
+	MMScore          float64           `json:"mm_score,omitempty"`
+	MMReasons        []string          `json:"mm_reasons,omitempty"`
+	MMMissing        []string          `json:"mm_missing,omitempty"`
+	LiquidityQuality liquidity.Quality `json:"liquidity_quality,omitempty"`
+	Layers           []Layer           `json:"layers"`
+	Reason           string            `json:"reason"`
+	HardBlockers     []string          `json:"hard_blockers,omitempty"`
+	SoftBlockers     []string          `json:"soft_blockers,omitempty"`
+	NextTrigger      string            `json:"next_trigger,omitempty"`
 }
 
 type Plan struct {
@@ -109,7 +115,16 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 		p.Summary = "BTC permission WATCH/NO_TRADE; không tạo probe."
 		p.State = StateWatch
 		for _, sym := range cfg.Data.Symbols.Assets {
-			p.Assets = append(p.Assets, AssetPlan{Symbol: sym, State: StateWatch, Reason: "BTC permission WATCH; không tạo probe", HardBlockers: []string{"BTC permission WATCH; không tạo probe"}, NextTrigger: "Chờ BTC chuyển ARMED hoặc ALLOWED trước khi tạo live order."})
+			ap := AssetPlan{Symbol: sym, State: StateWatch, Reason: "BTC permission WATCH; không tạo probe", HardBlockers: []string{"BTC permission WATCH; không tạo probe"}, NextTrigger: "Chờ BTC chuyển ARMED hoặc ALLOWED trước khi tạo live order."}
+			if c := candles[sym]; len(c) >= 25 {
+				mm := AnalyzeMMAccumulation(sym, c)
+				ap.MMCase = mm.Case
+				ap.MMScore = mm.Score
+				ap.MMReasons = mm.Reasons
+				ap.MMMissing = mm.Missing
+				ap.LiquidityQuality = liquidity.EvaluateCandleProxy(cfg, sym, c, desiredLiquidityNotional(cfg, sym))
+			}
+			p.Assets = append(p.Assets, ap)
 		}
 		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
 		AddWatchlistMissing(&p.Watchlist, "BTC permission WATCH; không tạo probe", cfg)
@@ -196,6 +211,12 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	ap.ZoneWidthPct = zoneWidthPct(support)
 	ap.DiscountGapPct = discountGapPct(price, support)
 	ap.ZoneQuality = zoneQuality(support)
+	mm := AnalyzeMMAccumulation(sym, c)
+	ap.MMCase = mm.Case
+	ap.MMScore = mm.Score
+	ap.MMReasons = mm.Reasons
+	ap.MMMissing = mm.Missing
+	ap.LiquidityQuality = liquidity.EvaluateCandleProxy(cfg, sym, c, desiredLiquidityNotional(cfg, sym))
 	if ap.ZoneQuality != "ZONE_OK" {
 		ap.State = StateWatch
 		ap.Reason = zoneQualityReason(ap.ZoneQuality, ap.ZoneWidthPct)
@@ -239,6 +260,13 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 			return ap
 		}
 	}
+	if mm.HardBlock {
+		ap.State = StateNoTrade
+		ap.Reason = mmReason(mm)
+		ap.HardBlockers = append(ap.HardBlockers, ap.Reason)
+		ap.NextTrigger = mm.NextTrigger
+		return ap
+	}
 	if enabled, minBull, allowNeutral := assetFlowEntryParams(cfg); enabled && useAssetFlowEntry {
 		entry := AssetFlowEntry(sym, c, minBull, allowNeutral)
 		ap.AssetFlowBias = entry.Bias
@@ -252,9 +280,16 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 				ap.SoftBlockers = append(ap.SoftBlockers, entry.Reason)
 			}
 			ap.Reason = entry.Reason
-			ap.NextTrigger = "Chờ sweep low + reclaim support hoặc absorption volume gần support."
+			ap.NextTrigger = firstNonEmptyMM(entry.NextTrigger, "Chờ sweep low + reclaim support hoặc absorption volume gần support.")
 			return ap
 		}
+	}
+	if cfg.Live.LiquidityGateEnabled && ap.LiquidityQuality.Enabled && !ap.LiquidityQuality.Pass {
+		ap.State = StateWatch
+		ap.Reason = "liquidity gate blocked: " + firstString(ap.LiquidityQuality.Reasons)
+		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+		ap.NextTrigger = "Chờ spread/depth/volume đủ dày trước khi tạo live layer."
+		return ap
 	}
 	if !support.Valid() || price > support.High*(1+discountZonePremiumPct(cfg)) {
 		ap.State = StateWatch
@@ -403,6 +438,38 @@ func relativeStrengthParams(cfg config.Config) (bool, int, float64, float64) {
 		minMomentum = -0.05
 	}
 	return true, lookback, minRelative, minMomentum
+}
+
+func desiredLiquidityNotional(cfg config.Config, sym string) float64 {
+	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
+		return cfg.Live.MaxLiveNotionalPerOrderUSDT
+	}
+	if cfg.Live.CanaryMaxNotionalUSDT > 0 {
+		return cfg.Live.CanaryMaxNotionalUSDT
+	}
+	if cfg.Live.MaxOrderNotionalUSDT > 0 {
+		return cfg.Live.MaxOrderNotionalUSDT
+	}
+	if cfg.Portfolio.TotalCapital > 0 && cfg.Portfolio.Allocation != nil && cfg.Portfolio.Allocation[sym] > 0 && cfg.Risk.MaxTotalDeploymentPerCycle > 0 {
+		return cfg.Portfolio.TotalCapital * cfg.Portfolio.Allocation[sym] * cfg.Risk.MaxTotalDeploymentPerCycle
+	}
+	return 1
+}
+
+func firstString(items []string) string {
+	if len(items) == 0 {
+		return "liquidity quality chưa đạt"
+	}
+	return items[0]
+}
+
+func firstNonEmptyMM(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func discountZonePremiumPct(cfg config.Config) float64 {

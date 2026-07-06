@@ -21,6 +21,11 @@ type AssetFlowEntrySignal struct {
 	Absorption      bool      `json:"absorption"`
 	FailedBreakout  bool      `json:"failed_breakout"`
 	Distribution    bool      `json:"distribution"`
+	MMCase          MMCase    `json:"mm_case,omitempty"`
+	MMScore         float64   `json:"mm_score,omitempty"`
+	MMReasons       []string  `json:"mm_reasons,omitempty"`
+	MMMissing       []string  `json:"mm_missing,omitempty"`
+	NextTrigger     string    `json:"next_trigger,omitempty"`
 	Reason          string    `json:"reason"`
 }
 
@@ -32,28 +37,33 @@ func AssetFlowEntry(sym string, candles []market.Candle, minBullScore float64, a
 	if minBullScore <= 0 {
 		minBullScore = 0.25
 	}
-	sig := flow.Analyze(candles, "1d", 60)
-	s.Bias = sig.FlowBias
-	s.BullScore = sig.BullScore
-	s.BearScore = sig.BearScore
-	s.SweepLow = sig.SweepLow
-	s.ReclaimSupport = sig.ReclaimSupport
-	s.FailedBreakdown = sig.FailedBreakdown
-	s.Absorption = sig.Absorption
-	s.FailedBreakout = sig.FailedBreakout
-	s.Distribution = sig.Distribution
+	mm := AnalyzeMMAccumulation(sym, candles)
+	s.Bias = mm.FlowBias
+	s.BullScore = mm.BullScore
+	s.BearScore = mm.BearScore
+	s.SweepLow = mm.SweepLow
+	s.ReclaimSupport = mm.ReclaimSupport
+	s.FailedBreakdown = mm.FailedBreakdown
+	s.Absorption = mm.Absorption
+	s.FailedBreakout = mm.FailedBreakout
+	s.Distribution = mm.Distribution
+	s.MMCase = mm.Case
+	s.MMScore = mm.Score
+	s.MMReasons = mm.Reasons
+	s.MMMissing = mm.Missing
+	s.NextTrigger = mm.NextTrigger
 
-	if sig.FlowBias == flow.BiasBullTrap || sig.FlowBias == flow.BiasDistribution || sig.FailedBreakout || sig.Distribution {
+	if mm.HardBlock {
 		s.HardBlock = true
-		s.Reason = fmt.Sprintf("asset flow entry chặn: bias=%s bull=%.2f bear=%.2f failed_breakout=%v distribution=%v", sig.FlowBias, sig.BullScore, sig.BearScore, sig.FailedBreakout, sig.Distribution)
+		s.Reason = fmt.Sprintf("asset flow entry chặn: %s", mmReason(mm))
 		return s
 	}
-	if sig.FlowBias == flow.BiasAccumulation || sig.FlowBias == flow.BiasBearTrap || sig.FailedBreakdown || sig.Absorption && sig.BullScore >= minBullScore || allowNeutralReclaim && sig.SweepLow && sig.ReclaimSupport {
+	if mm.Pass || mm.Case == MMCaseSpringReclaim || mm.Case == MMCaseArmedProbeCandidate || mm.FlowBias == flow.BiasAccumulation || mm.FlowBias == flow.BiasBearTrap || mm.FailedBreakdown || mm.Absorption && mm.BullScore >= minBullScore || allowNeutralReclaim && mm.SweepLow && mm.ReclaimSupport {
 		s.Pass = true
-		s.Reason = fmt.Sprintf("asset flow entry OK: bias=%s bull=%.2f sweep=%v reclaim=%v absorption=%v failed_breakdown=%v", sig.FlowBias, sig.BullScore, sig.SweepLow, sig.ReclaimSupport, sig.Absorption, sig.FailedBreakdown)
+		s.Reason = fmt.Sprintf("asset flow entry OK: %s", mmReason(mm))
 		return s
 	}
-	s.Reason = fmt.Sprintf("asset flow entry chưa xác nhận: bias=%s bull=%.2f bear=%.2f", sig.FlowBias, sig.BullScore, sig.BearScore)
+	s.Reason = fmt.Sprintf("asset flow entry chưa xác nhận: %s", mmReason(mm))
 	return s
 }
 

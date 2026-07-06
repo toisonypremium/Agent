@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/market"
 )
 
@@ -154,6 +156,29 @@ func TestManageLiveOrdersPerCoinAssignsCancelAndReplace(t *testing.T) {
 	}
 	if sol.Canceled != 1 {
 		t.Fatalf("expected SOL cancel summary, got %+v", sol)
+	}
+}
+
+func TestBuildManagedDesiredOrdersBlocksLiquidityFail(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.LiquidityGateEnabled = true
+	plan := managedPlan()
+	plan.Assets[0].LiquidityQuality = liquidity.Quality{Enabled: true, Pass: false, Grade: liquidity.GradeD, Reasons: []string{"liquidity gate: test fail"}}
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	for _, d := range desired {
+		if d.Symbol == "ETHUSDT" {
+			t.Fatalf("ETH should be blocked by liquidity: desired=%+v blocked=%+v", desired, blocked)
+		}
+	}
+	found := false
+	for _, b := range blocked {
+		if b.Symbol == "ETHUSDT" && strings.Contains(b.Reason, "liquidity gate blocked") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing liquidity block: desired=%+v blocked=%+v", desired, blocked)
 	}
 }
 

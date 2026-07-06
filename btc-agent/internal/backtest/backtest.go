@@ -45,6 +45,7 @@ type Result struct {
 	BTCPermissionAudit            BTCPermissionAuditResult      `json:"btc_permission_audit"`
 	ThresholdCalibration          ThresholdCalibrationResult    `json:"threshold_calibration"`
 	ZoneEntrySanity               ZoneEntrySanityResult         `json:"zone_entry_sanity"`
+	MMAccumulationAudit           MMAccumulationAuditResult     `json:"mm_accumulation_audit"`
 	Agent2Simulation              Agent2Simulation              `json:"agent2_simulation"`
 	Agent2ArmedResearchSimulation Agent2Simulation              `json:"agent2_armed_research_simulation"`
 	WatchlistTriggerAudit         WatchlistTriggerAuditResult   `json:"watchlist_trigger_audit"`
@@ -366,6 +367,25 @@ func Markdown(r Result) string {
 			b.WriteString("Top zone/RR blockers:\n")
 			for _, blocker := range r.ZoneEntrySanity.TopBlockers {
 				b.WriteString(fmt.Sprintf("- %s: %d\n", blocker.Reason, blocker.Count))
+			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("10c. MM Accumulation / Liquidity Sanity\n")
+	if !r.MMAccumulationAudit.Enabled {
+		b.WriteString("- MM accumulation audit: skipped\n\n")
+	} else {
+		b.WriteString("- " + r.MMAccumulationAudit.Summary + "\n")
+		b.WriteString("| Symbol | Samples | Top case | MM pass | Hard block | Avg MM | Liq pass | Avg liq |\n")
+		b.WriteString("|---|---:|---|---:|---:|---:|---:|---:|\n")
+		for _, row := range r.MMAccumulationAudit.Rows {
+			b.WriteString(fmt.Sprintf("| %s | %d | %s | %.1f%% | %.1f%% | %.1f | %.1f%% | %.1f |\n", row.Symbol, row.Samples, row.TopCase, row.PassRate*100, row.HardBlockRate*100, row.AvgScore, row.LiquidityPassRate*100, row.AvgLiquidityScore))
+		}
+		if len(r.MMAccumulationAudit.TopMissing) > 0 {
+			b.WriteString("Top MM/liquidity blockers:\n")
+			for _, item := range r.MMAccumulationAudit.TopMissing {
+				b.WriteString(fmt.Sprintf("- %s: %d\n", item.Reason, item.Count))
 			}
 		}
 		b.WriteString("\n")

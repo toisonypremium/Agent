@@ -93,7 +93,7 @@ func BuildDeterministic(s RunNowSnapshot) string {
 			limit = 3
 		}
 		for _, c := range s.Plan.Watchlist.Candidates[:limit] {
-			b.WriteString(fmt.Sprintf("- %s: readiness %.0f%% | chờ: %s\n", c.Symbol, c.ReadinessScore*100, emptyScheduler(c.NextTrigger, "thêm xác nhận")))
+			b.WriteString(fmt.Sprintf("- %s: readiness %.0f%% | MM=%s %.0f/100 | Liq=%s %.0f/100 | chờ: %s\n", c.Symbol, c.ReadinessScore*100, c.MMCase, c.MMScore, emptyScheduler(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score, emptyScheduler(c.NextTrigger, "thêm xác nhận")))
 		}
 	}
 	if s.ShadowProbe.Profile != "" {

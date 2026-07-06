@@ -373,7 +373,7 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 			"score_breakdown":   analysis.ScoreBreakdown,
 			"permission_reason": analysis.PermissionReason,
 			"bias":              map[string]any{"weekly": analysis.WeeklyBias, "daily": analysis.DailyBias, "4h": analysis.FourHourBias},
-			"flow":              map[string]any{"bias": analysis.Flow.Bias, "score": analysis.Flow.Score},
+			"flow":              map[string]any{"bias": analysis.Flow.Bias, "score": analysis.Flow.Score, "daily_components": analysis.Flow.Daily.Components, "daily_diagnostics": analysis.Flow.Daily.Diagnostics},
 			"risk":              map[string]any{"level": analysis.RiskLevel, "falling_knife": analysis.FallingKnifeRisk, "fomo": analysis.FomoRisk},
 			"zones":             map[string]any{"accumulation": analysis.AccumulationZone, "support": analysis.PrimarySupportZone, "deep_support": analysis.DeepSupportZone, "resistance": analysis.ResistanceZone, "invalidation": analysis.InvalidationZone},
 			"scenarios":         map[string]string{"main": analysis.ScenarioMain, "bullish": analysis.ScenarioBullish, "bearish": analysis.ScenarioBearish},

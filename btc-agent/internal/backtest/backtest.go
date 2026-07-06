@@ -11,6 +11,7 @@ import (
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/flow"
+	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
 )
 
@@ -37,10 +38,12 @@ type Result struct {
 	SignalDensity                 float64                       `json:"signal_density"`
 	FlowCounts                    map[flow.Bias]int             `json:"flow_counts"`
 	ByBias                        map[flow.Bias]SignalStats     `json:"by_bias"`
+	DataSanity                    liveguard.DataSanityResult    `json:"data_sanity"`
 	BTCFlowBottleneckAudit        BTCFlowBottleneckAuditResult  `json:"btc_flow_bottleneck_audit"`
 	FlowParamQualityAudit         FlowParamQualityAuditResult   `json:"flow_param_quality_audit"`
 	BTCFlowRegimeAudit            BTCFlowRegimeAuditResult      `json:"btc_flow_regime_audit"`
 	BTCPermissionAudit            BTCPermissionAuditResult      `json:"btc_permission_audit"`
+	ThresholdCalibration          ThresholdCalibrationResult    `json:"threshold_calibration"`
 	Agent2Simulation              Agent2Simulation              `json:"agent2_simulation"`
 	Agent2ArmedResearchSimulation Agent2Simulation              `json:"agent2_armed_research_simulation"`
 	WatchlistTriggerAudit         WatchlistTriggerAuditResult   `json:"watchlist_trigger_audit"`
@@ -189,6 +192,39 @@ func Markdown(r Result) string {
 	}
 	b.WriteString("\n")
 
+	b.WriteString("6. Data / Zone Sanity\n")
+	if r.DataSanity.Status == "" {
+		b.WriteString("- Data sanity: skipped\n\n")
+	} else {
+		b.WriteString("- " + r.DataSanity.Summary + "\n")
+		if len(r.DataSanity.Warnings) > 0 {
+			b.WriteString("Warnings:\n")
+			for _, warning := range limitStringList(r.DataSanity.Warnings, 8) {
+				b.WriteString("- " + warning + "\n")
+			}
+		}
+		if len(r.DataSanity.Blockers) > 0 {
+			b.WriteString("Blockers:\n")
+			for _, blocker := range limitStringList(r.DataSanity.Blockers, 8) {
+				b.WriteString("- " + blocker + "\n")
+			}
+		}
+		if len(r.DataSanity.Zones) > 0 {
+			b.WriteString("| Zone | Width | Distance BTC | Status | Reason |\n")
+			b.WriteString("|---|---:|---:|---|---|\n")
+			for _, zone := range r.DataSanity.Zones {
+				status := "OK"
+				if !zone.Pass {
+					status = "BLOCK"
+				} else if zone.Warning {
+					status = "WARN"
+				}
+				b.WriteString(fmt.Sprintf("| %s | %.1f%% | %.1f%% | %s | %s |\n", zone.Name, zone.WidthPct*100, zone.DistanceFromBTC*100, status, zone.Reason))
+			}
+		}
+		b.WriteString("\n")
+	}
+
 	b.WriteString("6. BTC Flow Detector Bottleneck Audit\n")
 	if !r.BTCFlowBottleneckAudit.Enabled {
 		b.WriteString("- BTC flow bottleneck audit: skipped / not enough BTC candles\n\n")
@@ -301,7 +337,21 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("10. Agent 2 Layer Simulation\n")
+	b.WriteString("10. Threshold Calibration Profiles\n")
+	if !r.ThresholdCalibration.Enabled {
+		b.WriteString("- Threshold calibration: skipped / not enough BTC candles\n\n")
+	} else {
+		b.WriteString("- " + r.ThresholdCalibration.Summary + "\n")
+		b.WriteString("- Research-only: no production threshold changed; use as evidence before tuning live gates.\n")
+		b.WriteString("| Profile | ARMED% | ALLOWED% | Desired | Filled | 7D avg/win/DD | Verdict |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---|\n")
+		for _, row := range r.ThresholdCalibration.Rows {
+			b.WriteString(fmt.Sprintf("| %s | %.1f%% | %.1f%% | %d | %d | %s | %s |\n", row.Profile.Name, row.ArmedRate*100, row.AllowedRate*100, row.Desired, row.Filled, thresholdCalibrationHorizonCell(row, 7), row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("11. Agent 2 Layer Simulation\n")
 	if !r.Agent2Simulation.Enabled {
 		b.WriteString("- Agent 2 simulation: skipped / not enough asset candles\n\n")
 	} else {
@@ -571,6 +621,20 @@ func emptyDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func thresholdCalibrationHorizonCell(row ThresholdProfileRow, horizon int) string {
+	if row.AvgReturn == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.1f%% / %.2f%%", row.AvgReturn[horizon]*100, row.WinRate[horizon]*100, row.WorstDrawdown[horizon]*100)
+}
+
+func limitStringList(items []string, limit int) []string {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
 }
 
 func SaveReports(dir string, r Result, markdown string) error {

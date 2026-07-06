@@ -172,6 +172,30 @@ func actionConclusionVI(analysis agent1.MarketAnalysis, plan agent2.Plan) string
 	}
 }
 
+func flowDetailVI(analysis agent1.MarketAnalysis) string {
+	parts := []string{}
+	for _, c := range analysis.Flow.Daily.Components {
+		if !c.Pass {
+			continue
+		}
+		if c.Bull > 0 {
+			parts = append(parts, fmt.Sprintf("%s +%.2f", c.Name, c.Bull))
+		} else if c.Bear > 0 {
+			parts = append(parts, fmt.Sprintf("%s -%.2f", c.Name, c.Bear))
+		}
+		if len(parts) >= 3 {
+			break
+		}
+	}
+	if len(parts) == 0 && analysis.Flow.Daily.Diagnostics.NextBullTrigger != "" {
+		return analysis.Flow.Daily.Diagnostics.NextBullTrigger
+	}
+	if analysis.Flow.Daily.Diagnostics.NeedBullScore > 0 {
+		parts = append(parts, fmt.Sprintf("thiếu %.2f bull score", analysis.Flow.Daily.Diagnostics.NeedBullScore))
+	}
+	return strings.Join(parts, "; ")
+}
+
 func vietnameseRegime(regime string) string {
 	switch regime {
 	case "UPTREND":

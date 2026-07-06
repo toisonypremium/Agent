@@ -31,6 +31,7 @@ type RuntimeDoctorResult struct {
 	AccountBalanceOK     bool                  `json:"account_balance_ok,omitempty"`
 	PreflightPass        bool                  `json:"preflight_pass,omitempty"`
 	DataHealth           DataHealthResult      `json:"data_health,omitempty"`
+	DataSanity           DataSanityResult      `json:"data_sanity,omitempty"`
 	ReconcileSafety      ReconcileSafetyResult `json:"reconcile_safety,omitempty"`
 	RiskGovernor         RiskGovernorResult    `json:"risk_governor,omitempty"`
 	Blockers             []string              `json:"blockers,omitempty"`

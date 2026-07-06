@@ -79,6 +79,12 @@ func AnalyzeWithParams(c []market.Candle, timeframe string, lookback int, params
 	nearResistance := last.High >= s.Resistance.Low*params.NearResistanceHigh || last.Close >= s.Resistance.Low*params.NearResistanceClose
 	volumeHigh := last.Volume >= avgVol*params.VolumeHighMultiplier
 	wide := rangeSize > 0
+	lowerWickRatio, upperWickRatio := 0.0, 0.0
+	if wide {
+		lowerWickRatio = lowerWick / rangeSize
+		upperWickRatio = upperWick / rangeSize
+	}
+	s.Diagnostics = FlowDiagnostics{NearSupport: nearSupport, NearResistance: nearResistance, VolumeHigh: volumeHigh, LowerWickRatio: lowerWickRatio, UpperWickRatio: upperWickRatio, AvgVolume: avgVol, LastVolume: last.Volume}
 
 	s.SweepLow = last.Low < s.Support.Low || prev.Low < s.Support.Low
 	s.ReclaimSupport = last.Low < s.Support.Low && last.Close >= s.Support.Low
@@ -118,41 +124,33 @@ func AnalyzeMultiFrameWithParams(btc map[string][]market.Candle, params Params) 
 
 func (s *Signal) scoreAndBias(params Params) {
 	bull, bear := 0.0, 0.0
-	if s.SweepLow {
-		bull += 0.10
-		s.Notes = append(s.Notes, "quét thanh khoản dưới hỗ trợ")
+	add := func(name string, pass bool, bullWeight, bearWeight float64, reason string) {
+		s.Components = append(s.Components, FlowComponent{Name: name, Pass: pass, Bull: boolWeight(pass, bullWeight), Bear: boolWeight(pass, bearWeight), Reason: reason})
+		if !pass {
+			return
+		}
+		if bullWeight > 0 {
+			bull += bullWeight
+		}
+		if bearWeight > 0 {
+			bear += bearWeight
+		}
+		s.Notes = append(s.Notes, reason)
 	}
-	if s.ReclaimSupport {
-		bull += 0.20
-		s.Notes = append(s.Notes, "đóng nến reclaim hỗ trợ")
-	}
-	if s.FailedBreakdown {
-		bull += 0.20
-		s.Notes = append(s.Notes, "failed breakdown")
-	}
-	if s.Absorption {
-		bull += 0.25
-		s.Notes = append(s.Notes, "volume bán được hấp thụ gần hỗ trợ")
-	}
-	if s.SweepHigh {
-		bear += 0.10
-		s.Notes = append(s.Notes, "quét thanh khoản trên kháng cự")
-	}
-	if s.RejectResistance {
-		bear += 0.20
-		s.Notes = append(s.Notes, "bị từ chối ở kháng cự")
-	}
-	if s.FailedBreakout {
-		bear += 0.25
-		s.Notes = append(s.Notes, "failed breakout / bull trap")
-	}
-	if s.Distribution {
-		bear += 0.25
-		s.Notes = append(s.Notes, "volume mua bị xả gần kháng cự")
-	}
+	add("sweep_low", s.SweepLow, 0.10, 0, "quét thanh khoản dưới hỗ trợ")
+	add("reclaim_support", s.ReclaimSupport, 0.20, 0, "đóng nến reclaim hỗ trợ")
+	add("failed_breakdown", s.FailedBreakdown, 0.20, 0, "failed breakdown")
+	add("absorption", s.Absorption, 0.25, 0, "volume bán được hấp thụ gần hỗ trợ")
+	add("sweep_high", s.SweepHigh, 0, 0.10, "quét thanh khoản trên kháng cự")
+	add("reject_resistance", s.RejectResistance, 0, 0.20, "bị từ chối ở kháng cự")
+	add("failed_breakout", s.FailedBreakout, 0, 0.25, "failed breakout / bull trap")
+	add("distribution", s.Distribution, 0, 0.25, "volume mua bị xả gần kháng cự")
 
 	s.BullScore = clamp01(bull)
 	s.BearScore = clamp01(bear)
+	s.Diagnostics.NeedBullScore = clamp01(math.Max(0, params.AccumulationScore-s.BullScore))
+	s.Diagnostics.NeedBearScore = clamp01(math.Max(0, params.DistributionScore-s.BearScore))
+	s.Diagnostics.NextBullTrigger = nextBullTrigger(*s)
 	if bear >= params.TrapScore && s.FailedBreakout {
 		s.FlowBias = BiasBullTrap
 		s.Confidence = clamp01(bear)
@@ -178,6 +176,29 @@ func (s *Signal) scoreAndBias(params Params) {
 	if len(s.Notes) == 0 {
 		s.Notes = append(s.Notes, "chưa thấy liquidity flow rõ")
 	}
+}
+
+func boolWeight(pass bool, weight float64) float64 {
+	if !pass {
+		return 0
+	}
+	return weight
+}
+
+func nextBullTrigger(s Signal) string {
+	if !s.SweepLow {
+		return "chờ sweep low dưới support"
+	}
+	if !s.ReclaimSupport {
+		return "chờ close reclaim support"
+	}
+	if !s.Absorption && s.Diagnostics.NearSupport {
+		return "chờ absorption/volume bán giảm gần support"
+	}
+	if !s.FailedBreakdown {
+		return "chờ failed breakdown rõ"
+	}
+	return "cần thêm bull component để flow >= ngưỡng"
 }
 
 func aggregateBias(daily, h4, weekly Signal) Bias {

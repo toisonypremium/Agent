@@ -59,13 +59,15 @@ type MarketAnalysis struct {
 }
 
 type ScoreBreakdown struct {
-	WeeklyTrend   float64  `json:"weekly_trend"`
-	DailyTrend    float64  `json:"daily_trend"`
-	FourHourTrend float64  `json:"four_hour_trend"`
-	TrendScore    float64  `json:"trend_score"`
-	FlowBias      string   `json:"flow_bias"`
-	FlowScore     float64  `json:"flow_score"`
-	RiskBlockers  []string `json:"risk_blockers,omitempty"`
+	WeeklyTrend     float64              `json:"weekly_trend"`
+	DailyTrend      float64              `json:"daily_trend"`
+	FourHourTrend   float64              `json:"four_hour_trend"`
+	TrendScore      float64              `json:"trend_score"`
+	FlowBias        string               `json:"flow_bias"`
+	FlowScore       float64              `json:"flow_score"`
+	FlowComponents  []flow.FlowComponent `json:"flow_components,omitempty"`
+	FlowNextTrigger string               `json:"flow_next_trigger,omitempty"`
+	RiskBlockers    []string             `json:"risk_blockers,omitempty"`
 }
 
 func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.FearGreed) (MarketAnalysis, error) {
@@ -82,7 +84,7 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	acc := market.AccumulationZone(ps, cfg.BTCCycle.StressPriceReference)
 	trend := (w.TrendScore*0.45 + d.TrendScore*0.40 + h4.TrendScore*0.15)
 	fl := flow.AnalyzeMultiFrame(btc)
-	breakdown := ScoreBreakdown{WeeklyTrend: w.TrendScore, DailyTrend: d.TrendScore, FourHourTrend: h4.TrendScore, TrendScore: trend, FlowBias: string(fl.Bias), FlowScore: fl.Score}
+	breakdown := ScoreBreakdown{WeeklyTrend: w.TrendScore, DailyTrend: d.TrendScore, FourHourTrend: h4.TrendScore, TrendScore: trend, FlowBias: string(fl.Bias), FlowScore: fl.Score, FlowComponents: compactFlowComponents(fl.Daily.Components, 6), FlowNextTrigger: fl.Daily.Diagnostics.NextBullTrigger}
 	regime := classifyRegime(w, d, h4, price, fg)
 	falling := fallingKnife(w, d, h4, btc["1d"])
 	fomo := fomoRisk(w, d, h4, price, rs, fg)
@@ -256,3 +258,26 @@ func riskBlockers(regime string, risk Risk, falling Risk, fomo Risk, support, re
 }
 
 func (a MarketAnalysis) JSON() string { b, _ := json.MarshalIndent(a, "", "  "); return string(b) }
+
+func compactFlowComponents(in []flow.FlowComponent, limit int) []flow.FlowComponent {
+	out := []flow.FlowComponent{}
+	for _, c := range in {
+		if !c.Pass {
+			continue
+		}
+		out = append(out, c)
+		if limit > 0 && len(out) >= limit {
+			return out
+		}
+	}
+	if len(out) > 0 {
+		return out
+	}
+	for _, c := range in {
+		out = append(out, c)
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}

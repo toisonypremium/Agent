@@ -89,3 +89,35 @@ func TestNormalVolumeSmallWickDoesNotTriggerFlow(t *testing.T) {
 		t.Fatalf("normal candle should remain neutral: %+v", got)
 	}
 }
+
+func TestFlowComponentsAndDiagnostics(t *testing.T) {
+	c := flowCandles(80)
+	last := len(c) - 1
+	c[last] = market.Candle{Symbol: "BTCUSDT", Interval: "1d", Open: 100, High: 108, Low: 96, Close: 106, Volume: 2200}
+	got := Analyze(c, "1d", 60)
+	if len(got.Components) == 0 {
+		t.Fatalf("expected flow components: %+v", got)
+	}
+	if got.Diagnostics.LastVolume <= 0 || got.Diagnostics.AvgVolume <= 0 {
+		t.Fatalf("expected volume diagnostics: %+v", got.Diagnostics)
+	}
+	found := false
+	for _, c := range got.Components {
+		if c.Name == "reclaim_support" && c.Pass && c.Bull > 0 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected reclaim_support component: %+v", got.Components)
+	}
+}
+
+func TestNeutralFlowHasNextTrigger(t *testing.T) {
+	c := flowCandles(80)
+	last := len(c) - 1
+	c[last] = market.Candle{Symbol: "BTCUSDT", Interval: "1d", Open: 104, High: 106, Low: 101, Close: 105, Volume: 1000}
+	got := Analyze(c, "1d", 60)
+	if got.FlowBias != BiasNeutral || got.Diagnostics.NextBullTrigger == "" {
+		t.Fatalf("expected neutral next trigger: %+v", got)
+	}
+}

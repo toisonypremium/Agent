@@ -373,7 +373,11 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 	if err != nil {
 		return backtest.Result{}, err
 	}
-	btc := map[string][]market.Candle{"1d": daily}
+	btc, err := loadBTC(cfg, db)
+	if err != nil {
+		btc = map[string][]market.Candle{"1d": daily}
+	}
+	btc["1d"] = daily
 	flowAudit, err := backtest.RunBTCFlowBottleneckAudit(btc, backtest.BTCFlowBottleneckAuditConfig{})
 	if err != nil {
 		result.BTCFlowBottleneckAudit = backtest.BTCFlowBottleneckAuditResult{Enabled: false, Summary: err.Error()}
@@ -398,6 +402,12 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 	} else {
 		result.BTCPermissionAudit = permissionAudit
 	}
+	thresholdCalibration, err := backtest.RunThresholdCalibration(cfg, btc, backtest.ThresholdCalibrationConfig{})
+	if err != nil {
+		result.ThresholdCalibration = backtest.ThresholdCalibrationResult{Enabled: false, Summary: err.Error()}
+	} else {
+		result.ThresholdCalibration = thresholdCalibration
+	}
 	assets := map[string][]market.Candle{}
 	for _, sym := range cfg.Data.Symbols.Assets {
 		candles, err := db.LoadCandles(sym, "1d", cfg.Data.CandleLimit)
@@ -405,6 +415,9 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 			continue
 		}
 		assets[sym] = candles
+	}
+	if analysis, err := agent1.Analyze(cfg, btc, exchange.FearGreed{Value: 50, Classification: "Neutral"}); err == nil {
+		result.DataSanity = liveguard.CheckDataSanity(cfg, btc, assets, analysis, time.Now())
 	}
 	sim, err := backtest.RunAgent2Simulation(cfg, btc, assets)
 	if err != nil {
@@ -883,6 +896,7 @@ type liveReadinessReport struct {
 	OpenLiveOrders                 []live.OrderStatus              `json:"open_live_orders"`
 	LivePositions                  []live.LivePosition             `json:"live_positions"`
 	DataHealth                     liveguard.DataHealthResult      `json:"data_health"`
+	DataSanity                     liveguard.DataSanityResult      `json:"data_sanity"`
 	ReconcileSafety                liveguard.ReconcileSafetyResult `json:"reconcile_safety"`
 	RiskGovernor                   liveguard.RiskGovernorResult    `json:"risk_governor"`
 	AutoLiveBlockers               []string                        `json:"auto_live_blockers"`
@@ -1138,6 +1152,9 @@ func liveDoctorMarkdown(result liveguard.RuntimeDoctorResult) string {
 	if result.DataHealth.Status != "" {
 		md += fmt.Sprintf("Data health: %s | %s\n", result.DataHealth.Status, result.DataHealth.Summary)
 	}
+	if result.DataSanity.Status != "" {
+		md += fmt.Sprintf("Data sanity: %s | %s\n", result.DataSanity.Status, result.DataSanity.Summary)
+	}
 	if result.ReconcileSafety.Status != "" {
 		md += fmt.Sprintf("Reconcile safety: %s | %s\n", result.ReconcileSafety.Status, result.ReconcileSafety.Summary)
 	}
@@ -1236,6 +1253,9 @@ func liveReadinessMarkdown(r liveReadinessReport) string {
 	md += fmt.Sprintf("Open live orders: %d\n", len(r.OpenLiveOrders))
 	md += fmt.Sprintf("Live positions: %d\n", len(r.LivePositions))
 	md += fmt.Sprintf("Data health: %s | %s\n", r.DataHealth.Status, r.DataHealth.Summary)
+	if r.DataSanity.Status != "" {
+		md += fmt.Sprintf("Data sanity: %s | %s\n", r.DataSanity.Status, r.DataSanity.Summary)
+	}
 	md += fmt.Sprintf("Reconcile safety: %s | %s\n", r.ReconcileSafety.Status, r.ReconcileSafety.Summary)
 	md += fmt.Sprintf("Risk governor: %s | %s\n", r.RiskGovernor.Status, r.RiskGovernor.Summary)
 	if len(r.DataHealth.Blockers) > 0 {

@@ -7,13 +7,11 @@ import (
 )
 
 func TestValidateSchedulerTelegramAI(t *testing.T) {
-	base := `📊 BTC Agent — Bản tin chiến lược
-I. Kết luận: không đặt lệnh vì BTC WATCH và chưa có ACTIVE_LIMIT. Không chase giá.
-II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score và risk đều được trình bày đủ để chủ tài khoản hiểu vì sao bot đứng ngoài lúc này.
-III. Vùng giá & kịch bản: Kịch bản chính giữ vốn. Kịch bản mở khóa cần reclaim. Kịch bản vô hiệu là mất support.
-IV. Kế hoạch bot: permission WATCH, plan WATCH. ETHUSDT: MM=NO_EDGE 10/100, Liq=D 22/100, Discount=12%, RR=2.2, thiếu=chưa reclaim, trigger=Chờ sweep low + close reclaim.
-V. Research context: tin tức chỉ là bối cảnh phụ, không override Agent 1/2, không dùng URL trong Telegram.
-VI. Trạng thái an toàn: daily OK, reconcile OK, supervisor OK. An toàn: spot limit BUY post-only only; không futures, không leverage, không market order.
+	base := `📊 BTC Agent — Tóm tắt chiến lược
+I. Kết luận: không đặt lệnh vì BTC WATCH và chưa có ACTIVE_LIMIT. Không chase giá. Blocker chính: BTC permission WATCH. BTC 62840 | trend 19.8 | DOWNTREND/WATCH | plan WATCH
+II. BTC & Kịch bản: Bias W/D/4H giảm/giảm/RANGE | Flow NEUTRAL 0.00 | risk vừa | Vùng active 57800–59775 | chính=Bảo toàn vốn | mở khóa=Cần reclaim/flow rõ | vô hiệu=mất support | Cần: Trend score cần tăng 25.2 điểm.
+III. Watchlist MM/Liq: ETHUSDT 49% | MM=NO_EDGE 20 (chưa reclaim) | Liq=A 100 | gap 12.0% RR 2.17 | Chờ BTC chuyển ALLOWED; asset chỉ nằm watchlist, không tạo lệnh.
+IV. Bot & Safety: Không ACTIVE_LIMIT: không đặt lệnh, không chase. WATCH không tạo probe. Runtime: MANAGED_CYCLE_COMPLETED desired=0 đặt=0. Spot limit BUY post-only only; không futures, không leverage, không market order.
 `
 	long := base + strings.Repeat("Nội dung phân tích bổ sung bằng tiếng Việt để vượt ngưỡng độ dài kiểm tra. ", 20)
 	if err := validateSchedulerTelegramAI(long); err != nil {
@@ -22,7 +20,7 @@ VI. Trạng thái an toàn: daily OK, reconcile OK, supervisor OK. An toàn: spo
 	if err := validateSchedulerTelegramAI(long + "..."); err == nil {
 		t.Fatal("expected truncated output rejected")
 	}
-	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "VI.", "")); err == nil {
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "IV.", "")); err == nil {
 		t.Fatal("expected missing section rejected")
 	}
 	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "không market", "")); err == nil {

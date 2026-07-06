@@ -119,6 +119,9 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		c.LiquidityQuality = plan.LiquidityQuality
 		c.RewardRisk = plan.RewardRisk
 		c.RewardRiskDetail = plan.RewardRiskDetail
+		if plan.SetupScore > 0 {
+			c.ReadinessScore = plan.SetupScore
+		}
 		c.ZoneWidthPct = plan.ZoneWidthPct
 		c.ZoneQuality = plan.ZoneQuality
 	} else {
@@ -242,11 +245,89 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		appendReasonMissing(&c)
 	}
 	c.Missing = uniqueStrings(c.Missing)
-	c.ReadinessScore = clamp01(relativeReady*0.20 + rotationReady*0.20 + flowReady*0.15 + mmReady*0.15 + liquidityReady*0.10 + discountReady*0.10 + rrReady*0.10)
+	computedReadiness := clamp01(relativeReady*0.20 + rotationReady*0.20 + flowReady*0.15 + mmReady*0.15 + liquidityReady*0.10 + discountReady*0.10 + rrReady*0.10)
+	if c.ReadinessScore > 0 {
+		c.ReadinessScore = clamp01(c.ReadinessScore*0.60 + computedReadiness*0.40)
+	} else {
+		c.ReadinessScore = computedReadiness
+	}
+	if len(plan.SetupGates) > 0 {
+		c.EntryChecklist = checklistFromSetupGates(plan.SetupGates)
+	}
 	c = tuneWatchCandidate(c, cfg)
 	c.NextTrigger = nextTrigger(c)
-	c.EntryChecklist = buildEntryChecklist(c, cfg)
+	if len(c.EntryChecklist) == 0 {
+		c.EntryChecklist = buildEntryChecklist(c, cfg)
+	}
 	return c
+}
+
+func checklistFromSetupGates(gates []SetupGateResult) []EntryChecklistItem {
+	items := []EntryChecklistItem{{Name: EntryCheckBTCPermission, Pass: true, Severity: EntryCheckHard, Reason: "BTC permission/risk đã cho phép."}}
+	for _, gate := range gates {
+		name := gate.Name
+		if name == "ZONE_QUALITY" {
+			name = EntryCheckDiscountZone
+		}
+		severity := EntryCheckSoft
+		if gate.Severity == SetupGateHard {
+			severity = EntryCheckHard
+		}
+		reason := gate.Reason
+		if gate.Pass {
+			reason = setupGatePassReason(name)
+		}
+		items = append(items, EntryChecklistItem{Name: name, Pass: gate.Pass, Severity: severity, Reason: reason})
+	}
+	return mergeChecklistItems(items)
+}
+
+func setupGatePassReason(name string) string {
+	switch name {
+	case EntryCheckFallingKnife:
+		return "Không có falling-knife risk."
+	case EntryCheckFOMO:
+		return "Không có FOMO risk."
+	case EntryCheckRelativeStrength:
+		return "Relative strength không yếu hơn BTC."
+	case EntryCheckRotationScore:
+		return "Rotation score đạt ngưỡng."
+	case EntryCheckRotationRank:
+		return "Rotation rank nằm trong top được phép."
+	case EntryCheckMMAccumulation:
+		return "MM accumulation footprint đã xác nhận."
+	case EntryCheckAssetFlowEntry:
+		return "Asset flow entry đã xác nhận."
+	case EntryCheckLiquidityQuality:
+		return "Liquidity đủ cho sizing hiện tại."
+	case EntryCheckDiscountZone:
+		return "Giá nằm trong vùng discount hợp lệ."
+	case EntryCheckRewardRisk:
+		return "Reward/risk đạt ngưỡng hoặc đã tính được."
+	default:
+		return "Setup gate pass."
+	}
+}
+
+func mergeChecklistItems(items []EntryChecklistItem) []EntryChecklistItem {
+	order := []string{EntryCheckBTCPermission, EntryCheckFallingKnife, EntryCheckFOMO, EntryCheckRelativeStrength, EntryCheckRotationScore, EntryCheckRotationRank, EntryCheckMMAccumulation, EntryCheckAssetFlowEntry, EntryCheckLiquidityQuality, EntryCheckDiscountZone, EntryCheckRewardRisk}
+	byName := map[string]EntryChecklistItem{}
+	for _, item := range items {
+		if item.Name == "" {
+			continue
+		}
+		prev, ok := byName[item.Name]
+		if !ok || (!item.Pass && prev.Pass) || (item.Severity == EntryCheckHard && prev.Severity != EntryCheckHard) {
+			byName[item.Name] = item
+		}
+	}
+	out := []EntryChecklistItem{}
+	for _, name := range order {
+		if item, ok := byName[name]; ok {
+			out = append(out, item)
+		}
+	}
+	return out
 }
 
 func appendReasonMissing(c *WatchCandidate) {

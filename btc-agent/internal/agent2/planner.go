@@ -9,7 +9,6 @@ import (
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/config"
 	"btc-agent/internal/flow"
-	"btc-agent/internal/indicators"
 	"btc-agent/internal/liquidity"
 	"btc-agent/internal/market"
 )
@@ -55,6 +54,8 @@ type AssetPlan struct {
 	MMReasons        []string          `json:"mm_reasons,omitempty"`
 	MMMissing        []string          `json:"mm_missing,omitempty"`
 	LiquidityQuality liquidity.Quality `json:"liquidity_quality,omitempty"`
+	SetupScore       float64           `json:"setup_score,omitempty"`
+	SetupGates       []SetupGateResult `json:"setup_gates,omitempty"`
 	Layers           []Layer           `json:"layers"`
 	Reason           string            `json:"reason"`
 	HardBlockers     []string          `json:"hard_blockers,omitempty"`
@@ -196,139 +197,24 @@ func probeNotional(cfg config.Config) float64 {
 }
 
 func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
-	ap := AssetPlan{Symbol: sym, State: StateWatch, Reason: "chưa đủ dữ liệu hoặc chưa vào discount zone", NextTrigger: "Chờ đủ dữ liệu và giá về discount zone."}
-	if len(c) < 60 {
-		ap.HardBlockers = []string{"chưa đủ dữ liệu 1D"}
-		ap.NextTrigger = "Chờ đủ dữ liệu nến 1D trước khi đánh giá candidate."
-		return ap
-	}
-	price := market.LastClose(c)
-	support, resistance := actionSupportResistanceZones(c)
-	closes := make([]float64, len(c))
-	for i, candle := range c {
-		closes[i] = candle.Close
-	}
-	ema20 := indicators.Last(indicators.EMA(closes, 20))
-	rsi := indicators.Last(indicators.RSI(closes, 14))
-
-	ap.DiscountZone = support
-	ap.ZoneWidthPct = zoneWidthPct(support)
-	ap.DiscountGapPct = discountGapPct(price, support)
-	ap.ZoneQuality = zoneQuality(support)
-	mm := AnalyzeMMAccumulation(sym, c)
-	ap.MMCase = mm.Case
-	ap.MMScore = mm.Score
-	ap.MMReasons = mm.Reasons
-	ap.MMMissing = mm.Missing
-	ap.LiquidityQuality = liquidity.EvaluateCandleProxy(cfg, sym, c, desiredLiquidityNotional(cfg, sym))
-	if ap.ZoneQuality != "ZONE_OK" {
-		ap.State = StateWatch
-		ap.Reason = zoneQualityReason(ap.ZoneQuality, ap.ZoneWidthPct)
-		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
-		ap.NextTrigger = "Chờ vùng support/discount hẹp và rõ hơn để tính entry/RR."
-		return ap
-	}
-
-	if FallingKnife(c) {
+	ap, eval := evaluateAssetSetup(cfg, sym, c, benchmark, rotation, useAssetFlowEntry)
+	if len(eval.HardBlockers) > 0 {
 		ap.State = StateNoTrade
-		ap.Reason = "falling knife filter chặn asset"
-		ap.HardBlockers = append(ap.HardBlockers, "falling knife risk")
-		ap.NextTrigger = "Chờ cấu trúc ngừng lower-low và reclaim support rõ."
+		ap.Reason = firstNonEmptyMM(firstReason(eval.HardBlockers), "setup hard blocker")
+		ap.NextTrigger = eval.NextTrigger
 		return ap
 	}
-	if FOMO(c, ema20, rsi, resistance) {
-		ap.State = StateNoTrade
-		ap.Reason = "FOMO filter chặn asset"
-		ap.HardBlockers = append(ap.HardBlockers, "FOMO risk")
-		ap.NextTrigger = "Không đuổi giá; chờ pullback về value/support."
-		return ap
-	}
-	if enabled, lookback, minRelative, minMomentum := relativeStrengthParams(cfg); enabled && len(benchmark) > 0 {
-		rs := RelativeStrength(c, benchmark, lookback, minRelative, minMomentum)
-		if !rs.Pass {
-			ap.State = StateNoTrade
-			ap.Reason = rs.Reason
-			ap.HardBlockers = append(ap.HardBlockers, rs.Reason)
-			ap.NextTrigger = "Chờ asset ngừng underperform BTC trong lookback."
-			return ap
-		}
-	}
-	if enabled, minScore, maxRank := rotationParams(cfg); enabled && rotation.Symbol != "" {
-		ap.RotationRank = rotation.Rank
-		ap.RotationScore = rotation.Score
-		if !rotation.Eligible || rotation.Score < minScore || (maxRank > 0 && rotation.Rank > maxRank) {
-			ap.State = StateWatch
-			ap.Reason = fmt.Sprintf("rotation score filter chặn asset: rank=%d score=%.2f reason=%s", rotation.Rank, rotation.Score, rotation.Reason)
-			ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
-			ap.NextTrigger = "Chờ rotation score tăng hoặc rank vào top được phép."
-			return ap
-		}
-	}
-	if mm.HardBlock {
-		ap.State = StateNoTrade
-		ap.Reason = mmReason(mm)
-		ap.HardBlockers = append(ap.HardBlockers, ap.Reason)
-		ap.NextTrigger = mm.NextTrigger
-		return ap
-	}
-	if enabled, minBull, allowNeutral := assetFlowEntryParams(cfg); enabled && useAssetFlowEntry {
-		entry := AssetFlowEntryFromMM(mm, minBull, allowNeutral)
-		ap.AssetFlowBias = entry.Bias
-		ap.AssetFlowScore = entry.BullScore
-		if !entry.Pass {
-			if entry.HardBlock {
-				ap.State = StateNoTrade
-				ap.HardBlockers = append(ap.HardBlockers, entry.Reason)
-			} else {
-				ap.State = StateWatch
-				ap.SoftBlockers = append(ap.SoftBlockers, entry.Reason)
-			}
-			ap.Reason = entry.Reason
-			ap.NextTrigger = firstNonEmptyMM(entry.NextTrigger, "Chờ sweep low + reclaim support hoặc absorption volume gần support.")
-			return ap
-		}
-	}
-	if cfg.Live.LiquidityGateEnabled && ap.LiquidityQuality.Enabled && !ap.LiquidityQuality.Pass {
+	if len(eval.SoftBlockers) > 0 {
 		ap.State = StateWatch
-		ap.Reason = "liquidity gate blocked: " + liquidity.FirstReason(ap.LiquidityQuality.Reasons)
-		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
-		ap.NextTrigger = "Chờ spread/depth/volume đủ dày trước khi tạo live layer."
+		ap.Reason = firstNonEmptyMM(primarySetupReason(eval.SoftBlockers), "setup chưa đủ gate")
+		ap.NextTrigger = eval.NextTrigger
 		return ap
 	}
-	if !support.Valid() || price > support.High*(1+discountZonePremiumPct(cfg)) {
-		ap.State = StateWatch
-		ap.DiscountZone = support
-		ap.Reason = fmt.Sprintf("giá chưa vào discount zone: cao hơn support %.2f%%", ap.DiscountGapPct*100)
-		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
-		ap.NextTrigger = "Chờ giá về support/discount zone mà không tạo falling knife."
-		return ap
-	}
-
-	invalidation := support.Low * 0.985
-	rr := RewardRiskBreakdown(RewardRiskInput{Entry: price, Invalidation: invalidation, Target: resistance.High})
-	ap.RewardRiskDetail = rr
-	if !rr.Valid {
-		ap.Reason = "reward/risk không hợp lệ: " + rr.Reason
-		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
-		ap.NextTrigger = "Chờ entry sâu hơn hoặc target rõ hơn để tính RR."
-		return ap
-	}
-	ap.DiscountZone = support
-	ap.Invalidation = invalidation
-	ap.RewardRisk = rr.Ratio
-	if ap.RewardRisk < cfg.Risk.MinRewardRisk {
-		ap.State = StateWatch
-		ap.Reason = fmt.Sprintf("reward/risk %.2f thấp hơn %.2f; risk %.4f reward %.4f", ap.RewardRisk, cfg.Risk.MinRewardRisk, rr.Risk, rr.Reward)
-		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
-		ap.NextTrigger = "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng."
-		return ap
-	}
-
 	budget := cfg.Portfolio.TotalCapital * cfg.Portfolio.Allocation[sym] * cfg.Risk.MaxTotalDeploymentPerCycle
 	if maxBudget := cfg.Portfolio.TotalCapital * cfg.Risk.MaxSingleAssetDeployment; budget > maxBudget {
 		budget = maxBudget
 	}
-	ap.Layers = buildEntryLayers(cfg, support, resistance, invalidation, budget)
+	ap.Layers = buildEntryLayers(cfg, ap.DiscountZone, ap.RewardRiskDetailToResistance(), ap.Invalidation, budget)
 	if len(ap.Layers) == 0 {
 		ap.State = StateWatch
 		ap.Reason = "không có layer nào đạt reward/risk tối thiểu"
@@ -337,9 +223,32 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		return ap
 	}
 	ap.State = StateActiveLimit
-	ap.Reason = "đủ discount zone và reward/risk; tạo paper limit layers"
+	ap.Reason = "đủ setup score/gates, discount zone và reward/risk; tạo paper limit layers"
 	ap.NextTrigger = "Layer hợp lệ; live manager kiểm tra preflight/caps trước khi đặt post-only."
 	return ap
+}
+
+func (ap AssetPlan) RewardRiskDetailToResistance() market.Zone {
+	if ap.RewardRiskDetail.Target > 0 {
+		return market.Zone{Low: ap.RewardRiskDetail.Target, High: ap.RewardRiskDetail.Target, Name: "target"}
+	}
+	return market.Zone{}
+}
+
+func firstReason(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	return items[0]
+}
+
+func primarySetupReason(items []string) string {
+	for _, item := range items {
+		if strings.Contains(item, "rotation score") || strings.Contains(item, "asset flow entry") || strings.Contains(item, "discount") || strings.Contains(item, "reward/risk") {
+			return item
+		}
+	}
+	return firstReason(items)
 }
 
 func actionSupportResistanceZones(c []market.Candle) (market.Zone, market.Zone) {

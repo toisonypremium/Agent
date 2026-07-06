@@ -425,24 +425,48 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 		}
 	}
 	b, _ := json.MarshalIndent(payload, "", "  ")
-	prompt := fmt.Sprintf(`Viết 1 bản tin Telegram TIẾNG VIỆT như trader chuyên nghiệp báo cáo cho chủ tài khoản.
-Không trả JSON. Không markdown fence. Không URL. Không tiếng Anh, trừ WATCH/ACTIVE_LIMIT/NO_TRADE.
+	prompt := fmt.Sprintf(`Bạn là bộ tạo tin Telegram. Nhiệm vụ: viết đúng format, không sáng tạo cấu trúc.
+	Ngôn ngữ: TIẾNG VIỆT. Không JSON. Không markdown fence. Không URL. Một tin duy nhất.
 
-BẮT BUỘC đủ 4 mục dưới đây, 1200-2400 ký tự:
+	QUY TẮC FORMAT BẮT BUỘC:
+	- Bắt đầu bằng đúng dòng: 📊 BTC Agent — Tóm tắt chiến lược
+	- Phải có đủ 4 nhãn literal, đúng chữ, đúng thứ tự: I. II. III. IV.
+	- Không được bỏ mục III. Không được gộp Watchlist vào mục khác.
+	- Mỗi mục ngắn, tổng 1200-2400 ký tự.
+	- Trước khi trả lời, tự kiểm: output có chứa đủ "I.", "II.", "III.", "IV.", "MM=", "Liq=", "trigger", "không futures", "không leverage", "không market order".
+
+	MẪU PHẢI BÁM SÁT, chỉ thay nội dung từ dữ liệu:
 	📊 BTC Agent — Tóm tắt chiến lược
-	I. Kết luận: nói có đặt lệnh không, blocker chính là gì (1 dòng), mode hiện tại, BTC price/trend/regime/plan.
-	II. BTC & Kịch bản: bias W/D/4H, flow, risk, vùng key (1 dòng), kịch bản chính/mở khóa/vô hiệu, điều kiện cần (tối đa 4 bullet).
-	III. Watchlist MM/Liq: mỗi coin 1 dòng: COIN readiness%% | MM=<case> <score> (<top missing>) | Liq=<grade> <score> | gap <gap>%% RR <ratio> | <trigger>.
-	IV. Bot & Safety: không ACTIVE_LIMIT thì nói rõ "không đặt lệnh, không chase", shadow nếu có, runtime desired/placed/canceled/blocked, research tối đa 1 câu, safety line.
+	I. KẾT LUẬN
+	<1-2 câu: có đặt lệnh không; blocker chính; mode; BTC price/trend/regime/plan>
 
-	CẤM nội dung vô nghĩa:
+	II. BTC & KỊCH BẢN
+	Bias W/D/4H: <...> | Flow <...> | risk <...>
+	Vùng: active <...> | support <...> | invalid <...> | resist <...>
+	Kịch bản chính: <...>
+	Kịch bản mở khóa: <...>
+	Kịch bản vô hiệu: <...>
+	Cần: <tối đa 4 điều kiện cụ thể>
+
+	III. WATCHLIST MM/LIQ
+	- <COIN> <readiness>%% | MM=<case> <score>/100 (<top missing>) | Liq=<grade> <score>/100 (<top reason nếu có>) | gap <gap>%% RR <ratio> | trigger=<next trigger>
+	- <COIN> <readiness>%% | MM=<case> <score>/100 (<top missing>) | Liq=<grade> <score>/100 (<top reason nếu có>) | gap <gap>%% RR <ratio> | trigger=<next trigger>
+	- <COIN> <readiness>%% | MM=<case> <score>/100 (<top missing>) | Liq=<grade> <score>/100 (<top reason nếu có>) | gap <gap>%% RR <ratio> | trigger=<next trigger>
+
+	IV. BOT & SAFETY
+	Không ACTIVE_LIMIT: không đặt lệnh, không chase; chờ điều kiện mở khóa.
+	Runtime: desired=<...> placed=<...> canceled=<...> blocked=<...>.
+	Research: <1 câu ngắn, context only>.
+	An toàn: spot limit BUY post-only only; không futures, không leverage, không market order.
+
+	CẤM:
 	- Không viết "theo dõi thêm" nếu không có trigger cụ thể.
 	- Không viết "thanh khoản chưa xác nhận" nếu không ghi Liq grade/score/reason.
 	- Không viết "MM footprint chưa đủ" nếu không ghi MM case/missing item.
 	- Không viết research dài hoặc link.
-	Nếu không có ACTIVE_LIMIT, phải ghi rõ: không đặt lệnh, không chase giá, chờ trigger, điều kiện mở khóa. Không futures, không leverage, không market order.
+	- Không dùng bullet ngoài 4 mục trên.
 
-	Dữ liệu:
+	Dữ liệu duy nhất được phép dùng:
 %s`, string(b))
 	text, err := client.ChatText(ctx, prompt)
 	if err != nil {

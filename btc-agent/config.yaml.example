@@ -80,7 +80,7 @@ ai:
   model: "Claw"
   base_url_env: "ANTHROPIC_BASE_URL"
   api_key_env: "ANTHROPIC_API_KEY"
-  max_tokens: 900
+  max_tokens: 6000
   temperature: 0
   telegram_enabled: true
 

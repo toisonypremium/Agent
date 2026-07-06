@@ -62,6 +62,9 @@ func BuildDeterministic(s RunNowSnapshot) string {
 
 	b.WriteString("IV. KẾ HOẠCH BOT\n")
 	b.WriteString(fmt.Sprintf("Permission: %s | Plan: %s\n", vietnamesePermission(s.Analysis.ActionPermission), vietnamesePlanState(s.Plan.State)))
+	if s.Analysis.PermissionReason != "" {
+		b.WriteString("Lý do chính: " + s.Analysis.PermissionReason + "\n")
+	}
 	active := activeAssetsVI(s.Plan)
 	if len(active) > 0 {
 		b.WriteString("Coin đủ điều kiện ACTIVE_LIMIT:\n")

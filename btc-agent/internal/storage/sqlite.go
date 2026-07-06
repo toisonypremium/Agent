@@ -23,12 +23,17 @@ func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
 	}
-	// Disable mmap for proot compatibility (avoids "out of memory" on Android/proot)
-	dsn := "file:" + path + "?_pragma=mmap_size(0)&_pragma=journal_mode(wal)"
+	// Disable mmap for proot compatibility (avoids "out of memory" on Android/proot).
+	// Keep one SQLite writer and wait briefly on locks so scheduler restart/live-doctor
+	// does not fail just because the previous process is finishing a transaction.
+	dsn := "file:" + path + "?_pragma=mmap_size(0)&_pragma=journal_mode(wal)&_pragma=busy_timeout(5000)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
 	d := &DB{db}
 	return d, d.Migrate()
 }
@@ -97,23 +102,44 @@ func (d *DB) ensureColumn(table, name, def string) error {
 	return err
 }
 func (d *DB) SaveCandles(cs []market.Candle) error {
-	tx, err := d.Begin()
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-	st, err := tx.Prepare(`INSERT OR REPLACE INTO candles(symbol,interval,open_time,open,high,low,close,volume,close_time) VALUES(?,?,?,?,?,?,?,?,?)`)
-	if err != nil {
-		return err
-	}
-	defer st.Close()
-	for _, c := range cs {
-		if _, err := st.Exec(c.Symbol, c.Interval, c.OpenTime.Unix(), c.Open, c.High, c.Low, c.Close, c.Volume, c.CloseTime.Unix()); err != nil {
+	return withSQLiteRetry(func() error {
+		tx, err := d.Begin()
+		if err != nil {
 			return err
 		}
-	}
-	return tx.Commit()
+		defer tx.Rollback()
+		st, err := tx.Prepare(`INSERT OR REPLACE INTO candles(symbol,interval,open_time,open,high,low,close,volume,close_time) VALUES(?,?,?,?,?,?,?,?,?)`)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		for _, c := range cs {
+			if _, err := st.Exec(c.Symbol, c.Interval, c.OpenTime.Unix(), c.Open, c.High, c.Low, c.Close, c.Volume, c.CloseTime.Unix()); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	})
 }
+
+func (d *DB) LatestCandleOpenTime(symbol, interval string) (time.Time, bool, error) {
+	var ts int64
+	err := d.QueryRow(`SELECT open_time FROM candles WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT 1`, strings.ToUpper(symbol), interval).Scan(&ts)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return time.Unix(ts, 0), true, nil
+}
+
+func (d *DB) CandleCount(symbol, interval string) (int, error) {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM candles WHERE symbol=? AND interval=?`, strings.ToUpper(symbol), interval).Scan(&count)
+	return count, err
+}
+
 func (d *DB) LoadCandles(symbol, interval string, limit int) ([]market.Candle, error) {
 	rows, err := d.Query(`SELECT symbol,interval,open_time,open,high,low,close,volume,close_time FROM candles WHERE symbol=? AND interval=? ORDER BY open_time DESC LIMIT ?`, symbol, interval, limit)
 	if err != nil {
@@ -473,6 +499,26 @@ func (d *DB) LivePositions() ([]live.LivePosition, error) {
 		out = append(out, pos)
 	}
 	return out, rows.Err()
+}
+
+func withSQLiteRetry(fn func() error) error {
+	var err error
+	for attempt := 0; attempt < 4; attempt++ {
+		err = fn()
+		if err == nil || !isSQLiteBusy(err) {
+			return err
+		}
+		time.Sleep(time.Duration(attempt+1) * 150 * time.Millisecond)
+	}
+	return err
+}
+
+func isSQLiteBusy(err error) bool {
+	if err == nil {
+		return false
+	}
+	lower := strings.ToLower(err.Error())
+	return strings.Contains(lower, "database is locked") || strings.Contains(lower, "sqlite_busy") || strings.Contains(lower, "database table is locked")
 }
 
 func mergeFeeCurrency(existing, incoming string) string {

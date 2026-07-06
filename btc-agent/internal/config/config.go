@@ -60,13 +60,17 @@ type Config struct {
 		CandleLimit int      `yaml:"candle_limit"`
 	} `yaml:"data"`
 	Maintenance struct {
-		Enabled              bool   `yaml:"enabled"`
-		SchedulerEnabled     bool   `yaml:"scheduler_enabled"`
-		SchedulerTime        string `yaml:"scheduler_time"`
-		ReportRetentionDays  int    `yaml:"report_retention_days"`
-		EventRetentionDays   int    `yaml:"event_retention_days"`
-		MaxReportFiles       int    `yaml:"max_report_files"`
-		MaxClosedPaperOrders int    `yaml:"max_closed_paper_orders"`
+		Enabled                     bool   `yaml:"enabled"`
+		SchedulerEnabled            bool   `yaml:"scheduler_enabled"`
+		SchedulerTime               string `yaml:"scheduler_time"`
+		ReportRetentionDays         int    `yaml:"report_retention_days"`
+		EventRetentionDays          int    `yaml:"event_retention_days"`
+		MaxReportFiles              int    `yaml:"max_report_files"`
+		MaxClosedPaperOrders        int    `yaml:"max_closed_paper_orders"`
+		MaxCandlesPerSymbolInterval int    `yaml:"max_candles_per_symbol_interval"`
+		MaxAnalysisRows             int    `yaml:"max_analysis_rows"`
+		MaxPlanRows                 int    `yaml:"max_plan_rows"`
+		WALCheckpoint               bool   `yaml:"wal_checkpoint_on_maintenance"`
 	} `yaml:"maintenance"`
 	Notify struct {
 		Enabled        bool   `yaml:"enabled"`
@@ -324,7 +328,7 @@ func (c Config) Validate() error {
 	if c.Data.CandleLimit < 100 {
 		return errors.New("data.candle_limit must be >=100")
 	}
-	if c.Maintenance.ReportRetentionDays < 0 || c.Maintenance.EventRetentionDays < 0 || c.Maintenance.MaxReportFiles < 0 || c.Maintenance.MaxClosedPaperOrders < 0 {
+	if c.Maintenance.ReportRetentionDays < 0 || c.Maintenance.EventRetentionDays < 0 || c.Maintenance.MaxReportFiles < 0 || c.Maintenance.MaxClosedPaperOrders < 0 || c.Maintenance.MaxCandlesPerSymbolInterval < 0 || c.Maintenance.MaxAnalysisRows < 0 || c.Maintenance.MaxPlanRows < 0 {
 		return errors.New("maintenance retention values cannot be negative")
 	}
 	if c.Maintenance.SchedulerTime != "" && !validClockTime(c.Maintenance.SchedulerTime) {

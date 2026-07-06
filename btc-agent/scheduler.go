@@ -293,12 +293,38 @@ func schedulerRunNowTelegram(ctx context.Context, cfg config.Config, db *storage
 		log.Printf("scheduler AI Telegram fallback: %v", err)
 		return fallback
 	}
-	if strings.TrimSpace(text) == "" || len(strings.TrimSpace(text)) < 1200 || textsafe.ContainsSecretLike(text) {
-		log.Printf("scheduler AI Telegram fallback: empty/short/unsafe output len=%d", len(strings.TrimSpace(text)))
+	if err := validateSchedulerTelegramAI(text); err != nil {
+		log.Printf("scheduler AI Telegram fallback: %v len=%d", err, len(strings.TrimSpace(text)))
 		return fallback
 	}
 	log.Printf("scheduler AI Telegram ok (%d chars)", len(text))
 	return strings.TrimSpace(text) + "\n"
+}
+
+func validateSchedulerTelegramAI(text string) error {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return fmt.Errorf("empty output")
+	}
+	if len(trimmed) < 1200 {
+		return fmt.Errorf("short output")
+	}
+	if textsafe.ContainsSecretLike(trimmed) {
+		return fmt.Errorf("unsafe secret-like output")
+	}
+	for _, want := range []string{"I.", "II.", "III.", "IV.", "V.", "VI."} {
+		if !strings.Contains(trimmed, want) {
+			return fmt.Errorf("missing section %s", want)
+		}
+	}
+	lower := strings.ToLower(trimmed)
+	if !strings.Contains(lower, "spot limit") || !strings.Contains(lower, "post-only") || !strings.Contains(lower, "không futures") || !strings.Contains(lower, "không leverage") || !strings.Contains(lower, "không market") {
+		return fmt.Errorf("missing complete safety line")
+	}
+	if strings.HasSuffix(trimmed, "...") || strings.HasSuffix(trimmed, "…") {
+		return fmt.Errorf("truncated output")
+	}
+	return nil
 }
 
 func schedulerRunNowTelegramDeterministic(db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {
@@ -341,26 +367,17 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	payload := map[string]any{
 		"generated_at": time.Now().UTC().Format(time.RFC3339),
 		"btc": map[string]any{
-			"price":              analysis.BTCPrice,
-			"regime":             analysis.MarketRegime,
-			"trend_score":        analysis.TrendScore,
-			"weekly_bias":        analysis.WeeklyBias,
-			"daily_bias":         analysis.DailyBias,
-			"four_hour_bias":     analysis.FourHourBias,
-			"flow_bias":          analysis.Flow.Bias,
-			"flow_score":         analysis.Flow.Score,
-			"risk_level":         analysis.RiskLevel,
-			"falling_knife_risk": analysis.FallingKnifeRisk,
-			"fomo_risk":          analysis.FomoRisk,
-			"accumulation_zone":  analysis.AccumulationZone,
-			"support_zone":       analysis.PrimarySupportZone,
-			"deep_support_zone":  analysis.DeepSupportZone,
-			"resistance_zone":    analysis.ResistanceZone,
-			"invalidation_zone":  analysis.InvalidationZone,
-			"scenario_main":      analysis.ScenarioMain,
-			"scenario_bullish":   analysis.ScenarioBullish,
-			"scenario_bearish":   analysis.ScenarioBearish,
-			"permission":         analysis.ActionPermission,
+			"price":             analysis.BTCPrice,
+			"regime":            analysis.MarketRegime,
+			"trend_score":       analysis.TrendScore,
+			"score_breakdown":   analysis.ScoreBreakdown,
+			"permission_reason": analysis.PermissionReason,
+			"bias":              map[string]any{"weekly": analysis.WeeklyBias, "daily": analysis.DailyBias, "4h": analysis.FourHourBias},
+			"flow":              map[string]any{"bias": analysis.Flow.Bias, "score": analysis.Flow.Score},
+			"risk":              map[string]any{"level": analysis.RiskLevel, "falling_knife": analysis.FallingKnifeRisk, "fomo": analysis.FomoRisk},
+			"zones":             map[string]any{"accumulation": analysis.AccumulationZone, "support": analysis.PrimarySupportZone, "deep_support": analysis.DeepSupportZone, "resistance": analysis.ResistanceZone, "invalidation": analysis.InvalidationZone},
+			"scenarios":         map[string]string{"main": analysis.ScenarioMain, "bullish": analysis.ScenarioBullish, "bearish": analysis.ScenarioBearish},
+			"permission":        analysis.ActionPermission,
 		},
 		"plan":               schedulerreport.CompactPlan(plan),
 		"research_summary":   researchSummary,

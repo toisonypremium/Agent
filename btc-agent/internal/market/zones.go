@@ -18,6 +18,12 @@ func RangeZone(c []Candle, lookback int) (Zone, Zone) {
 		}
 	}
 	width := (hi - lo) * 0.08
+	if width <= 0 {
+		width = lo * 0.005
+		if width <= 0 {
+			width = 1
+		}
+	}
 	return Zone{Low: lo, High: lo + width, Name: "support"}, Zone{Low: hi - width, High: hi, Name: "resistance"}
 }
 func DeepSupport(c []Candle, lookback int) Zone {

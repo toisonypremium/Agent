@@ -3,6 +3,7 @@ package agent1
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"btc-agent/internal/config"
@@ -37,6 +38,8 @@ type MarketAnalysis struct {
 	FourHourBias       string                        `json:"four_hour_bias"`
 	MarketRegime       string                        `json:"market_regime"`
 	TrendScore         float64                       `json:"trend_score"`
+	ScoreBreakdown     ScoreBreakdown                `json:"score_breakdown"`
+	PermissionReason   string                        `json:"permission_reason"`
 	RiskLevel          Risk                          `json:"risk_level"`
 	FallingKnifeRisk   Risk                          `json:"falling_knife_risk"`
 	FomoRisk           Risk                          `json:"fomo_risk"`
@@ -55,6 +58,16 @@ type MarketAnalysis struct {
 	Flow               flow.MultiFrame               `json:"flow"`
 }
 
+type ScoreBreakdown struct {
+	WeeklyTrend   float64  `json:"weekly_trend"`
+	DailyTrend    float64  `json:"daily_trend"`
+	FourHourTrend float64  `json:"four_hour_trend"`
+	TrendScore    float64  `json:"trend_score"`
+	FlowBias      string   `json:"flow_bias"`
+	FlowScore     float64  `json:"flow_score"`
+	RiskBlockers  []string `json:"risk_blockers,omitempty"`
+}
+
 func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.FearGreed) (MarketAnalysis, error) {
 	w, d, h4 := market.Frame(btc["1w"]), market.Frame(btc["1d"]), market.Frame(btc["4h"])
 	price := market.LastClose(btc["1d"])
@@ -69,6 +82,7 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	acc := market.AccumulationZone(ps, cfg.BTCCycle.StressPriceReference)
 	trend := (w.TrendScore*0.45 + d.TrendScore*0.40 + h4.TrendScore*0.15)
 	fl := flow.AnalyzeMultiFrame(btc)
+	breakdown := ScoreBreakdown{WeeklyTrend: w.TrendScore, DailyTrend: d.TrendScore, FourHourTrend: h4.TrendScore, TrendScore: trend, FlowBias: string(fl.Bias), FlowScore: fl.Score}
 	regime := classifyRegime(w, d, h4, price, fg)
 	falling := fallingKnife(w, d, h4, btc["1d"])
 	fomo := fomoRisk(w, d, h4, price, rs, fg)
@@ -81,13 +95,17 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	} else if trend >= 65 && falling == Low && fomo != High {
 		risk = Low
 	}
+	breakdown.RiskBlockers = riskBlockers(regime, risk, falling, fomo, ps, rs)
 	perm := permission(regime, risk, falling, fomo, ps, rs, trend)
+	permissionReason := permissionReason(regime, risk, falling, fomo, ps, rs, trend, perm)
 	if perm == Watch && risk != High && falling != High && fomo != High && (fl.Bias == flow.BiasAccumulation || fl.Bias == flow.BiasBearTrap) && fl.Score >= 0.25 {
 		perm = Armed
+		permissionReason = "flow accumulation/bear-trap đủ mạnh nên nâng từ WATCH lên ARMED"
 	}
 	if fl.Bias == flow.BiasBullTrap || fl.Bias == flow.BiasDistribution {
 		if perm == Allowed {
 			perm = Watch
+			permissionReason = "flow bull-trap/distribution hạ quyền từ ALLOWED xuống WATCH"
 		}
 	}
 	inv := market.Zone{}
@@ -97,7 +115,7 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	if !inv.Valid() {
 		perm = NoTrade
 	}
-	a := MarketAnalysis{Timestamp: time.Now(), BTCPrice: price, WeeklyBias: w.Bias, DailyBias: d.Bias, FourHourBias: h4.Bias, MarketRegime: regime, TrendScore: trend, RiskLevel: risk, FallingKnifeRisk: falling, FomoRisk: fomo, PrimarySupportZone: ps, DeepSupportZone: deep, ResistanceZone: rs, AccumulationZone: acc, InvalidationZone: inv, ActionPermission: perm, FearGreed: fg, Frames: map[string]market.FrameSignal{"1w": w, "1d": d, "4h": h4}, Flow: fl}
+	a := MarketAnalysis{Timestamp: time.Now(), BTCPrice: price, WeeklyBias: w.Bias, DailyBias: d.Bias, FourHourBias: h4.Bias, MarketRegime: regime, TrendScore: trend, ScoreBreakdown: breakdown, PermissionReason: permissionReason, RiskLevel: risk, FallingKnifeRisk: falling, FomoRisk: fomo, PrimarySupportZone: ps, DeepSupportZone: deep, ResistanceZone: rs, AccumulationZone: acc, InvalidationZone: inv, ActionPermission: perm, FearGreed: fg, Frames: map[string]market.FrameSignal{"1w": w, "1d": d, "4h": h4}, Flow: fl}
 	a.ScenarioMain = "Ưu tiên bảo toàn vốn; chỉ gom khi BTC giữ vùng hỗ trợ/value và có reclaim rõ."
 	a.ScenarioBullish = "BTC reclaim EMA/kháng cự gần, 1D giữ cấu trúc, volume bán giảm; Agent 2 có thể chuyển sang ARMED/ALLOWED."
 	a.ScenarioBearish = "BTC phá hỗ trợ chính với volume bán tăng hoặc 4H/1D tiếp tục lower-low; giữ NO_TRADE."
@@ -167,7 +185,7 @@ func permission(regime string, risk Risk, falling Risk, fomo Risk, support, resi
 	if !support.Valid() || !resistance.Valid() {
 		return NoTrade
 	}
-	rr := (resistance.High - support.High) / (support.High - support.Low)
+	rr := permissionRewardRisk(support, resistance)
 	if rr < 2 {
 		return Watch
 	}
@@ -179,4 +197,62 @@ func permission(regime string, risk Risk, falling Risk, fomo Risk, support, resi
 	}
 	return Watch
 }
+
+func permissionRewardRisk(support, resistance market.Zone) float64 {
+	if !support.Valid() || !resistance.Valid() {
+		return 0
+	}
+	entry := support.High
+	invalidation := support.Low * 0.985
+	risk := entry - invalidation
+	if risk <= 0 {
+		return 0
+	}
+	return (resistance.High - entry) / risk
+}
+
+func permissionReason(regime string, risk Risk, falling Risk, fomo Risk, support, resistance market.Zone, trend float64, perm Permission) string {
+	blockers := riskBlockers(regime, risk, falling, fomo, support, resistance)
+	if len(blockers) > 0 {
+		return "blocked: " + strings.Join(blockers, "; ")
+	}
+	rr := permissionRewardRisk(support, resistance)
+	if rr < 2 {
+		return fmt.Sprintf("reward/risk proxy %.2f dưới 2.00", rr)
+	}
+	switch perm {
+	case Allowed:
+		return fmt.Sprintf("trend %.1f và regime %s đủ cho ALLOWED", trend, regime)
+	case Armed:
+		return fmt.Sprintf("trend %.1f chỉ đủ ARMED", trend)
+	case Watch:
+		return fmt.Sprintf("trend %.1f chưa đủ ARMED", trend)
+	default:
+		return string(perm)
+	}
+}
+
+func riskBlockers(regime string, risk Risk, falling Risk, fomo Risk, support, resistance market.Zone) []string {
+	out := []string{}
+	if regime == "PANIC_SELLING" {
+		out = append(out, "panic selling")
+	}
+	if risk == High {
+		out = append(out, "risk high")
+	}
+	if falling == High {
+		out = append(out, "falling knife high")
+	}
+	if fomo == High {
+		out = append(out, "FOMO high")
+	}
+	if !support.Valid() {
+		out = append(out, "support zone invalid")
+	}
+	if !resistance.Valid() {
+		out = append(out, "resistance zone invalid")
+	}
+	return out
+}
+
 func (a MarketAnalysis) JSON() string { b, _ := json.MarshalIndent(a, "", "  "); return string(b) }

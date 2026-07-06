@@ -70,6 +70,41 @@ func TestPruneMaintenanceCapsClosedPaperOrdersAndKeepsOpen(t *testing.T) {
 	}
 }
 
+func TestPruneMaintenanceCapsCandlesAnalysesAndPlans(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for i := 0; i < 5; i++ {
+		mustExec(t, db, `INSERT INTO candles(symbol,interval,open_time,open,high,low,close,volume,close_time) VALUES(?,?,?,?,?,?,?,?,?)`, "BTCUSDT", "1d", int64(100+i), 1, 1, 1, 1, 1, int64(200+i))
+		mustExec(t, db, `INSERT INTO candles(symbol,interval,open_time,open,high,low,close,volume,close_time) VALUES(?,?,?,?,?,?,?,?,?)`, "ETHUSDT", "1d", int64(100+i), 1, 1, 1, 1, 1, int64(200+i))
+		mustExec(t, db, `INSERT INTO market_analyses(timestamp,btc_price,regime,action_permission,risk_level,falling_knife_risk,fomo_risk,payload_json) VALUES(?,?,?,?,?,?,?,?)`, int64(100+i), 1, "RANGE", "WATCH", "MEDIUM", "LOW", "LOW", "{}")
+		mustExec(t, db, `INSERT INTO accumulation_plans(timestamp,state,action_permission,payload_json) VALUES(?,?,?,?)`, int64(100+i), "WATCH", "WATCH", "{}")
+	}
+
+	result, err := db.PruneMaintenance(MaintenanceConfig{MaxCandlesPerSymbolInterval: 3, MaxAnalysisRows: 2, MaxPlanRows: 2}, time.Unix(1700000000, 0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.CandlesDeleted != 4 || result.AnalysesDeleted != 3 || result.PlansDeleted != 3 {
+		t.Fatalf("unexpected deleted counts: %+v", result)
+	}
+	if got := countRowsWhere(t, db, "candles", "symbol='BTCUSDT'"); got != 3 {
+		t.Fatalf("btc candles=%d want 3", got)
+	}
+	if got := countRowsWhere(t, db, "candles", "symbol='ETHUSDT'"); got != 3 {
+		t.Fatalf("eth candles=%d want 3", got)
+	}
+	if got := countRows(t, db, "market_analyses"); got != 2 {
+		t.Fatalf("analyses=%d want 2", got)
+	}
+	if got := countRows(t, db, "accumulation_plans"); got != 2 {
+		t.Fatalf("plans=%d want 2", got)
+	}
+}
+
 func mustExec(t *testing.T, db *DB, query string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(query, args...); err != nil {

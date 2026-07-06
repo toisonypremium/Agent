@@ -333,6 +333,7 @@ func schedulerRunNowTelegramDeterministic(db *storage.DB, researchSummary string
 	if analysisErr != nil || planErr != nil {
 		return schedulerreport.BuildMissingData()
 	}
+	shadow, _ := liveguard.LoadShadowProbeLatest("reports/shadow_probe_latest.json")
 	return schedulerreport.BuildDeterministic(schedulerreport.RunNowSnapshot{
 		GeneratedAt:     time.Now().UTC(),
 		Analysis:        analysis,
@@ -342,6 +343,7 @@ func schedulerRunNowTelegramDeterministic(db *storage.DB, researchSummary string
 		ReconcileOK:     reconcileOK,
 		Supervisor:      supervisor,
 		SupervisorSet:   supervisorSet,
+		ShadowProbe:     shadow,
 		Notes:           notes,
 	})
 }
@@ -355,6 +357,7 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	if err != nil {
 		return "", fmt.Errorf("latest plan: %w", err)
 	}
+	shadow, _ := liveguard.LoadShadowProbeLatest("reports/shadow_probe_latest.json")
 	maxTokens := cfg.AI.MaxTokens
 	if maxTokens < 2000 {
 		maxTokens = 2000
@@ -375,11 +378,12 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 			"bias":              map[string]any{"weekly": analysis.WeeklyBias, "daily": analysis.DailyBias, "4h": analysis.FourHourBias},
 			"flow":              map[string]any{"bias": analysis.Flow.Bias, "score": analysis.Flow.Score, "daily_components": analysis.Flow.Daily.Components, "daily_diagnostics": analysis.Flow.Daily.Diagnostics},
 			"risk":              map[string]any{"level": analysis.RiskLevel, "falling_knife": analysis.FallingKnifeRisk, "fomo": analysis.FomoRisk},
-			"zones":             map[string]any{"accumulation": analysis.AccumulationZone, "support": analysis.PrimarySupportZone, "deep_support": analysis.DeepSupportZone, "resistance": analysis.ResistanceZone, "invalidation": analysis.InvalidationZone},
+			"zones":             map[string]any{"active_accumulation": analysis.AccumulationZone, "macro_accumulation": analysis.MacroAccumulationZone, "support": analysis.PrimarySupportZone, "deep_support": analysis.DeepSupportZone, "resistance": analysis.ResistanceZone, "invalidation": analysis.InvalidationZone},
 			"scenarios":         map[string]string{"main": analysis.ScenarioMain, "bullish": analysis.ScenarioBullish, "bearish": analysis.ScenarioBearish},
 			"permission":        analysis.ActionPermission,
 		},
 		"plan":               schedulerreport.CompactPlan(plan),
+		"shadow_probe":       shadow,
 		"research_summary":   researchSummary,
 		"daily_ok":           dailyOK,
 		"reconcile_ok":       reconcileOK,
@@ -415,7 +419,7 @@ BẮT BUỘC đủ 6 mục dưới đây, 1600-2600 ký tự:
 I. Kết luận: nói có đặt lệnh không, vì sao.
 II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score, risk.
 III. Vùng giá & kịch bản: vùng gom, support, deep support, kháng cự, invalidation; kịch bản chính/tốt/xấu.
-IV. Kế hoạch bot: permission, plan state, ACTIVE_LIMIT layer nếu có; nếu không có thì nói thiếu gì, watchlist chờ trigger nào, và điều kiện mở khóa cụ thể.
+IV. Kế hoạch bot: permission, plan state, ACTIVE_LIMIT layer nếu có; nếu không có thì nói thiếu gì, watchlist chờ trigger nào, điều kiện mở khóa cụ thể, và Shadow ARMED_PROBE_LIGHT nếu có. Ghi rõ shadow only không đặt lệnh thật.
 V. Research context: chỉ bối cảnh phụ, không override.
 VI. Trạng thái an toàn: daily/reconcile/supervisor/gates, kết luận spot limit BUY post-only only.
 

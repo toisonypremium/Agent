@@ -44,6 +44,7 @@ type Result struct {
 	BTCFlowRegimeAudit            BTCFlowRegimeAuditResult      `json:"btc_flow_regime_audit"`
 	BTCPermissionAudit            BTCPermissionAuditResult      `json:"btc_permission_audit"`
 	ThresholdCalibration          ThresholdCalibrationResult    `json:"threshold_calibration"`
+	ZoneEntrySanity               ZoneEntrySanityResult         `json:"zone_entry_sanity"`
 	Agent2Simulation              Agent2Simulation              `json:"agent2_simulation"`
 	Agent2ArmedResearchSimulation Agent2Simulation              `json:"agent2_armed_research_simulation"`
 	WatchlistTriggerAudit         WatchlistTriggerAuditResult   `json:"watchlist_trigger_audit"`
@@ -347,6 +348,25 @@ func Markdown(r Result) string {
 		b.WriteString("|---|---:|---:|---:|---:|---:|---|\n")
 		for _, row := range r.ThresholdCalibration.Rows {
 			b.WriteString(fmt.Sprintf("| %s | %.1f%% | %.1f%% | %d | %d | %s | %s |\n", row.Profile.Name, row.ArmedRate*100, row.AllowedRate*100, row.Desired, row.Filled, thresholdCalibrationHorizonCell(row, 7), row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("10b. Zone / Discount / RR Sanity\n")
+	if !r.ZoneEntrySanity.Enabled {
+		b.WriteString("- Zone entry sanity: skipped\n\n")
+	} else {
+		b.WriteString("- " + r.ZoneEntrySanity.Summary + "\n")
+		b.WriteString("| Symbol | Samples | Discount pass | RR pass | Zone warns | Avg width | Avg gap |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---:|\n")
+		for _, row := range r.ZoneEntrySanity.Rows {
+			b.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %.1f%% | %d | %.1f%% | %.1f%% |\n", row.Symbol, row.Samples, row.DiscountPassRate*100, row.RewardRiskRate*100, row.ZoneWarn, row.AvgZoneWidthPct*100, row.AvgDiscountGap*100))
+		}
+		if len(r.ZoneEntrySanity.TopBlockers) > 0 {
+			b.WriteString("Top zone/RR blockers:\n")
+			for _, blocker := range r.ZoneEntrySanity.TopBlockers {
+				b.WriteString(fmt.Sprintf("- %s: %d\n", blocker.Reason, blocker.Count))
+			}
 		}
 		b.WriteString("\n")
 	}

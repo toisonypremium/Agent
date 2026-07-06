@@ -42,29 +42,32 @@ type EntryChecklistItem struct {
 }
 
 type WatchCandidate struct {
-	Symbol          string               `json:"symbol"`
-	State           State                `json:"state"`
-	ReadinessScore  float64              `json:"readiness_score"`
-	Actionable      bool                 `json:"actionable"`
-	Tier            string               `json:"tier"`
-	NoiseFlags      []string             `json:"noise_flags,omitempty"`
-	EntryChecklist  []EntryChecklistItem `json:"entry_checklist,omitempty"`
-	RotationRank    int                  `json:"rotation_rank,omitempty"`
-	RotationScore   float64              `json:"rotation_score,omitempty"`
-	AssetReturn     float64              `json:"asset_return"`
-	BenchmarkReturn float64              `json:"benchmark_return"`
-	RelativeReturn  float64              `json:"relative_return"`
-	FlowBias        flow.Bias            `json:"flow_bias,omitempty"`
-	FlowBullScore   float64              `json:"flow_bull_score"`
-	FlowBearScore   float64              `json:"flow_bear_score"`
-	Price           float64              `json:"price"`
-	Support         market.Zone          `json:"support"`
-	Resistance      market.Zone          `json:"resistance"`
-	DiscountGap     float64              `json:"discount_gap"`
-	RewardRisk      float64              `json:"reward_risk"`
-	BlockReason     string               `json:"block_reason"`
-	Missing         []string             `json:"missing"`
-	NextTrigger     string               `json:"next_trigger"`
+	Symbol           string               `json:"symbol"`
+	State            State                `json:"state"`
+	ReadinessScore   float64              `json:"readiness_score"`
+	Actionable       bool                 `json:"actionable"`
+	Tier             string               `json:"tier"`
+	NoiseFlags       []string             `json:"noise_flags,omitempty"`
+	EntryChecklist   []EntryChecklistItem `json:"entry_checklist,omitempty"`
+	RotationRank     int                  `json:"rotation_rank,omitempty"`
+	RotationScore    float64              `json:"rotation_score,omitempty"`
+	AssetReturn      float64              `json:"asset_return"`
+	BenchmarkReturn  float64              `json:"benchmark_return"`
+	RelativeReturn   float64              `json:"relative_return"`
+	FlowBias         flow.Bias            `json:"flow_bias,omitempty"`
+	FlowBullScore    float64              `json:"flow_bull_score"`
+	FlowBearScore    float64              `json:"flow_bear_score"`
+	Price            float64              `json:"price"`
+	Support          market.Zone          `json:"support"`
+	Resistance       market.Zone          `json:"resistance"`
+	DiscountGap      float64              `json:"discount_gap"`
+	ZoneWidthPct     float64              `json:"zone_width_pct,omitempty"`
+	ZoneQuality      string               `json:"zone_quality,omitempty"`
+	RewardRisk       float64              `json:"reward_risk"`
+	RewardRiskDetail RewardRiskResult     `json:"reward_risk_detail,omitempty"`
+	BlockReason      string               `json:"block_reason"`
+	Missing          []string             `json:"missing"`
+	NextTrigger      string               `json:"next_trigger"`
 }
 
 type WatchlistReport struct {
@@ -101,6 +104,9 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		c.FlowBias = plan.AssetFlowBias
 		c.FlowBullScore = plan.AssetFlowScore
 		c.RewardRisk = plan.RewardRisk
+		c.RewardRiskDetail = plan.RewardRiskDetail
+		c.ZoneWidthPct = plan.ZoneWidthPct
+		c.ZoneQuality = plan.ZoneQuality
 	} else {
 		c.BlockReason = "chưa có plan chi tiết"
 	}
@@ -114,13 +120,11 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 	}
 
 	c.Price = market.LastClose(candles)
-	c.Support, c.Resistance = market.RangeZone(candles, 60)
-	if c.Support.Valid() && c.Price > 0 {
-		if c.Price > c.Support.High {
-			c.DiscountGap = c.Price/c.Support.High - 1
-		} else if c.Price < c.Support.Low {
-			c.DiscountGap = c.Price/c.Support.Low - 1
-		}
+	c.Support, c.Resistance = actionSupportResistanceZones(candles)
+	c.DiscountGap = discountGapPct(c.Price, c.Support)
+	c.ZoneWidthPct = zoneWidthPct(c.Support)
+	if c.ZoneQuality == "" {
+		c.ZoneQuality = zoneQuality(c.Support)
 	}
 
 	lookback, minRelative, minMomentum := rotationStrengthParams(cfg)
@@ -174,10 +178,10 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 	}
 
 	discountReady := discountComponent(c.Price, c.Support)
-	if !c.Support.Valid() {
-		c.Missing = append(c.Missing, "support zone không hợp lệ")
+	if c.ZoneQuality != "ZONE_OK" {
+		c.Missing = append(c.Missing, zoneQualityReason(c.ZoneQuality, c.ZoneWidthPct))
 	} else if c.Price > c.Support.High*(1+discountZonePremiumPct(cfg)) {
-		c.Missing = append(c.Missing, "giá chưa vào discount zone")
+		c.Missing = append(c.Missing, fmt.Sprintf("giá chưa vào discount zone: cao hơn support %.2f%%", c.DiscountGap*100))
 	} else if c.Price < c.Support.Low*0.97 {
 		c.Missing = append(c.Missing, "giá dưới support quá sâu; tránh dao rơi")
 	}
@@ -185,6 +189,7 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 	rrReady := 0.50
 	if c.RewardRisk <= 0 && c.Support.Valid() && c.Resistance.Valid() && c.Price > 0 {
 		rr := RewardRiskFromZones(c.Price, c.Support, c.Resistance)
+		c.RewardRiskDetail = rr
 		if rr.Valid {
 			c.RewardRisk = rr.Ratio
 		}
@@ -192,7 +197,7 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 	if cfg.Risk.MinRewardRisk > 0 && c.RewardRisk > 0 {
 		rrReady = clamp01(c.RewardRisk / cfg.Risk.MinRewardRisk)
 		if c.RewardRisk < cfg.Risk.MinRewardRisk {
-			c.Missing = append(c.Missing, fmt.Sprintf("reward/risk dưới %.2f", cfg.Risk.MinRewardRisk))
+			c.Missing = append(c.Missing, fmt.Sprintf("reward/risk %.2f dưới %.2f", c.RewardRisk, cfg.Risk.MinRewardRisk))
 		}
 	} else {
 		c.Missing = append(c.Missing, "chưa tính được reward/risk")

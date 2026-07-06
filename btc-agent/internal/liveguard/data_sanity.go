@@ -105,10 +105,14 @@ func CheckDataSanity(cfg config.Config, btc map[string][]market.Candle, assets m
 		{"support", analysis.PrimarySupportZone},
 		{"deep_support", analysis.DeepSupportZone},
 		{"resistance", analysis.ResistanceZone},
-		{"accumulation", analysis.AccumulationZone},
+		{"active_accumulation", analysis.AccumulationZone},
+		{"macro_accumulation", analysis.MacroAccumulationZone},
 		{"invalidation", analysis.InvalidationZone},
 	}
 	for _, item := range zones {
+		if item.name == "macro_accumulation" && !item.zone.Valid() {
+			continue
+		}
 		z := checkZoneSanity(item.name, item.zone, price)
 		res.Zones = append(res.Zones, z)
 		if !z.Pass {

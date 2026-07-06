@@ -45,7 +45,7 @@ func RankAssets(cfg config.Config, candles map[string][]market.Candle, benchmark
 		s.RelativeScore = relativeComponent(rs.RelativeReturn)
 		s.MomentumScore = momentumComponent(rs.AssetReturn)
 		price := market.LastClose(c)
-		support, _ := market.RangeZone(c, 60)
+		support, _ := actionSupportResistanceZones(c)
 		s.DiscountScore = discountComponent(price, support)
 		sig := flow.Analyze(c, "1d", 60)
 		s.FlowBias = sig.FlowBias

@@ -7,6 +7,7 @@ import (
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
+	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
 )
 
@@ -32,6 +33,7 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 			ScenarioMain:       "đi ngang chờ xác nhận",
 		},
 		Plan:            agent2.Plan{State: agent2.StateWatch},
+		ShadowProbe:     liveguard.ShadowProbeJournal{Profile: liveguard.ShadowProfileArmedProbeLight, ProductionPermission: agent1.Watch, ResearchPermission: agent1.Watch, Blockers: []string{"BTC research profile not ARMED"}},
 		ResearchSummary: "Tin nền trung lập",
 		DailyOK:         true,
 		ReconcileOK:     true,
@@ -44,6 +46,8 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 		"V. TIN TỨC / RESEARCH",
 		"VI. TRẠNG THÁI THỰC THI",
 		"Chưa có coin ACTIVE_LIMIT. Bot không đặt lệnh.",
+		"Shadow ARMED_PROBE_LIGHT",
+		"Shadow only — không đặt lệnh thật",
 		"không futures, không leverage, không market order",
 	} {
 		if !strings.Contains(text, want) {

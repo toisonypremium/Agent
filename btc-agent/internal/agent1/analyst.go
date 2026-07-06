@@ -31,31 +31,32 @@ const (
 )
 
 type MarketAnalysis struct {
-	Timestamp          time.Time                     `json:"timestamp"`
-	BTCPrice           float64                       `json:"btc_price"`
-	WeeklyBias         string                        `json:"weekly_bias"`
-	DailyBias          string                        `json:"daily_bias"`
-	FourHourBias       string                        `json:"four_hour_bias"`
-	MarketRegime       string                        `json:"market_regime"`
-	TrendScore         float64                       `json:"trend_score"`
-	ScoreBreakdown     ScoreBreakdown                `json:"score_breakdown"`
-	PermissionReason   string                        `json:"permission_reason"`
-	RiskLevel          Risk                          `json:"risk_level"`
-	FallingKnifeRisk   Risk                          `json:"falling_knife_risk"`
-	FomoRisk           Risk                          `json:"fomo_risk"`
-	PrimarySupportZone market.Zone                   `json:"primary_support_zone"`
-	DeepSupportZone    market.Zone                   `json:"deep_support_zone"`
-	ResistanceZone     market.Zone                   `json:"resistance_zone"`
-	AccumulationZone   market.Zone                   `json:"accumulation_zone"`
-	InvalidationZone   market.Zone                   `json:"invalidation_zone"`
-	ScenarioMain       string                        `json:"scenario_main"`
-	ScenarioBullish    string                        `json:"scenario_bullish"`
-	ScenarioBearish    string                        `json:"scenario_bearish"`
-	ActionPermission   Permission                    `json:"action_permission"`
-	Summary            string                        `json:"summary"`
-	FearGreed          exchange.FearGreed            `json:"fear_greed"`
-	Frames             map[string]market.FrameSignal `json:"frames"`
-	Flow               flow.MultiFrame               `json:"flow"`
+	Timestamp             time.Time                     `json:"timestamp"`
+	BTCPrice              float64                       `json:"btc_price"`
+	WeeklyBias            string                        `json:"weekly_bias"`
+	DailyBias             string                        `json:"daily_bias"`
+	FourHourBias          string                        `json:"four_hour_bias"`
+	MarketRegime          string                        `json:"market_regime"`
+	TrendScore            float64                       `json:"trend_score"`
+	ScoreBreakdown        ScoreBreakdown                `json:"score_breakdown"`
+	PermissionReason      string                        `json:"permission_reason"`
+	RiskLevel             Risk                          `json:"risk_level"`
+	FallingKnifeRisk      Risk                          `json:"falling_knife_risk"`
+	FomoRisk              Risk                          `json:"fomo_risk"`
+	PrimarySupportZone    market.Zone                   `json:"primary_support_zone"`
+	DeepSupportZone       market.Zone                   `json:"deep_support_zone"`
+	ResistanceZone        market.Zone                   `json:"resistance_zone"`
+	AccumulationZone      market.Zone                   `json:"accumulation_zone"`
+	MacroAccumulationZone market.Zone                   `json:"macro_accumulation_zone,omitempty"`
+	InvalidationZone      market.Zone                   `json:"invalidation_zone"`
+	ScenarioMain          string                        `json:"scenario_main"`
+	ScenarioBullish       string                        `json:"scenario_bullish"`
+	ScenarioBearish       string                        `json:"scenario_bearish"`
+	ActionPermission      Permission                    `json:"action_permission"`
+	Summary               string                        `json:"summary"`
+	FearGreed             exchange.FearGreed            `json:"fear_greed"`
+	Frames                map[string]market.FrameSignal `json:"frames"`
+	Flow                  flow.MultiFrame               `json:"flow"`
 }
 
 type ScoreBreakdown struct {
@@ -81,7 +82,8 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	}
 	ps, rs := market.RangeZone(btc["1d"], 60)
 	deep := market.DeepSupport(btc["1w"], 104)
-	acc := market.AccumulationZone(ps, cfg.BTCCycle.StressPriceReference)
+	acc := market.ActiveAccumulationZone(ps)
+	macroAcc := market.MacroAccumulationZone(ps, cfg.BTCCycle.StressPriceReference)
 	trend := (w.TrendScore*0.45 + d.TrendScore*0.40 + h4.TrendScore*0.15)
 	fl := flow.AnalyzeMultiFrame(btc)
 	breakdown := ScoreBreakdown{WeeklyTrend: w.TrendScore, DailyTrend: d.TrendScore, FourHourTrend: h4.TrendScore, TrendScore: trend, FlowBias: string(fl.Bias), FlowScore: fl.Score, FlowComponents: compactFlowComponents(fl.Daily.Components, 6), FlowNextTrigger: fl.Daily.Diagnostics.NextBullTrigger}
@@ -117,7 +119,7 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	if !inv.Valid() {
 		perm = NoTrade
 	}
-	a := MarketAnalysis{Timestamp: time.Now(), BTCPrice: price, WeeklyBias: w.Bias, DailyBias: d.Bias, FourHourBias: h4.Bias, MarketRegime: regime, TrendScore: trend, ScoreBreakdown: breakdown, PermissionReason: permissionReason, RiskLevel: risk, FallingKnifeRisk: falling, FomoRisk: fomo, PrimarySupportZone: ps, DeepSupportZone: deep, ResistanceZone: rs, AccumulationZone: acc, InvalidationZone: inv, ActionPermission: perm, FearGreed: fg, Frames: map[string]market.FrameSignal{"1w": w, "1d": d, "4h": h4}, Flow: fl}
+	a := MarketAnalysis{Timestamp: time.Now(), BTCPrice: price, WeeklyBias: w.Bias, DailyBias: d.Bias, FourHourBias: h4.Bias, MarketRegime: regime, TrendScore: trend, ScoreBreakdown: breakdown, PermissionReason: permissionReason, RiskLevel: risk, FallingKnifeRisk: falling, FomoRisk: fomo, PrimarySupportZone: ps, DeepSupportZone: deep, ResistanceZone: rs, AccumulationZone: acc, MacroAccumulationZone: macroAcc, InvalidationZone: inv, ActionPermission: perm, FearGreed: fg, Frames: map[string]market.FrameSignal{"1w": w, "1d": d, "4h": h4}, Flow: fl}
 	a.ScenarioMain = "Ưu tiên bảo toàn vốn; chỉ gom khi BTC giữ vùng hỗ trợ/value và có reclaim rõ."
 	a.ScenarioBullish = "BTC reclaim EMA/kháng cự gần, 1D giữ cấu trúc, volume bán giảm; Agent 2 có thể chuyển sang ARMED/ALLOWED."
 	a.ScenarioBearish = "BTC phá hỗ trợ chính với volume bán tăng hoặc 4H/1D tiếp tục lower-low; giữ NO_TRADE."

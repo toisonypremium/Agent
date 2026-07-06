@@ -71,7 +71,7 @@ func BuildDeterministic(s RunNowSnapshot) string {
 		for _, asset := range active {
 			b.WriteString(fmt.Sprintf("- %s | RR %.1f | rank #%d\n", asset.Symbol, asset.RewardRisk, asset.RotationRank))
 			for _, layer := range asset.Layers {
-				b.WriteString(fmt.Sprintf("  Layer %d: %.4f × %.2f USDT\n", layer.Index, layer.Price, layer.Notional))
+				b.WriteString(fmt.Sprintf("  Layer %d: entry %.4f × %.2f USDT | RR %.2f | invalid %.4f | target %.4f\n", layer.Index, layer.Price, layer.Notional, layer.RewardRisk, layer.Invalidation, layer.Target))
 			}
 		}
 	} else {
@@ -126,7 +126,7 @@ func CompactPlan(plan agent2.Plan) map[string]any {
 	for _, a := range plan.Assets {
 		layers := []map[string]any{}
 		for _, l := range a.Layers {
-			layers = append(layers, map[string]any{"index": l.Index, "price": l.Price, "notional": l.Notional})
+			layers = append(layers, map[string]any{"index": l.Index, "price": l.Price, "notional": l.Notional, "invalidation": l.Invalidation, "target": l.Target, "reward_risk": l.RewardRisk, "reason": l.Reason})
 		}
 		assets = append(assets, map[string]any{
 			"symbol": a.Symbol, "state": a.State, "reason": a.Reason,
@@ -291,4 +291,11 @@ func emptyScheduler(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func limitStrings(items []string, limit int) []string {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
 }

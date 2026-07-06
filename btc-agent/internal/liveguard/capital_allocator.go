@@ -34,18 +34,31 @@ type AllocationDecision struct {
 	Reason            string          `json:"reason"`
 }
 
-func AllocateLiveCapital(cfg config.Config, plan agent2.Plan, quality map[string]historyQualityScore, positions []live.LivePosition) map[string]AllocationDecision {
+func AllocateLiveCapital(cfg config.Config, plan agent2.Plan, quality map[string]historyQualityScore, positions []live.LivePosition, openOrderSets ...[]live.OrderStatus) map[string]AllocationDecision {
 	out := map[string]AllocationDecision{}
 	btcMult := btcRiskMultiplier(plan.ActionPermission)
 	positionCost := map[string]float64{}
 	for _, p := range positions {
 		positionCost[strings.ToUpper(p.Symbol)] += p.CostBasis
 	}
+	openNotional := map[string]float64{}
+	openTotal := 0.0
+	if len(openOrderSets) > 0 {
+		for _, order := range openOrderSets[0] {
+			notional := liveOrderNotional(order)
+			symbol := strings.ToUpper(order.Symbol)
+			if symbol == "" {
+				symbol = live.InternalSymbol(order.InstID)
+			}
+			openNotional[symbol] += notional
+			openTotal += notional
+		}
+	}
 
 	weights := map[string]float64{}
 	for _, asset := range plan.Assets {
 		symbol := strings.ToUpper(asset.Symbol)
-		decision := allocationDecisionForAsset(cfg, plan, asset, quality[symbol], btcMult, positionCost[symbol])
+		decision := allocationDecisionForAsset(cfg, plan, asset, quality[symbol], btcMult, positionCost[symbol], openNotional[symbol])
 		out[symbol] = decision
 		if decision.Tier != OpportunityBlock && decision.Tier != OpportunityWatch && decision.BudgetUSDT >= 0 {
 			weights[symbol] = decision.Score * decision.BTCMultiplier * decision.QualityMultiplier
@@ -62,7 +75,10 @@ func AllocateLiveCapital(cfg config.Config, plan agent2.Plan, quality map[string
 		return out
 	}
 
-	availableTotal := normalizedMaxLiveNotionalTotal(cfg)
+	availableTotal := normalizedMaxLiveNotionalTotal(cfg) - openTotal
+	if availableTotal < 0 {
+		availableTotal = 0
+	}
 	perAssetCap := normalizedMaxLiveNotionalPerAsset(cfg)
 	perOrderCap := normalizedMaxLiveNotionalPerOrder(cfg)
 	for symbol, weight := range weights {
@@ -77,8 +93,12 @@ func AllocateLiveCapital(cfg config.Config, plan agent2.Plan, quality map[string
 		if budget > perAssetCap {
 			budget = perAssetCap
 		}
-		if budget > perAssetCap-positionCost[symbol] {
-			budget = perAssetCap - positionCost[symbol]
+		remainingAssetBudget := portfolioRemainingBudget(cfg, symbol, positionCost[symbol], openNotional[symbol])
+		if budget > remainingAssetBudget {
+			budget = remainingAssetBudget
+		}
+		if budget > perAssetCap-positionCost[symbol]-openNotional[symbol] {
+			budget = perAssetCap - positionCost[symbol] - openNotional[symbol]
 		}
 		if budget <= 0 {
 			decision.Tier = OpportunityBlock
@@ -99,7 +119,7 @@ func AllocateLiveCapital(cfg config.Config, plan agent2.Plan, quality map[string
 	return out
 }
 
-func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent2.AssetPlan, quality historyQualityScore, btcMult, positionCost float64) AllocationDecision {
+func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent2.AssetPlan, quality historyQualityScore, btcMult, positionCost, openNotional float64) AllocationDecision {
 	symbol := strings.ToUpper(asset.Symbol)
 	grade := strings.ToUpper(strings.TrimSpace(quality.Grade))
 	qMult, qMaxLayers, qReason := qualityMultiplier(grade)
@@ -131,7 +151,7 @@ func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent
 		decision.MaxLayers = 0
 		return decision
 	}
-	if normalizedMaxLiveNotionalPerAsset(cfg)-positionCost <= 0 {
+	if portfolioRemainingBudget(cfg, symbol, positionCost, openNotional) <= 0 || normalizedMaxLiveNotionalPerAsset(cfg)-positionCost-openNotional <= 0 {
 		decision.Tier = OpportunityBlock
 		decision.MaxLayers = 0
 		decision.Reason = appendAllocationReason(decision.Reason, "asset live notional budget exhausted")
@@ -144,6 +164,38 @@ func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent
 	return decision
 }
 
+func portfolioRemainingBudget(cfg config.Config, symbol string, positionCost, openNotional float64) float64 {
+	allocation := cfg.Portfolio.Allocation[strings.ToUpper(symbol)]
+	if allocation <= 0 || cfg.Portfolio.TotalCapital <= 0 {
+		return 0
+	}
+	target := cfg.Portfolio.TotalCapital * allocation * cfg.Risk.MaxTotalDeploymentPerCycle
+	if cfg.Risk.MaxSingleAssetDeployment > 0 {
+		maxSingle := cfg.Portfolio.TotalCapital * cfg.Risk.MaxSingleAssetDeployment
+		if target > maxSingle {
+			target = maxSingle
+		}
+	}
+	if cap := normalizedMaxLiveNotionalPerAsset(cfg); cap > 0 && target > cap {
+		target = cap
+	}
+	remaining := target - positionCost - openNotional
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+func liveOrderNotional(order live.OrderStatus) float64 {
+	if order.Notional > 0 {
+		return order.Notional
+	}
+	if order.Price > 0 && order.Quantity > 0 {
+		return order.Price * order.Quantity
+	}
+	return 0
+}
+
 func btcRiskMultiplier(permission agent1.Permission) float64 {
 	switch permission {
 	case agent1.Allowed:
@@ -151,7 +203,7 @@ func btcRiskMultiplier(permission agent1.Permission) float64 {
 	case agent1.Armed:
 		return 0.35
 	case agent1.Watch:
-		return 0.15
+		return 0
 	default:
 		return 0
 	}

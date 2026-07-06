@@ -22,11 +22,16 @@ const (
 )
 
 type Layer struct {
-	Index    int     `json:"index"`
-	Fraction float64 `json:"fraction"`
-	Price    float64 `json:"price"`
-	Notional float64 `json:"notional"`
-	Quantity float64 `json:"quantity"`
+	Index        int       `json:"index"`
+	Fraction     float64   `json:"fraction"`
+	Price        float64   `json:"price"`
+	Notional     float64   `json:"notional"`
+	Quantity     float64   `json:"quantity"`
+	Invalidation float64   `json:"invalidation,omitempty"`
+	Target       float64   `json:"target,omitempty"`
+	RewardRisk   float64   `json:"reward_risk,omitempty"`
+	ExpiresAt    time.Time `json:"expires_at,omitempty"`
+	Reason       string    `json:"reason,omitempty"`
 }
 
 type AssetPlan struct {
@@ -41,6 +46,9 @@ type AssetPlan struct {
 	AssetFlowScore float64     `json:"asset_flow_score,omitempty"`
 	Layers         []Layer     `json:"layers"`
 	Reason         string      `json:"reason"`
+	HardBlockers   []string    `json:"hard_blockers,omitempty"`
+	SoftBlockers   []string    `json:"soft_blockers,omitempty"`
+	NextTrigger    string      `json:"next_trigger,omitempty"`
 }
 
 type Plan struct {
@@ -74,7 +82,7 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 		return p
 	}
 	if a.ActionPermission != agent1.Allowed {
-		if a.ActionPermission == agent1.Armed || a.ActionPermission == agent1.Watch {
+		if a.ActionPermission == agent1.Armed {
 			anyProbe := false
 			for _, sym := range cfg.Data.Symbols.Assets {
 				ap := planProbeAsset(cfg, sym, candles[sym], benchmark, rotationBySymbol[sym], useAssetFlowEntry)
@@ -84,20 +92,23 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 				}
 			}
 			p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
-			AddWatchlistMissing(&p.Watchlist, "BTC permission chưa ALLOWED; chỉ cho phép ARMED probe nhỏ", cfg)
+			AddWatchlistMissing(&p.Watchlist, "BTC permission ARMED; chỉ cho phép probe nhỏ khi mọi gate con đạt", cfg)
 			if anyProbe {
 				p.State = StateArmed
-				p.Summary = "BTC chưa ALLOWED nhưng có ARMED probe candidate chất lượng cao."
+				p.Summary = "BTC ARMED và có probe candidate chất lượng cao."
 			} else {
 				p.State = StateWatch
-				p.Summary = "BTC chưa ALLOWED; chưa có coin đủ đẹp để tạo probe."
+				p.Summary = "BTC ARMED nhưng chưa có coin đủ đẹp để tạo probe."
 			}
 			return p
 		}
-		p.Summary = "Agent 1 chưa cho phép gom; giữ NO_TRADE/WATCH."
+		p.Summary = "BTC permission WATCH/NO_TRADE; không tạo probe."
 		p.State = StateWatch
-		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, nil)
-		AddWatchlistMissing(&p.Watchlist, "BTC permission chưa ALLOWED", cfg)
+		for _, sym := range cfg.Data.Symbols.Assets {
+			p.Assets = append(p.Assets, AssetPlan{Symbol: sym, State: StateWatch, Reason: "BTC permission WATCH; không tạo probe", HardBlockers: []string{"BTC permission WATCH; không tạo probe"}, NextTrigger: "Chờ BTC chuyển ARMED hoặc ALLOWED trước khi tạo live order."})
+		}
+		p.Watchlist = BuildWatchlist(cfg, candles, benchmark, p.Rotation, p.Assets)
+		AddWatchlistMissing(&p.Watchlist, "BTC permission WATCH; không tạo probe", cfg)
 		return p
 	}
 	if a.MarketRegime == "DOWNTREND" {
@@ -127,11 +138,7 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 }
 
 func planProbeAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
-	probeCfg := cfg
-	if probeCfg.Risk.MinRewardRisk > 0 {
-		probeCfg.Risk.MinRewardRisk *= 0.80
-	}
-	ap := planAsset(probeCfg, sym, c, benchmark, rotation, useAssetFlowEntry)
+	ap := planAsset(cfg, sym, c, benchmark, rotation, useAssetFlowEntry)
 	if ap.State != StateActiveLimit || len(ap.Layers) == 0 {
 		if ap.Symbol == "" {
 			ap.Symbol = sym
@@ -139,7 +146,9 @@ func planProbeAsset(cfg config.Config, sym string, c []market.Candle, benchmark 
 		return ap
 	}
 	ap.State = StateArmed
-	ap.Reason = "BTC chưa ALLOWED nhưng coin setup rất đẹp; tạo ARMED probe layer"
+	ap.Reason = "BTC ARMED và coin setup đủ gate; tạo 1 probe layer nhỏ"
+	ap.SoftBlockers = uniqueStrings(append(ap.SoftBlockers, "BTC mới ARMED nên chỉ sizing probe"))
+	ap.NextTrigger = "Probe post-only nhỏ; chỉ mở rộng ladder khi BTC chuyển ALLOWED."
 	ap.Layers = ap.Layers[:1]
 	notional := probeNotional(cfg)
 	ap.Layers[0].Fraction = 1
@@ -164,8 +173,10 @@ func probeNotional(cfg config.Config) float64 {
 }
 
 func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
-	ap := AssetPlan{Symbol: sym, State: StateWatch, Reason: "chưa đủ dữ liệu hoặc chưa vào discount zone"}
+	ap := AssetPlan{Symbol: sym, State: StateWatch, Reason: "chưa đủ dữ liệu hoặc chưa vào discount zone", NextTrigger: "Chờ đủ dữ liệu và giá về discount zone."}
 	if len(c) < 60 {
+		ap.HardBlockers = []string{"chưa đủ dữ liệu 1D"}
+		ap.NextTrigger = "Chờ đủ dữ liệu nến 1D trước khi đánh giá candidate."
 		return ap
 	}
 	price := market.LastClose(c)
@@ -180,11 +191,15 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	if FallingKnife(c) {
 		ap.State = StateNoTrade
 		ap.Reason = "falling knife filter chặn asset"
+		ap.HardBlockers = append(ap.HardBlockers, "falling knife risk")
+		ap.NextTrigger = "Chờ cấu trúc ngừng lower-low và reclaim support rõ."
 		return ap
 	}
 	if FOMO(c, ema20, rsi, resistance) {
 		ap.State = StateNoTrade
 		ap.Reason = "FOMO filter chặn asset"
+		ap.HardBlockers = append(ap.HardBlockers, "FOMO risk")
+		ap.NextTrigger = "Không đuổi giá; chờ pullback về value/support."
 		return ap
 	}
 	if enabled, lookback, minRelative, minMomentum := relativeStrengthParams(cfg); enabled && len(benchmark) > 0 {
@@ -192,6 +207,8 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		if !rs.Pass {
 			ap.State = StateNoTrade
 			ap.Reason = rs.Reason
+			ap.HardBlockers = append(ap.HardBlockers, rs.Reason)
+			ap.NextTrigger = "Chờ asset ngừng underperform BTC trong lookback."
 			return ap
 		}
 	}
@@ -201,6 +218,8 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		if !rotation.Eligible || rotation.Score < minScore || (maxRank > 0 && rotation.Rank > maxRank) {
 			ap.State = StateWatch
 			ap.Reason = fmt.Sprintf("rotation score filter chặn asset: rank=%d score=%.2f reason=%s", rotation.Rank, rotation.Score, rotation.Reason)
+			ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+			ap.NextTrigger = "Chờ rotation score tăng hoặc rank vào top được phép."
 			return ap
 		}
 	}
@@ -211,10 +230,13 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		if !entry.Pass {
 			if entry.HardBlock {
 				ap.State = StateNoTrade
+				ap.HardBlockers = append(ap.HardBlockers, entry.Reason)
 			} else {
 				ap.State = StateWatch
+				ap.SoftBlockers = append(ap.SoftBlockers, entry.Reason)
 			}
 			ap.Reason = entry.Reason
+			ap.NextTrigger = "Chờ sweep low + reclaim support hoặc absorption volume gần support."
 			return ap
 		}
 	}
@@ -222,6 +244,8 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		ap.State = StateWatch
 		ap.DiscountZone = support
 		ap.Reason = "giá chưa vào discount zone"
+		ap.SoftBlockers = append(ap.SoftBlockers, "giá chưa vào discount zone")
+		ap.NextTrigger = "Chờ giá về support/discount zone mà không tạo falling knife."
 		return ap
 	}
 
@@ -229,6 +253,8 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	rr := RewardRiskBreakdown(RewardRiskInput{Entry: price, Invalidation: invalidation, Target: resistance.High})
 	if !rr.Valid {
 		ap.Reason = "reward/risk không hợp lệ: " + rr.Reason
+		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+		ap.NextTrigger = "Chờ entry sâu hơn hoặc target rõ hơn để tính RR."
 		return ap
 	}
 	ap.DiscountZone = support
@@ -237,6 +263,8 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	if ap.RewardRisk < cfg.Risk.MinRewardRisk {
 		ap.State = StateWatch
 		ap.Reason = fmt.Sprintf("reward/risk %.2f thấp hơn %.2f", ap.RewardRisk, cfg.Risk.MinRewardRisk)
+		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+		ap.NextTrigger = "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng."
 		return ap
 	}
 
@@ -244,15 +272,48 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	if maxBudget := cfg.Portfolio.TotalCapital * cfg.Risk.MaxSingleAssetDeployment; budget > maxBudget {
 		budget = maxBudget
 	}
-	prices := []float64{support.High, support.Mid(), support.Low}
-	for i, fraction := range cfg.Execution.LayerDistribution {
-		px := prices[min(i, len(prices)-1)]
-		notional := budget * fraction
-		ap.Layers = append(ap.Layers, Layer{Index: i + 1, Fraction: fraction, Price: px, Notional: notional, Quantity: notional / px})
+	ap.Layers = buildEntryLayers(cfg, support, resistance, invalidation, budget)
+	if len(ap.Layers) == 0 {
+		ap.State = StateWatch
+		ap.Reason = "không có layer nào đạt reward/risk tối thiểu"
+		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
+		ap.NextTrigger = "Chờ entry sâu hơn để layer đạt reward/risk."
+		return ap
 	}
 	ap.State = StateActiveLimit
 	ap.Reason = "đủ discount zone và reward/risk; tạo paper limit layers"
+	ap.NextTrigger = "Layer hợp lệ; live manager kiểm tra preflight/caps trước khi đặt post-only."
 	return ap
+}
+
+func buildEntryLayers(cfg config.Config, support, resistance market.Zone, invalidation, budget float64) []Layer {
+	prices := []float64{support.High, support.Mid(), support.Low}
+	expires := time.Time{}
+	if cfg.Execution.OrderExpiryHours > 0 {
+		expires = time.Now().Add(time.Duration(cfg.Execution.OrderExpiryHours) * time.Hour)
+	}
+	layers := []Layer{}
+	for i, fraction := range cfg.Execution.LayerDistribution {
+		px := prices[min(i, len(prices)-1)]
+		notional := budget * fraction
+		rr := RewardRiskBreakdown(RewardRiskInput{Entry: px, Invalidation: invalidation, Target: resistance.High})
+		if !rr.Valid || rr.Ratio < cfg.Risk.MinRewardRisk || px <= 0 || notional <= 0 {
+			continue
+		}
+		layers = append(layers, Layer{
+			Index:        i + 1,
+			Fraction:     fraction,
+			Price:        px,
+			Notional:     notional,
+			Quantity:     notional / px,
+			Invalidation: invalidation,
+			Target:       resistance.High,
+			RewardRisk:   rr.Ratio,
+			ExpiresAt:    expires,
+			Reason:       fmt.Sprintf("layer %d tại support %.4f, target %.4f, RR %.2f", i+1, px, resistance.High, rr.Ratio),
+		})
+	}
+	return layers
 }
 
 func benchmarkCandles(cfg config.Config, benchmarks map[string][]market.Candle) []market.Candle {

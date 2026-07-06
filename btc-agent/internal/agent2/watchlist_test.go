@@ -64,7 +64,7 @@ func TestBuildPlanWithBenchmarksIncludesWatchlistWhenAgent1NotAllowed(t *testing
 	if got.State == StateActiveLimit || len(got.Watchlist.Candidates) == 0 {
 		t.Fatalf("expected watchlist without full active plan on non-ALLOWED BTC: %+v", got)
 	}
-	if !containsString(got.Watchlist.Candidates[0].Missing, "BTC permission chưa ALLOWED; chỉ cho phép ARMED probe nhỏ") {
+	if !containsString(got.Watchlist.Candidates[0].Missing, "BTC permission WATCH; không tạo probe") {
 		t.Fatalf("expected BTC permission missing: %+v", got.Watchlist.Candidates[0])
 	}
 }

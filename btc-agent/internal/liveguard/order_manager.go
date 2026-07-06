@@ -46,6 +46,10 @@ type ManagedDesiredOrder struct {
 	AllocationScore   float64     `json:"allocation_score,omitempty"`
 	AllocationTier    string      `json:"allocation_tier,omitempty"`
 	AllocationReason  string      `json:"allocation_reason,omitempty"`
+	TargetPrice       float64     `json:"target_price,omitempty"`
+	RewardRisk        float64     `json:"reward_risk,omitempty"`
+	ExpiresAt         time.Time   `json:"expires_at,omitempty"`
+	LayerReason       string      `json:"layer_reason,omitempty"`
 }
 
 type ManagedOrderDecision struct {
@@ -95,6 +99,8 @@ type ManagedCoinSummary struct {
 	Actions         []ManagedOrderDecision `json:"actions,omitempty"`
 	Reasons         []string               `json:"reasons,omitempty"`
 	WhyNoOrder      []string               `json:"why_no_order,omitempty"`
+	HardBlockers    []string               `json:"hard_blockers,omitempty"`
+	SoftBlockers    []string               `json:"soft_blockers,omitempty"`
 	NextTrigger     string                 `json:"next_trigger,omitempty"`
 }
 
@@ -261,11 +267,17 @@ func BuildManagedCoinSummaries(cfg config.Config, plan agent2.Plan, openOrders [
 	}
 	stateBySymbol := map[string]agent2.State{}
 	reasonBySymbol := map[string]string{}
+	hardBySymbol := map[string][]string{}
+	softBySymbol := map[string][]string{}
+	nextBySymbol := map[string]string{}
 	for _, asset := range plan.Assets {
 		symbol := strings.ToUpper(asset.Symbol)
 		addSymbol(symbol)
 		stateBySymbol[symbol] = asset.State
 		reasonBySymbol[symbol] = asset.Reason
+		hardBySymbol[symbol] = appendUniqueStrings(hardBySymbol[symbol], asset.HardBlockers...)
+		softBySymbol[symbol] = appendUniqueStrings(softBySymbol[symbol], asset.SoftBlockers...)
+		nextBySymbol[symbol] = asset.NextTrigger
 	}
 	watchBySymbol := map[string]agent2.WatchCandidate{}
 	for _, candidate := range plan.Watchlist.Candidates {
@@ -320,6 +332,11 @@ func BuildManagedCoinSummaries(cfg config.Config, plan agent2.Plan, openOrders [
 		s.Actions = append(s.Actions, decision)
 		if decision.Reason != "" && !stringInSlice(s.Reasons, decision.Reason) {
 			s.Reasons = append(s.Reasons, decision.Reason)
+			if decision.Action == "block" || decision.Error != "" {
+				s.HardBlockers = appendUniqueStrings(s.HardBlockers, decision.Reason)
+			} else {
+				s.SoftBlockers = appendUniqueStrings(s.SoftBlockers, decision.Reason)
+			}
 		}
 	}
 	for _, d := range result.Kept {
@@ -364,14 +381,23 @@ func BuildManagedCoinSummaries(cfg config.Config, plan agent2.Plan, openOrders [
 		if s == nil {
 			continue
 		}
+		s.HardBlockers = appendUniqueStrings(s.HardBlockers, hardBySymbol[symbol]...)
+		s.SoftBlockers = appendUniqueStrings(s.SoftBlockers, softBySymbol[symbol]...)
+		if nextBySymbol[symbol] != "" {
+			s.NextTrigger = nextBySymbol[symbol]
+		}
 		if candidate, ok := watchBySymbol[symbol]; ok {
 			s.ReadinessScore = candidate.ReadinessScore
-			s.NextTrigger = candidate.NextTrigger
+			if s.NextTrigger == "" {
+				s.NextTrigger = candidate.NextTrigger
+			}
 			if s.DesiredLayers == 0 && s.Placed == 0 && s.Kept == 0 {
-				s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, candidate.Missing...)
+				s.SoftBlockers = appendUniqueStrings(s.SoftBlockers, candidate.Missing...)
 			}
 		}
 		if s.DesiredLayers == 0 && s.Placed == 0 && s.Kept == 0 {
+			s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, s.HardBlockers...)
+			s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, s.SoftBlockers...)
 			s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, s.Reasons...)
 			if reason := reasonBySymbol[symbol]; reason != "" {
 				s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, reason)
@@ -466,7 +492,7 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 		return desired, blocked
 	}
 	qualityBySymbol := loadHistoryQualityScores("reports/live_manager_history_latest.json")
-	allocationBySymbol := AllocateLiveCapital(cfg, plan, qualityBySymbol, positions)
+	allocationBySymbol := AllocateLiveCapital(cfg, plan, qualityBySymbol, positions, openOrders)
 	totalDesired := 0.0
 	for _, asset := range plan.Assets {
 		symbol := strings.ToUpper(asset.Symbol)
@@ -523,7 +549,7 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 				}
 				instID = firstNonEmptyString(preflight.InstID, instID)
 			}
-			d := ManagedDesiredOrder{Symbol: symbol, InstID: instID, LayerIndex: layer.Index, Side: "BUY", Type: "limit", Price: preflightCandidate.Price, Quantity: preflightCandidate.Quantity, Notional: preflightCandidate.Notional, PostOnly: preflightCandidate.PostOnly, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: preflightCandidate.Source, DecisionReason: asset.Reason, QualityScore: qualityBySymbol[symbol].Score, QualityGrade: qualityBySymbol[symbol].Grade, AllocationScore: allocation.Score, AllocationTier: string(allocation.Tier), AllocationReason: allocation.Reason}
+			d := ManagedDesiredOrder{Symbol: symbol, InstID: instID, LayerIndex: layer.Index, Side: "BUY", Type: "limit", Price: preflightCandidate.Price, Quantity: preflightCandidate.Quantity, Notional: preflightCandidate.Notional, PostOnly: preflightCandidate.PostOnly, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: preflightCandidate.Source, DecisionReason: asset.Reason, QualityScore: qualityBySymbol[symbol].Score, QualityGrade: qualityBySymbol[symbol].Grade, AllocationScore: allocation.Score, AllocationTier: string(allocation.Tier), AllocationReason: allocation.Reason, TargetPrice: layer.Target, RewardRisk: layer.RewardRisk, ExpiresAt: layer.ExpiresAt, LayerReason: layer.Reason}
 			desired = append(desired, d)
 			assetRemaining -= d.Notional
 			totalDesired += d.Notional

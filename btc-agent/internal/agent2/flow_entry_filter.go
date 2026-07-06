@@ -30,29 +30,17 @@ type AssetFlowEntrySignal struct {
 }
 
 func AssetFlowEntry(sym string, candles []market.Candle, minBullScore float64, allowNeutralReclaim bool) AssetFlowEntrySignal {
-	s := AssetFlowEntrySignal{Symbol: sym, Bias: flow.BiasNeutral, Reason: "asset flow entry chưa đủ dữ liệu"}
 	if len(candles) < 25 {
-		return s
+		return AssetFlowEntrySignal{Symbol: sym, Bias: flow.BiasNeutral, Reason: "asset flow entry chưa đủ dữ liệu"}
 	}
+	return AssetFlowEntryFromMM(AnalyzeMMAccumulation(sym, candles), minBullScore, allowNeutralReclaim)
+}
+
+func AssetFlowEntryFromMM(mm MMAccumulationSignal, minBullScore float64, allowNeutralReclaim bool) AssetFlowEntrySignal {
+	s := AssetFlowEntrySignal{Symbol: mm.Symbol, Bias: mm.FlowBias, BullScore: mm.BullScore, BearScore: mm.BearScore, SweepLow: mm.SweepLow, ReclaimSupport: mm.ReclaimSupport, FailedBreakdown: mm.FailedBreakdown, Absorption: mm.Absorption, FailedBreakout: mm.FailedBreakout, Distribution: mm.Distribution, MMCase: mm.Case, MMScore: mm.Score, MMReasons: mm.Reasons, MMMissing: mm.Missing, NextTrigger: mm.NextTrigger, Reason: "asset flow entry chưa đủ dữ liệu"}
 	if minBullScore <= 0 {
 		minBullScore = 0.25
 	}
-	mm := AnalyzeMMAccumulation(sym, candles)
-	s.Bias = mm.FlowBias
-	s.BullScore = mm.BullScore
-	s.BearScore = mm.BearScore
-	s.SweepLow = mm.SweepLow
-	s.ReclaimSupport = mm.ReclaimSupport
-	s.FailedBreakdown = mm.FailedBreakdown
-	s.Absorption = mm.Absorption
-	s.FailedBreakout = mm.FailedBreakout
-	s.Distribution = mm.Distribution
-	s.MMCase = mm.Case
-	s.MMScore = mm.Score
-	s.MMReasons = mm.Reasons
-	s.MMMissing = mm.Missing
-	s.NextTrigger = mm.NextTrigger
-
 	if mm.HardBlock {
 		s.HardBlock = true
 		s.Reason = fmt.Sprintf("asset flow entry chặn: %s", mmReason(mm))

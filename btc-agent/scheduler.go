@@ -321,6 +321,20 @@ func validateSchedulerTelegramAI(text string) error {
 	if !strings.Contains(lower, "spot limit") || !strings.Contains(lower, "post-only") || !strings.Contains(lower, "không futures") || !strings.Contains(lower, "không leverage") || !strings.Contains(lower, "không market") {
 		return fmt.Errorf("missing complete safety line")
 	}
+	if strings.Contains(trimmed, "http://") || strings.Contains(trimmed, "https://") {
+		return fmt.Errorf("contains URL")
+	}
+	if strings.Contains(lower, "watch") || strings.Contains(lower, "không đặt lệnh") || strings.Contains(lower, "khong dat lenh") {
+		if !strings.Contains(lower, "mm=") && !strings.Contains(lower, "mm footprint") {
+			return fmt.Errorf("missing MM footprint detail")
+		}
+		if !strings.Contains(lower, "liq=") && !strings.Contains(lower, "liquidity") {
+			return fmt.Errorf("missing liquidity detail")
+		}
+		if !strings.Contains(lower, "trigger") && !strings.Contains(lower, "điều kiện mở khóa") {
+			return fmt.Errorf("missing actionable trigger")
+		}
+	}
 	if strings.HasSuffix(trimmed, "...") || strings.HasSuffix(trimmed, "…") {
 		return fmt.Errorf("truncated output")
 	}
@@ -414,18 +428,23 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	prompt := fmt.Sprintf(`Viết 1 bản tin Telegram TIẾNG VIỆT như trader chuyên nghiệp báo cáo cho chủ tài khoản.
 Không trả JSON. Không markdown fence. Không URL. Không tiếng Anh, trừ WATCH/ACTIVE_LIMIT/NO_TRADE.
 
-BẮT BUỘC đủ 6 mục dưới đây, 1600-2600 ký tự:
-📊 BTC Agent — Bản tin chiến lược
-I. Kết luận: nói có đặt lệnh không, vì sao.
-II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score, risk.
-III. Vùng giá & kịch bản: vùng gom, support, deep support, kháng cự, invalidation; kịch bản chính/tốt/xấu.
-IV. Kế hoạch bot: permission, plan state, ACTIVE_LIMIT layer nếu có; nếu không có thì nói thiếu gì, watchlist chờ trigger nào, điều kiện mở khóa cụ thể, MM footprint/liquidity gate từng coin, và Shadow ARMED_PROBE_LIGHT nếu có. Ghi rõ shadow only không đặt lệnh thật.
-V. Research context: chỉ bối cảnh phụ, không override.
-VI. Trạng thái an toàn: daily/reconcile/supervisor/gates, kết luận spot limit BUY post-only only.
+BẮT BUỘC đủ 6 mục dưới đây, 1800-3200 ký tự:
+	📊 BTC Agent — Bản tin chiến lược
+	I. Kết luận: nói có đặt lệnh không, blocker chính là gì, mode hiện tại là WATCH/ARMED/ACTIVE_LIMIT.
+	II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score, risk; chỉ dùng dữ liệu payload.
+	III. Vùng giá & kịch bản: bắt buộc có 3 dòng "Kịch bản chính", "Kịch bản mở khóa", "Kịch bản vô hiệu"; mỗi dòng nói rõ bot sẽ làm gì.
+	IV. Kế hoạch bot: mỗi coin top watchlist phải có format: COIN: MM=<case> <score>/100, Liq=<grade> <score>/100, Discount=<gap>, RR=<ratio>, thiếu=<top blockers>, trigger=<next trigger>. Nếu thiếu dữ liệu thì ghi n/a, không bịa.
+	V. Research context: tối đa 2 câu, chỉ bối cảnh phụ, không override, không URL.
+	VI. Trạng thái an toàn: daily/reconcile/supervisor/gates, kết luận spot limit BUY post-only only.
 
-Nếu không có ACTIVE_LIMIT, phải ghi rõ: không đặt lệnh, không chase giá, chờ trigger, điều kiện mở khóa. Không futures, không leverage, không market order.
+	CẤM nội dung vô nghĩa:
+	- Không viết "theo dõi thêm" nếu không có trigger cụ thể.
+	- Không viết "thanh khoản chưa xác nhận" nếu không ghi Liq grade/score/reason.
+	- Không viết "MM footprint chưa đủ" nếu không ghi MM case/missing item.
+	- Không viết research dài hoặc link.
+	Nếu không có ACTIVE_LIMIT, phải ghi rõ: không đặt lệnh, không chase giá, chờ trigger, điều kiện mở khóa. Không futures, không leverage, không market order.
 
-Dữ liệu:
+	Dữ liệu:
 %s`, string(b))
 	text, err := client.ChatText(ctx, prompt)
 	if err != nil {

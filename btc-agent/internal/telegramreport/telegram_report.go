@@ -156,13 +156,20 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 		b.WriteString("\n👀 WATCHLIST (sắp đủ điều kiện):\n")
 		for _, c := range firstCandidates(plan.Watchlist.Candidates, 3) {
 			bar := readinessBar(c.ReadinessScore)
-			b.WriteString(fmt.Sprintf("  %s %s %.0f%%", c.Symbol, bar, c.ReadinessScore*100))
+			b.WriteString(fmt.Sprintf("  %s %s %.0f%% | MM=%s %.0f/100 | Liq=%s %.0f/100", c.Symbol, bar, c.ReadinessScore*100, emptyMMCaseText(c.MMCase), c.MMScore, empty(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score))
+			if c.RewardRisk > 0 || c.DiscountGap != 0 {
+				b.WriteString(fmt.Sprintf(" | gap %.2f%% RR %.2f", c.DiscountGap*100, c.RewardRisk))
+			}
 			if c.NextTrigger != "" {
-				b.WriteString(fmt.Sprintf(" | chờ: %s", c.NextTrigger))
+				b.WriteString(fmt.Sprintf(" | trigger: %s", c.NextTrigger))
 			}
 			b.WriteString("\n")
 			if len(c.Missing) > 0 {
 				b.WriteString(fmt.Sprintf("    Thiếu: %s\n", humanList(c.Missing, 2)))
+			} else if len(c.MMMissing) > 0 {
+				b.WriteString(fmt.Sprintf("    MM thiếu: %s\n", humanList(c.MMMissing, 2)))
+			} else if len(c.LiquidityQuality.Reasons) > 0 {
+				b.WriteString(fmt.Sprintf("    Liquidity: %s\n", humanList(c.LiquidityQuality.Reasons, 1)))
 			}
 		}
 	}
@@ -1038,6 +1045,13 @@ func empty(value, fallback string) string {
 		return fallback
 	}
 	return value
+}
+
+func emptyMMCaseText(c agent2.MMCase) string {
+	if c == "" {
+		return "NO_DATA"
+	}
+	return string(c)
 }
 
 func trimTelegram(s string) string {

@@ -42,6 +42,15 @@ type OrderBookSnapshot struct {
 	AskDepth1PctUSDT float64 `json:"ask_depth_1pct_usdt,omitempty"`
 }
 
+const DefaultFailReason = "liquidity quality chưa đạt"
+
+func FirstReason(reasons []string) string {
+	if len(reasons) == 0 {
+		return DefaultFailReason
+	}
+	return reasons[0]
+}
+
 func EvaluateCandleProxy(cfg config.Config, symbol string, candles []market.Candle, orderNotional float64) Quality {
 	q := Quality{Enabled: true, Symbol: symbol, Pass: true, Grade: GradeUnknown}
 	maxOrderPct := cfg.Live.MaxOrderToAvg5mQuoteVolumePct

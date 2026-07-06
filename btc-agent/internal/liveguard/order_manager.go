@@ -13,6 +13,7 @@ import (
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/market"
 )
 
@@ -501,7 +502,7 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 		}
 		allocation := allocationBySymbol[symbol]
 		if cfg.Live.LiquidityGateEnabled && asset.LiquidityQuality.Enabled && !asset.LiquidityQuality.Pass {
-			reason := "liquidity gate blocked: " + firstManagedString(asset.LiquidityQuality.Reasons)
+			reason := "liquidity gate blocked: " + liquidity.FirstReason(asset.LiquidityQuality.Reasons)
 			blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: reason})
 			continue
 		}
@@ -728,13 +729,6 @@ func normalizedMaxLiveNotionalTotal(cfg config.Config) float64 {
 		return cfg.Live.MaxLiveNotionalTotalUSDT
 	}
 	return normalizedMaxLiveNotionalPerAsset(cfg) * float64(len(cfg.Data.Symbols.Assets))
-}
-
-func firstManagedString(items []string) string {
-	if len(items) == 0 {
-		return "liquidity quality chưa đạt"
-	}
-	return items[0]
 }
 
 func firstNonEmptyString(values ...string) string {

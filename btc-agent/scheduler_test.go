@@ -8,10 +8,10 @@ import (
 
 func TestValidateSchedulerTelegramAI(t *testing.T) {
 	base := `📊 BTC Agent — Bản tin chiến lược
-I. Kết luận: không đặt lệnh vì BTC WATCH và chưa có ACTIVE_LIMIT. Chờ trigger rõ, không chase giá.
+I. Kết luận: không đặt lệnh vì BTC WATCH và chưa có ACTIVE_LIMIT. Không chase giá.
 II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score và risk đều được trình bày đủ để chủ tài khoản hiểu vì sao bot đứng ngoài lúc này.
-III. Vùng giá & kịch bản: support, deep support, kháng cự, invalidation, kịch bản chính, kịch bản tốt, kịch bản xấu đều rõ ràng.
-IV. Kế hoạch bot: permission WATCH, plan WATCH, watchlist chờ BTC ALLOWED, flow reclaim, discount zone và reward/risk đủ chuẩn.
+III. Vùng giá & kịch bản: Kịch bản chính giữ vốn. Kịch bản mở khóa cần reclaim. Kịch bản vô hiệu là mất support.
+IV. Kế hoạch bot: permission WATCH, plan WATCH. ETHUSDT: MM=NO_EDGE 10/100, Liq=D 22/100, Discount=12%, RR=2.2, thiếu=chưa reclaim, trigger=Chờ sweep low + close reclaim.
 V. Research context: tin tức chỉ là bối cảnh phụ, không override Agent 1/2, không dùng URL trong Telegram.
 VI. Trạng thái an toàn: daily OK, reconcile OK, supervisor OK. An toàn: spot limit BUY post-only only; không futures, không leverage, không market order.
 `
@@ -97,4 +97,34 @@ func TestGetNextRunTime(t *testing.T) {
 			})
 		}
 	})
+}
+
+func TestValidateSchedulerTelegramAIRejectsVagueWatchReport(t *testing.T) {
+	base := `📊 BTC Agent — Bản tin chiến lược
+I. Kết luận: không đặt lệnh vì BTC WATCH và chưa có ACTIVE_LIMIT. Không chase giá.
+II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score và risk đều được trình bày đủ để chủ tài khoản hiểu vì sao bot đứng ngoài lúc này.
+III. Vùng giá & kịch bản: Kịch bản chính giữ vốn. Kịch bản mở khóa cần reclaim. Kịch bản vô hiệu là mất support.
+IV. Kế hoạch bot: permission WATCH, plan WATCH. ETHUSDT: MM=NO_EDGE 10/100, Liq=D 22/100, Discount=12%, RR=2.2, thiếu=chưa reclaim, trigger=Chờ sweep low + close reclaim.
+V. Research context: tin tức chỉ là bối cảnh phụ, không override Agent 1/2, không dùng URL trong Telegram.
+VI. Trạng thái an toàn: daily OK, reconcile OK, supervisor OK. An toàn: spot limit BUY post-only only; không futures, không leverage, không market order.
+`
+	long := base + strings.Repeat("Nội dung phân tích bổ sung bằng tiếng Việt để vượt ngưỡng độ dài kiểm tra. ", 20)
+	if err := validateSchedulerTelegramAI(long); err != nil {
+		t.Fatalf("expected valid detailed output: %v", err)
+	}
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "MM=NO_EDGE", "MM footprint")); err != nil {
+		t.Fatalf("expected MM footprint wording accepted: %v", err)
+	}
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "MM=NO_EDGE", "footprint")); err == nil {
+		t.Fatal("expected missing MM detail rejected")
+	}
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "Liq=D", "thanh khoản")); err == nil {
+		t.Fatal("expected missing liquidity detail rejected")
+	}
+	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "trigger=Chờ sweep low + close reclaim.", "theo dõi thêm.")); err == nil {
+		t.Fatal("expected missing actionable trigger rejected")
+	}
+	if err := validateSchedulerTelegramAI(long + " https://example.com"); err == nil {
+		t.Fatal("expected URL rejected")
+	}
 }

@@ -134,8 +134,8 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 
 	c.Price = market.LastClose(candles)
 	c.Support, c.Resistance = actionSupportResistanceZones(candles)
+	mm := AnalyzeMMAccumulation(sym, candles)
 	if c.MMCase == "" {
-		mm := AnalyzeMMAccumulation(sym, candles)
 		c.MMCase = mm.Case
 		c.MMScore = mm.Score
 		c.MMReasons = mm.Reasons
@@ -185,7 +185,7 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 
 	flowReady := 0.50
 	if enabled, minBull, allowNeutral := assetFlowEntryParams(cfg); enabled {
-		entry := AssetFlowEntry(sym, candles, minBull, allowNeutral)
+		entry := AssetFlowEntryFromMM(mm, minBull, allowNeutral)
 		c.FlowBias = entry.Bias
 		c.FlowBullScore = entry.BullScore
 		c.FlowBearScore = entry.BearScore

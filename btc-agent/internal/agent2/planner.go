@@ -122,6 +122,8 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 				ap.MMScore = mm.Score
 				ap.MMReasons = mm.Reasons
 				ap.MMMissing = mm.Missing
+				ap.AssetFlowBias = mm.FlowBias
+				ap.AssetFlowScore = mm.BullScore
 				ap.LiquidityQuality = liquidity.EvaluateCandleProxy(cfg, sym, c, desiredLiquidityNotional(cfg, sym))
 			}
 			p.Assets = append(p.Assets, ap)
@@ -268,7 +270,7 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		return ap
 	}
 	if enabled, minBull, allowNeutral := assetFlowEntryParams(cfg); enabled && useAssetFlowEntry {
-		entry := AssetFlowEntry(sym, c, minBull, allowNeutral)
+		entry := AssetFlowEntryFromMM(mm, minBull, allowNeutral)
 		ap.AssetFlowBias = entry.Bias
 		ap.AssetFlowScore = entry.BullScore
 		if !entry.Pass {
@@ -286,7 +288,7 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 	}
 	if cfg.Live.LiquidityGateEnabled && ap.LiquidityQuality.Enabled && !ap.LiquidityQuality.Pass {
 		ap.State = StateWatch
-		ap.Reason = "liquidity gate blocked: " + firstString(ap.LiquidityQuality.Reasons)
+		ap.Reason = "liquidity gate blocked: " + liquidity.FirstReason(ap.LiquidityQuality.Reasons)
 		ap.SoftBlockers = append(ap.SoftBlockers, ap.Reason)
 		ap.NextTrigger = "Chờ spread/depth/volume đủ dày trước khi tạo live layer."
 		return ap
@@ -454,13 +456,6 @@ func desiredLiquidityNotional(cfg config.Config, sym string) float64 {
 		return cfg.Portfolio.TotalCapital * cfg.Portfolio.Allocation[sym] * cfg.Risk.MaxTotalDeploymentPerCycle
 	}
 	return 1
-}
-
-func firstString(items []string) string {
-	if len(items) == 0 {
-		return "liquidity quality chưa đạt"
-	}
-	return items[0]
 }
 
 func firstNonEmptyMM(values ...string) string {

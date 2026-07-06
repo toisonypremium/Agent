@@ -32,6 +32,7 @@ type SetupEvaluation struct {
 	HardBlockers   []string          `json:"hard_blockers,omitempty"`
 	SoftBlockers   []string          `json:"soft_blockers,omitempty"`
 	Gates          []SetupGateResult `json:"gates"`
+	Reasons        []DecisionReason  `json:"reasons,omitempty"`
 	Actionable     bool              `json:"actionable"`
 	NearActionable bool              `json:"near_actionable"`
 	NextTrigger    string            `json:"next_trigger"`
@@ -46,17 +47,18 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 		if pass {
 			return
 		}
+		reasonSeverity := ReasonSoftWait
 		if severity == SetupGateHard {
-			eval.HardBlockers = append(eval.HardBlockers, reason)
-		} else {
-			eval.SoftBlockers = append(eval.SoftBlockers, reason)
+			reasonSeverity = ReasonHardBlock
 		}
+		eval.Reasons = AddReason(eval.Reasons, NewDecisionReason(setupGateReasonCode(name), reasonSeverity, setupGateReasonScope(name), reason))
 	}
 	if len(c) < 60 {
 		reason := "chưa đủ dữ liệu 1D"
 		add("DATA", SetupGateHard, false, 0, reason, "Chờ đủ dữ liệu nến 1D trước khi đánh giá candidate.")
 		finalizeSetupEvaluation(&eval, cfg)
 		ap.HardBlockers = append(ap.HardBlockers, eval.HardBlockers...)
+		ap.Reasons = append(ap.Reasons, eval.Reasons...)
 		ap.SetupScore = eval.Score
 		ap.SetupGates = eval.Gates
 		ap.Reason = reason
@@ -89,14 +91,22 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 	zonePass := ap.ZoneQuality == "ZONE_OK"
 	add("ZONE_QUALITY", SetupGateSoft, zonePass, boolScore(zonePass, 1, 0.25), zoneQualityReason(ap.ZoneQuality, ap.ZoneWidthPct), "Chờ vùng support/discount hẹp và rõ hơn để tính entry/RR.")
 
-	falling := FallingKnife(c)
-	add(EntryCheckFallingKnife, SetupGateHard, !falling, boolScore(!falling, 1, 0), "falling knife risk", "Chờ cấu trúc ngừng lower-low và reclaim support rõ.")
-	fomo := FOMO(c, ema20, rsi, resistance)
-	add(EntryCheckFOMO, SetupGateHard, !fomo, boolScore(!fomo, 1, 0), "FOMO risk", "Không đuổi giá; chờ pullback về value/support.")
+	riskSig := ClassifyAssetRisk(c, ema20, rsi, resistance)
+	fallingSeverity := setupSeverityFromReason(riskSig.FallingKnife)
+	fallingPass := riskSig.FallingKnife == ReasonInfo
+	add(EntryCheckFallingKnife, fallingSeverity, fallingPass, boolScore(fallingPass, 1, 0.35), reasonMessageForCode(riskSig.Reasons, ReasonFallingKnife, "falling knife risk"), "Chờ cấu trúc ngừng lower-low và reclaim support rõ.")
+	fomoSeverity := setupSeverityFromReason(riskSig.FOMO)
+	fomoPass := riskSig.FOMO == ReasonInfo
+	add(EntryCheckFOMO, fomoSeverity, fomoPass, boolScore(fomoPass, 1, 0.45), reasonMessageForCode(riskSig.Reasons, ReasonFOMO, "FOMO risk"), "Không đuổi giá; chờ pullback về value/support.")
 
 	if enabled, lookback, minRelative, minMomentum := relativeStrengthParams(cfg); enabled && len(benchmark) > 0 {
 		rs := RelativeStrength(c, benchmark, lookback, minRelative, minMomentum)
-		add(EntryCheckRelativeStrength, SetupGateHard, rs.Pass, relativeComponent(rs.RelativeReturn), rs.Reason, "Chờ asset ngừng underperform BTC trong lookback.")
+		severity := SetupGateSoft
+		severeWeak := rs.RelativeReturn < minRelative*2 && rs.AssetReturn < minMomentum*2 && riskSig.FallingKnife != ReasonInfo
+		if !rs.Pass && severeWeak {
+			severity = SetupGateHard
+		}
+		add(EntryCheckRelativeStrength, severity, rs.Pass, relativeComponent(rs.RelativeReturn), rs.Reason, "Chờ asset ngừng underperform BTC trong lookback.")
 	}
 	if enabled, minScore, maxRank := rotationParams(cfg); enabled && rotation.Symbol != "" {
 		ap.RotationRank = rotation.Rank
@@ -105,7 +115,11 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 		add(EntryCheckRotationScore, SetupGateSoft, scorePass, rotation.Score, fmt.Sprintf("rotation score filter chặn asset: rank=%d score=%.2f reason=%s", rotation.Rank, rotation.Score, rotation.Reason), "Chờ rotation score tăng hoặc rank vào top được phép.")
 		if maxRank > 0 {
 			rankPass := rotation.Rank <= maxRank
-			add(EntryCheckRotationRank, SetupGateSoft, rankPass, boolScore(rankPass, 1, 0.4), fmt.Sprintf("rotation score filter chặn asset: rank=%d ngoài top %d score=%.2f reason=%s", rotation.Rank, maxRank, rotation.Score, rotation.Reason), "Chờ rotation rank vào top được phép.")
+			severity := SetupGateSoft
+			if cfg.Risk.StrictRotationRank {
+				severity = SetupGateHard
+			}
+			add(EntryCheckRotationRank, severity, rankPass, boolScore(rankPass, 1, 0.4), fmt.Sprintf("rotation score filter chặn asset: rank=%d ngoài top %d score=%.2f reason=%s", rotation.Rank, maxRank, rotation.Score, rotation.Reason), "Chờ rotation rank vào top được phép.")
 		}
 	}
 
@@ -115,7 +129,7 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 		add(EntryCheckMMAccumulation, SetupGateSoft, mm.Pass, clamp01(mm.Score/100), mmReason(mm), mm.NextTrigger)
 	}
 	if enabled, minBull, allowNeutral := assetFlowEntryParams(cfg); enabled && useAssetFlowEntry {
-		entry := AssetFlowEntryFromMM(mm, minBull, allowNeutral)
+		entry := AssetFlowEntryFromMMWithConfig(cfg, mm, minBull, allowNeutral)
 		ap.AssetFlowBias = entry.Bias
 		ap.AssetFlowScore = entry.BullScore
 		severity := SetupGateSoft
@@ -141,7 +155,12 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 	ap.Invalidation = invalidation
 	if rr.Valid {
 		ap.RewardRisk = rr.Ratio
-		add(EntryCheckRewardRisk, SetupGateSoft, rr.Ratio >= cfg.Risk.MinRewardRisk, clamp01(rr.Ratio/cfg.Risk.MinRewardRisk), fmt.Sprintf("reward/risk %.2f thấp hơn %.2f; risk %.4f reward %.4f", rr.Ratio, cfg.Risk.MinRewardRisk, rr.Risk, rr.Reward), "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng.")
+		rrPass := rr.Ratio >= cfg.Risk.MinRewardRisk
+		rrScore := clamp01(rr.Ratio / cfg.Risk.MinRewardRisk)
+		if !rrPass && rr.Ratio >= minScoutRewardRisk(cfg) {
+			rrScore = clamp01(0.55 + rr.Ratio/cfg.Risk.MinRewardRisk*0.35)
+		}
+		add(EntryCheckRewardRisk, SetupGateSoft, rrPass, rrScore, fmt.Sprintf("reward/risk %.2f thấp hơn %.2f; risk %.4f reward %.4f", rr.Ratio, cfg.Risk.MinRewardRisk, rr.Risk, rr.Reward), "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng.")
 	} else {
 		add(EntryCheckRewardRisk, SetupGateSoft, false, 0, "reward/risk không hợp lệ: "+rr.Reason, "Chờ entry sâu hơn hoặc target rõ hơn để tính RR.")
 	}
@@ -149,6 +168,7 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 	finalizeSetupEvaluation(&eval, cfg)
 	ap.SetupScore = eval.Score
 	ap.SetupGates = eval.Gates
+	ap.Reasons = append(ap.Reasons, eval.Reasons...)
 	ap.HardBlockers = append(ap.HardBlockers, eval.HardBlockers...)
 	ap.SoftBlockers = append(ap.SoftBlockers, eval.SoftBlockers...)
 	ap.NextTrigger = eval.NextTrigger
@@ -156,6 +176,8 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 }
 
 func finalizeSetupEvaluation(eval *SetupEvaluation, cfg config.Config) {
+	eval.HardBlockers = ReasonMessages(ReasonsBySeverity(eval.Reasons, ReasonHardBlock))
+	eval.SoftBlockers = ReasonMessages(ReasonsBySeverity(eval.Reasons, ReasonSoftWait))
 	passed := 0
 	total := 0
 	score := 0.0
@@ -185,11 +207,84 @@ func finalizeSetupEvaluation(eval *SetupEvaluation, cfg config.Config) {
 	eval.SoftBlockers = uniqueStrings(eval.SoftBlockers)
 }
 
+func setupSeverityFromReason(severity ReasonSeverity) SetupGateSeverity {
+	if severity == ReasonHardBlock {
+		return SetupGateHard
+	}
+	return SetupGateSoft
+}
+
+func reasonMessageForCode(reasons []DecisionReason, code ReasonCode, fallback string) string {
+	for _, reason := range reasons {
+		if reason.Code == code && reason.Message != "" {
+			return reason.Message
+		}
+	}
+	return fallback
+}
+
+func setupGateReasonCode(name string) ReasonCode {
+	switch name {
+	case "DATA":
+		return ReasonDataWait
+	case "ZONE_QUALITY", EntryCheckDiscountZone:
+		return ReasonDiscountZone
+	case EntryCheckFallingKnife:
+		return ReasonFallingKnife
+	case EntryCheckFOMO:
+		return ReasonFOMO
+	case EntryCheckRelativeStrength:
+		return ReasonRelativeStrength
+	case EntryCheckRotationScore:
+		return ReasonRotationScore
+	case EntryCheckRotationRank:
+		return ReasonRotationRank
+	case EntryCheckMMAccumulation:
+		return ReasonMMAccumulation
+	case EntryCheckAssetFlowEntry:
+		return ReasonAssetFlowEntry
+	case EntryCheckLiquidityQuality:
+		return ReasonLiquidityQuality
+	case EntryCheckRewardRisk:
+		return ReasonRewardRisk
+	default:
+		return ReasonCode(name)
+	}
+}
+
+func setupGateReasonScope(name string) ReasonScope {
+	switch name {
+	case "DATA":
+		return ReasonScopeData
+	case EntryCheckRotationScore, EntryCheckRotationRank, EntryCheckRelativeStrength:
+		return ReasonScopeRotation
+	case EntryCheckAssetFlowEntry, EntryCheckMMAccumulation:
+		return ReasonScopeFlow
+	case EntryCheckRewardRisk:
+		return ReasonScopeExecution
+	case EntryCheckLiquidityQuality:
+		return ReasonScopeExecution
+	case EntryCheckFallingKnife, EntryCheckFOMO:
+		return ReasonScopeRisk
+	default:
+		return ReasonScopeAsset
+	}
+}
+
 func boolScore(pass bool, passScore, failScore float64) float64 {
 	if pass {
 		return passScore
 	}
 	return failScore
+}
+
+func containsAny(s string, needles ...string) bool {
+	for _, needle := range needles {
+		if strings.Contains(s, strings.ToLower(needle)) {
+			return true
+		}
+	}
+	return false
 }
 
 func entryScore(entry AssetFlowEntrySignal) float64 {

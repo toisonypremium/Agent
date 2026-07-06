@@ -52,7 +52,7 @@ func TestAssetFlowEntryWatchesNeutral(t *testing.T) {
 	if got.Pass || got.HardBlock {
 		t.Fatalf("expected neutral watch: %+v", got)
 	}
-	if !strings.Contains(got.Reason, "chưa xác nhận") {
-		t.Fatalf("expected watch reason: %+v", got)
+	if !strings.Contains(got.Reason, "soft wait") {
+		t.Fatalf("expected soft-wait reason: %+v", got)
 	}
 }

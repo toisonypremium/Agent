@@ -28,9 +28,14 @@ risk:
   disable_rotation_score_filter: false
   min_rotation_score: 0.55
   max_rotation_rank: 2
+  strict_rotation_rank: false
   disable_asset_flow_entry_filter: false
   min_asset_flow_bull_score: 0.25
   allow_neutral_reclaim_entry: true
+  strict_asset_flow_entry: false
+  flow_bear_hard_block_score: 0.45
+  min_scout_reward_risk: 1.5
+  allow_scout_in_downtrend: true
   no_futures: true
   no_leverage: true
   spot_limit_only: true

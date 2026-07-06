@@ -64,8 +64,9 @@ func TestBuildPlanWithBenchmarksIncludesWatchlistWhenAgent1NotAllowed(t *testing
 	if got.State == StateActiveLimit || len(got.Watchlist.Candidates) == 0 {
 		t.Fatalf("expected watchlist without full active plan on non-ALLOWED BTC: %+v", got)
 	}
-	if !containsString(got.Watchlist.Candidates[0].Missing, "BTC permission WATCH; không tạo probe") {
-		t.Fatalf("expected BTC permission missing: %+v", got.Watchlist.Candidates[0])
+	item, ok := checklistItem(got.Watchlist.Candidates[0].EntryChecklist, EntryCheckBTCPermission)
+	if !ok || item.Pass || item.Severity != EntryCheckSoft {
+		t.Fatalf("expected BTC permission soft wait: %+v", got.Watchlist.Candidates[0])
 	}
 }
 
@@ -77,17 +78,18 @@ func TestWatchlistCapsBTCNotAllowedNoise(t *testing.T) {
 	btc := assetCandles(80, false)
 	got := BuildPlanWithBenchmarks(cfg, analysis, assets, map[string][]market.Candle{"BTCUSDT": btc})
 	for _, c := range got.Watchlist.Candidates {
-		if c.Actionable || c.Tier != WatchTierEarly || c.ReadinessScore > 0.49 {
-			t.Fatalf("BTC-not-allowed candidate should be capped: %+v", c)
+		item, ok := checklistItem(c.EntryChecklist, EntryCheckBTCPermission)
+		if c.Actionable || c.Tier != WatchTierEarly || !ok || item.Pass || item.Severity != EntryCheckSoft {
+			t.Fatalf("BTC-not-allowed candidate should be soft-wait capped: %+v", c)
 		}
 	}
 }
 
-func TestWatchlistCapsRelativeWeakAsBlocked(t *testing.T) {
+func TestWatchlistCapsRelativeWeakAsSoftWait(t *testing.T) {
 	cfg := testConfig()
-	c := tuneWatchCandidate(WatchCandidate{Symbol: "ETHUSDT", ReadinessScore: 0.90, Missing: []string{"relative strength yếu hơn BTC"}}, cfg)
-	if c.Actionable || c.Tier != WatchTierBlocked || c.ReadinessScore > 0.35 {
-		t.Fatalf("relative weak should be blocked/capped: %+v", c)
+	c := tuneWatchCandidate(WatchCandidate{Symbol: "ETHUSDT", ReadinessScore: 0.90, EntryChecklist: []EntryChecklistItem{{Name: EntryCheckRelativeStrength, Pass: false, Severity: EntryCheckSoft, Reason: "relative strength yếu hơn BTC"}}}, cfg)
+	if c.Actionable || c.Tier != WatchTierEarly || c.ReadinessScore > 0.90 {
+		t.Fatalf("relative weak should be soft-wait, not blocked: %+v", c)
 	}
 }
 
@@ -136,7 +138,7 @@ func TestBuildWatchlistIncludesEntryChecklist(t *testing.T) {
 	}
 }
 
-func TestEntryChecklistMarksBTCMissingHardFail(t *testing.T) {
+func TestEntryChecklistMarksBTCMissingSoftWait(t *testing.T) {
 	cfg := testConfig()
 	analysis := allowedAnalysis()
 	analysis.ActionPermission = agent1.Watch
@@ -144,14 +146,14 @@ func TestEntryChecklistMarksBTCMissingHardFail(t *testing.T) {
 	btc := assetCandles(80, false)
 	got := BuildPlanWithBenchmarks(cfg, analysis, assets, map[string][]market.Candle{"BTCUSDT": btc})
 	item, ok := checklistItem(got.Watchlist.Candidates[0].EntryChecklist, EntryCheckBTCPermission)
-	if !ok || item.Pass || item.Severity != EntryCheckHard {
-		t.Fatalf("BTC checklist should hard fail: %+v", got.Watchlist.Candidates[0].EntryChecklist)
+	if !ok || item.Pass || item.Severity != EntryCheckSoft {
+		t.Fatalf("BTC checklist should soft wait: %+v", got.Watchlist.Candidates[0].EntryChecklist)
 	}
 }
 
 func TestEntryChecklistMarksFlowUnconfirmedSoftFail(t *testing.T) {
-	c := WatchCandidate{Missing: []string{"asset flow chưa reclaim/absorption"}}
-	items := buildEntryChecklist(c, testConfig())
+	reasons := []DecisionReason{NewDecisionReason(ReasonAssetFlowEntry, ReasonSoftWait, ReasonScopeFlow, "asset flow chưa xác nhận")}
+	items := checklistFromReasons(reasons)
 	item, ok := checklistItem(items, EntryCheckAssetFlowEntry)
 	if !ok || item.Pass || item.Severity != EntryCheckSoft {
 		t.Fatalf("flow checklist should soft fail: %+v", items)

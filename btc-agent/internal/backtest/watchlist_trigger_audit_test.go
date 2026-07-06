@@ -50,7 +50,7 @@ func TestRunWatchlistTriggerAuditProducesRows(t *testing.T) {
 }
 
 func TestWatchlistTriggerClassifiesFlowMissing(t *testing.T) {
-	got := watchlistTrigger(agent2.WatchCandidate{Missing: []string{"asset flow chưa reclaim/absorption"}})
+	got := watchlistTrigger(agent2.WatchCandidate{Reasons: []agent2.DecisionReason{agent2.NewDecisionReason(agent2.ReasonAssetFlowEntry, agent2.ReasonSoftWait, agent2.ReasonScopeFlow, "asset flow chưa xác nhận")}})
 	if got != TriggerFlowNotConfirmed {
 		t.Fatalf("trigger=%s want %s", got, TriggerFlowNotConfirmed)
 	}

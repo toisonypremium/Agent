@@ -19,6 +19,7 @@ const (
 )
 
 const (
+	EntryCheckData             = "DATA"
 	EntryCheckBTCPermission    = "BTC_PERMISSION"
 	EntryCheckFallingKnife     = "FALLING_KNIFE"
 	EntryCheckFOMO             = "FOMO"
@@ -52,6 +53,7 @@ type WatchCandidate struct {
 	Tier             string               `json:"tier"`
 	NoiseFlags       []string             `json:"noise_flags,omitempty"`
 	EntryChecklist   []EntryChecklistItem `json:"entry_checklist,omitempty"`
+	Reasons          []DecisionReason     `json:"reasons,omitempty"`
 	RotationRank     int                  `json:"rotation_rank,omitempty"`
 	RotationScore    float64              `json:"rotation_score,omitempty"`
 	AssetReturn      float64              `json:"asset_return"`
@@ -119,6 +121,7 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		c.LiquidityQuality = plan.LiquidityQuality
 		c.RewardRisk = plan.RewardRisk
 		c.RewardRiskDetail = plan.RewardRiskDetail
+		c.Reasons = append(c.Reasons, plan.Reasons...)
 		if plan.SetupScore > 0 {
 			c.ReadinessScore = plan.SetupScore
 		}
@@ -132,7 +135,8 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		c.Tier = WatchTierDataWait
 		c.Actionable = false
 		c.NextTrigger = "Chờ đủ dữ liệu nến 1D trước khi đánh giá candidate."
-		c.EntryChecklist = buildEntryChecklist(c, cfg)
+		c.Reasons = AddReason(c.Reasons, NewDecisionReason(ReasonDataWait, ReasonHardBlock, ReasonScopeData, "chưa đủ dữ liệu 1D"))
+		c.EntryChecklist = checklistFromReasons(c.Reasons)
 		return c
 	}
 
@@ -241,9 +245,6 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 		c.Missing = append(c.Missing, "chưa tính được reward/risk")
 	}
 
-	if c.BlockReason != "" && c.State != StateActiveLimit {
-		appendReasonMissing(&c)
-	}
 	c.Missing = uniqueStrings(c.Missing)
 	computedReadiness := clamp01(relativeReady*0.20 + rotationReady*0.20 + flowReady*0.15 + mmReady*0.15 + liquidityReady*0.10 + discountReady*0.10 + rrReady*0.10)
 	if c.ReadinessScore > 0 {
@@ -251,15 +252,67 @@ func buildWatchCandidate(cfg config.Config, sym string, candles []market.Candle,
 	} else {
 		c.ReadinessScore = computedReadiness
 	}
+	if len(c.Reasons) > 0 {
+		c.EntryChecklist = checklistFromReasons(c.Reasons)
+	}
 	if len(plan.SetupGates) > 0 {
-		c.EntryChecklist = checklistFromSetupGates(plan.SetupGates)
+		c.EntryChecklist = mergeChecklistItems(append(c.EntryChecklist, checklistFromSetupGates(plan.SetupGates)...))
 	}
 	c = tuneWatchCandidate(c, cfg)
 	c.NextTrigger = nextTrigger(c)
 	if len(c.EntryChecklist) == 0 {
-		c.EntryChecklist = buildEntryChecklist(c, cfg)
+		c.EntryChecklist = checklistFromCandidateFacts(c)
 	}
 	return c
+}
+
+func checklistFromReasons(reasons []DecisionReason) []EntryChecklistItem {
+	items := []EntryChecklistItem{}
+	for _, reason := range reasons {
+		if reason.Severity == ReasonInfo {
+			continue
+		}
+		items = append(items, EntryChecklistItem{Name: checklistNameFromReason(reason.Code), Pass: false, Severity: checklistSeverityFromReason(reason.Severity), Reason: reason.Message})
+	}
+	return mergeChecklistItems(items)
+}
+
+func checklistNameFromReason(code ReasonCode) string {
+	switch code {
+	case ReasonBTCPermission, ReasonBTCPanic, ReasonBTCDowntrend:
+		return EntryCheckBTCPermission
+	case ReasonFallingKnife:
+		return EntryCheckFallingKnife
+	case ReasonFOMO:
+		return EntryCheckFOMO
+	case ReasonRelativeStrength:
+		return EntryCheckRelativeStrength
+	case ReasonRotationScore:
+		return EntryCheckRotationScore
+	case ReasonRotationRank:
+		return EntryCheckRotationRank
+	case ReasonMMAccumulation:
+		return EntryCheckMMAccumulation
+	case ReasonAssetFlowEntry:
+		return EntryCheckAssetFlowEntry
+	case ReasonLiquidityQuality:
+		return EntryCheckLiquidityQuality
+	case ReasonDiscountZone:
+		return EntryCheckDiscountZone
+	case ReasonRewardRisk, ReasonExecutionLayer:
+		return EntryCheckRewardRisk
+	case ReasonDataWait:
+		return EntryCheckData
+	default:
+		return string(code)
+	}
+}
+
+func checklistSeverityFromReason(severity ReasonSeverity) string {
+	if severity == ReasonHardBlock {
+		return EntryCheckHard
+	}
+	return EntryCheckSoft
 }
 
 func checklistFromSetupGates(gates []SetupGateResult) []EntryChecklistItem {
@@ -317,7 +370,7 @@ func mergeChecklistItems(items []EntryChecklistItem) []EntryChecklistItem {
 			continue
 		}
 		prev, ok := byName[item.Name]
-		if !ok || (!item.Pass && prev.Pass) || (item.Severity == EntryCheckHard && prev.Severity != EntryCheckHard) {
+		if !ok || (!item.Pass && prev.Pass) || (!item.Pass && !prev.Pass && item.Severity == EntryCheckHard && prev.Severity != EntryCheckHard) {
 			byName[item.Name] = item
 		}
 	}
@@ -330,36 +383,12 @@ func mergeChecklistItems(items []EntryChecklistItem) []EntryChecklistItem {
 	return out
 }
 
-func appendReasonMissing(c *WatchCandidate) {
-	r := c.BlockReason
-	switch {
-	case strings.Contains(r, "falling knife"):
-		c.Missing = append(c.Missing, "falling knife risk")
-	case strings.Contains(r, "FOMO"):
-		c.Missing = append(c.Missing, "FOMO risk")
-	case strings.Contains(r, "relative strength"):
-		c.Missing = append(c.Missing, "relative strength yếu hơn BTC")
-	case strings.Contains(r, "rotation score"):
-		c.Missing = append(c.Missing, "rotation chưa đạt")
-	case strings.Contains(r, "asset flow entry"):
-		if strings.Contains(r, "chặn") {
-			c.Missing = append(c.Missing, "asset flow đang distribution/bull-trap")
-		} else {
-			c.Missing = append(c.Missing, "asset flow chưa reclaim/absorption")
-		}
-	case strings.Contains(r, "discount"):
-		c.Missing = append(c.Missing, "giá chưa vào discount zone")
-	case strings.Contains(r, "reward/risk"):
-		c.Missing = append(c.Missing, "reward/risk chưa đủ")
-	}
-}
-
 func AddWatchlistMissing(w *WatchlistReport, missing string, cfg config.Config) {
 	for i := range w.Candidates {
 		w.Candidates[i].Missing = uniqueStrings(append([]string{missing}, w.Candidates[i].Missing...))
 		w.Candidates[i] = tuneWatchCandidate(w.Candidates[i], cfg)
 		w.Candidates[i].NextTrigger = nextTrigger(w.Candidates[i])
-		w.Candidates[i].EntryChecklist = buildEntryChecklist(w.Candidates[i], cfg)
+		w.Candidates[i].EntryChecklist = checklistFromCandidateFacts(w.Candidates[i])
 	}
 	sortWatchCandidates(w.Candidates)
 	w.Summary = summarizeWatchlist(w.Candidates)
@@ -367,7 +396,7 @@ func AddWatchlistMissing(w *WatchlistReport, missing string, cfg config.Config) 
 
 func tuneWatchCandidate(c WatchCandidate, cfg config.Config) WatchCandidate {
 	if len(c.EntryChecklist) == 0 {
-		c.EntryChecklist = buildEntryChecklist(c, cfg)
+		c.EntryChecklist = checklistFromCandidateFacts(c)
 	}
 	return tuneWatchCandidateFromChecklist(c, cfg)
 }
@@ -389,7 +418,7 @@ func tuneWatchCandidateFromChecklist(c WatchCandidate, cfg config.Config) WatchC
 			softFails[item.Name] = true
 		}
 	}
-	if containsAny(strings.ToLower(strings.Join(c.Missing, " ")+" "+c.BlockReason), "chưa đủ dữ liệu") {
+	if hardFails[EntryCheckData] || softFails[EntryCheckData] {
 		capScore = 0
 		capReasons = append(capReasons, "DATA_WAIT")
 		c.Tier = WatchTierDataWait
@@ -438,56 +467,21 @@ func tuneWatchCandidateFromChecklist(c WatchCandidate, cfg config.Config) WatchC
 	return c
 }
 
-func buildEntryChecklist(c WatchCandidate, cfg config.Config) []EntryChecklistItem {
-	_ = cfg
-	joined := strings.ToLower(strings.Join(c.Missing, " ") + " " + c.BlockReason)
+func checklistFromCandidateFacts(c WatchCandidate) []EntryChecklistItem {
 	items := []EntryChecklistItem{
-		entryChecklistItem(EntryCheckBTCPermission, EntryCheckHard, !containsAny(joined, "btc permission", "btc risk"), firstMatchingReason(c, "BTC permission", "BTC risk"), "BTC permission/risk đã cho phép."),
-		entryChecklistItem(EntryCheckFallingKnife, EntryCheckHard, !containsAny(joined, "falling knife", "dao rơi"), firstMatchingReason(c, "falling knife", "dao rơi"), "Không có falling-knife risk."),
-		entryChecklistItem(EntryCheckFOMO, EntryCheckHard, !containsAny(joined, "fomo"), firstMatchingReason(c, "FOMO"), "Không có FOMO risk."),
+		entryChecklistItem(EntryCheckBTCPermission, EntryCheckHard, true, "", "BTC permission/risk đã cho phép."),
+		entryChecklistItem(EntryCheckFallingKnife, EntryCheckHard, true, "", "Không có falling-knife risk."),
+		entryChecklistItem(EntryCheckFOMO, EntryCheckHard, true, "", "Không có FOMO risk."),
+		entryChecklistItem(EntryCheckRelativeStrength, EntryCheckSoft, c.RelativeReturn >= 0, "relative strength yếu hơn BTC", "Relative strength không yếu hơn BTC."),
+		entryChecklistItem(EntryCheckRotationScore, EntryCheckSoft, c.RotationScore > 0, "chưa có rotation score", "Rotation score đạt ngưỡng."),
+		entryChecklistItem(EntryCheckRotationRank, EntryCheckSoft, c.RotationRank > 0, "chưa có rotation rank", "Rotation rank nằm trong top được phép."),
+		entryChecklistItem(EntryCheckMMAccumulation, EntryCheckSoft, c.MMScore > 0, "MM accumulation chưa xác nhận", "MM accumulation footprint đã xác nhận."),
+		entryChecklistItem(EntryCheckAssetFlowEntry, EntryCheckSoft, c.FlowBullScore > 0, "asset flow chưa xác nhận", "Asset flow entry đã xác nhận."),
+		entryChecklistItem(EntryCheckLiquidityQuality, EntryCheckSoft, !c.LiquidityQuality.Enabled || c.LiquidityQuality.Pass, "liquidity gate chưa đạt", "Liquidity đủ cho sizing hiện tại."),
+		entryChecklistItem(EntryCheckDiscountZone, EntryCheckSoft, c.Support.Valid() && c.Price <= c.Support.High*(1+c.DiscountGap), "giá chưa vào discount zone", "Giá nằm trong vùng discount hợp lệ."),
+		entryChecklistItem(EntryCheckRewardRisk, EntryCheckSoft, c.RewardRisk > 0, "reward/risk chưa tính được", "Reward/risk đạt ngưỡng hoặc đã tính được."),
 	}
-
-	relativePass := !containsAny(joined, "relative strength")
-	relativeSeverity := EntryCheckHard
-	relativeReason := firstMatchingReason(c, "relative strength")
-	if containsAny(joined, "thiếu btc benchmark") {
-		relativePass = false
-		relativeSeverity = EntryCheckSoft
-		relativeReason = firstMatchingReason(c, "thiếu BTC benchmark")
-	}
-	items = append(items, entryChecklistItem(EntryCheckRelativeStrength, relativeSeverity, relativePass, relativeReason, "Relative strength không yếu hơn BTC."))
-
-	items = append(items,
-		entryChecklistItem(EntryCheckRotationScore, EntryCheckSoft, !containsAny(joined, "rotation score", "rotation chưa đạt"), firstMatchingReason(c, "rotation score", "rotation chưa đạt"), "Rotation score đạt ngưỡng."),
-		entryChecklistItem(EntryCheckRotationRank, EntryCheckSoft, !containsAny(joined, "rotation rank"), firstMatchingReason(c, "rotation rank"), "Rotation rank nằm trong top được phép."),
-	)
-
-	mmFail := containsAny(joined, "mm case", "reclaim", "absorption", "falling_knife", "distribution", "bull-trap")
-	mmSeverity := EntryCheckSoft
-	if containsAny(joined, "falling_knife", "distribution", "bull-trap") {
-		mmSeverity = EntryCheckHard
-	}
-	items = append(items, entryChecklistItem(EntryCheckMMAccumulation, mmSeverity, !mmFail, firstMatchingReason(c, "MM case", "reclaim", "absorption", "distribution", "bull-trap"), "MM accumulation footprint đã xác nhận."))
-
-	flowFail := containsAny(joined, "asset flow", "flow chưa", "distribution", "bull-trap")
-	flowSeverity := EntryCheckSoft
-	if containsAny(joined, "distribution", "bull-trap", "failed breakout") {
-		flowSeverity = EntryCheckHard
-	}
-	items = append(items, entryChecklistItem(EntryCheckAssetFlowEntry, flowSeverity, !flowFail, firstMatchingReason(c, "asset flow", "flow", "distribution", "bull-trap"), "Asset flow entry đã xác nhận."))
-	liquidityFail := containsAny(joined, "liquidity")
-	items = append(items, entryChecklistItem(EntryCheckLiquidityQuality, EntryCheckSoft, !liquidityFail, firstMatchingReason(c, "liquidity"), "Liquidity đủ cho sizing hiện tại."))
-
-	discountFail := containsAny(joined, "discount", "support zone", "dưới support")
-	discountSeverity := EntryCheckSoft
-	if containsAny(joined, "dưới support", "dao rơi") {
-		discountSeverity = EntryCheckHard
-	}
-	items = append(items,
-		entryChecklistItem(EntryCheckDiscountZone, discountSeverity, !discountFail, firstMatchingReason(c, "discount", "support zone", "dưới support"), "Giá nằm trong vùng discount hợp lệ."),
-		entryChecklistItem(EntryCheckRewardRisk, EntryCheckSoft, !containsAny(joined, "reward/risk"), firstMatchingReason(c, "reward/risk"), "Reward/risk đạt ngưỡng hoặc đã tính được."),
-	)
-	return items
+	return mergeChecklistItems(items)
 }
 
 func entryChecklistItem(name, severity string, pass bool, reason, passReason string) EntryChecklistItem {
@@ -497,33 +491,6 @@ func entryChecklistItem(name, severity string, pass bool, reason, passReason str
 		reason = "check chưa đạt theo deterministic engine."
 	}
 	return EntryChecklistItem{Name: name, Pass: pass, Severity: severity, Reason: reason}
-}
-
-func firstMatchingReason(c WatchCandidate, needles ...string) string {
-	for _, m := range c.Missing {
-		lower := strings.ToLower(m)
-		for _, needle := range needles {
-			if strings.Contains(lower, strings.ToLower(needle)) {
-				return m
-			}
-		}
-	}
-	lowerReason := strings.ToLower(c.BlockReason)
-	for _, needle := range needles {
-		if strings.Contains(lowerReason, strings.ToLower(needle)) {
-			return c.BlockReason
-		}
-	}
-	return ""
-}
-
-func containsAny(s string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, strings.ToLower(needle)) {
-			return true
-		}
-	}
-	return false
 }
 
 func ChecklistSummary(items []EntryChecklistItem) string {
@@ -556,30 +523,33 @@ func ChecklistSummary(items []EntryChecklistItem) string {
 }
 
 func nextTrigger(c WatchCandidate) string {
-	for _, m := range c.Missing {
-		switch {
-		case strings.Contains(m, "BTC permission"):
+	for _, item := range c.EntryChecklist {
+		if item.Pass {
+			continue
+		}
+		switch item.Name {
+		case EntryCheckBTCPermission:
 			return "Chờ BTC chuyển ALLOWED; asset chỉ nằm watchlist, không tạo lệnh."
-		case strings.Contains(m, "distribution") || strings.Contains(m, "bull-trap"):
-			return "Chờ hết distribution/bull-trap; cần reclaim lại support với bull flow."
-		case strings.Contains(m, "MM case"):
-			return "Chờ sweep low + close reclaim support + retest giữ vùng."
-		case strings.Contains(m, "liquidity"):
-			return "Chờ spread/depth/volume đủ dày trước khi tạo live layer."
-		case strings.Contains(m, "flow"):
-			return "Chờ sweep low + reclaim support hoặc absorption volume gần support."
-		case strings.Contains(m, "discount"):
-			return "Chờ giá về support/discount zone mà không tạo falling knife."
-		case strings.Contains(m, "reward/risk"):
-			return "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng."
-		case strings.Contains(m, "relative"):
-			return "Chờ asset ngừng underperform BTC trong lookback."
-		case strings.Contains(m, "rotation"):
-			return "Chờ rotation score tăng hoặc rank vào top được phép."
-		case strings.Contains(m, "falling knife"):
+		case EntryCheckFallingKnife:
 			return "Chờ cấu trúc ngừng lower-low và có reclaim support rõ."
-		case strings.Contains(m, "FOMO"):
+		case EntryCheckFOMO:
 			return "Không đuổi giá; chờ pullback về value/support."
+		case EntryCheckRelativeStrength:
+			return "Chờ asset ngừng underperform BTC trong lookback."
+		case EntryCheckRotationScore, EntryCheckRotationRank:
+			return "Chờ rotation score tăng hoặc rank vào top được phép."
+		case EntryCheckMMAccumulation:
+			return "Chờ sweep low + close reclaim support + retest giữ vùng."
+		case EntryCheckAssetFlowEntry:
+			return "Chờ sweep low + reclaim support hoặc absorption volume gần support."
+		case EntryCheckLiquidityQuality:
+			return "Chờ spread/depth/volume đủ dày trước khi tạo live layer."
+		case EntryCheckDiscountZone:
+			return "Chờ giá về support/discount zone mà không tạo falling knife."
+		case EntryCheckRewardRisk:
+			return "Chờ entry sâu hơn hoặc resistance mở rộng để RR đạt ngưỡng."
+		case EntryCheckData:
+			return "Chờ đủ dữ liệu nến 1D trước khi đánh giá candidate."
 		}
 	}
 	if c.State == StateArmed {

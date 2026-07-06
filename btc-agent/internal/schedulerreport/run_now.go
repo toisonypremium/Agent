@@ -28,113 +28,69 @@ func BuildDeterministic(s RunNowSnapshot) string {
 		s.GeneratedAt = time.Now().UTC()
 	}
 	var b strings.Builder
-	b.WriteString("📊 BTC Agent — Bản tin chiến lược\n")
+	b.WriteString("📊 BTC Agent — Tóm tắt chiến lược\n")
 	b.WriteString(s.GeneratedAt.UTC().Format("02/01 15:04 UTC") + "\n")
 	b.WriteString("───────────────────\n")
 
 	b.WriteString("I. KẾT LUẬN\n")
 	b.WriteString(actionConclusionVI(s.Analysis, s.Plan) + "\n")
-	b.WriteString("Blocker chính: " + dominantBlockerVI(s.Analysis, s.Plan) + "\n")
-	b.WriteString("Mode: " + vietnamesePermission(s.Analysis.ActionPermission) + " | Plan: " + vietnamesePlanState(s.Plan.State) + "\n")
+	b.WriteString("Blocker: " + dominantBlockerVI(s.Analysis, s.Plan) + "\n")
+	b.WriteString(fmt.Sprintf("BTC %.0f | trend %.1f | %s/%s | plan %s\n", s.Analysis.BTCPrice, s.Analysis.TrendScore, s.Analysis.MarketRegime, s.Analysis.ActionPermission, s.Plan.State))
 	b.WriteString("───────────────────\n")
 
-	b.WriteString("II. PHÂN TÍCH KỸ THUẬT BTC\n")
-	b.WriteString(fmt.Sprintf("Giá BTC: %.0f USDT | Regime: %s | Trend score: %.1f/100\n", s.Analysis.BTCPrice, vietnameseRegime(s.Analysis.MarketRegime), s.Analysis.TrendScore))
-	b.WriteString(fmt.Sprintf("Bias: tuần=%s, ngày=%s, 4H=%s\n", vietnameseBias(s.Analysis.WeeklyBias), vietnameseBias(s.Analysis.DailyBias), vietnameseBias(s.Analysis.FourHourBias)))
-	b.WriteString(fmt.Sprintf("Flow: %s %.2f — %s\n", s.Analysis.Flow.Bias, s.Analysis.Flow.Score, flowDetailVI(s.Analysis)))
-	b.WriteString(fmt.Sprintf("Rủi ro: tổng=%s | falling knife=%s | FOMO=%s\n", vietnameseRisk(s.Analysis.RiskLevel), vietnameseRisk(s.Analysis.FallingKnifeRisk), vietnameseRisk(s.Analysis.FomoRisk)))
-	b.WriteString("Vùng giá quan trọng:\n")
-	writeZoneVI(&b, "Gom active", s.Analysis.AccumulationZone.Low, s.Analysis.AccumulationZone.High)
-	writeZoneVI(&b, "Gom macro/stress", s.Analysis.MacroAccumulationZone.Low, s.Analysis.MacroAccumulationZone.High)
-	writeZoneVI(&b, "Support chính", s.Analysis.PrimarySupportZone.Low, s.Analysis.PrimarySupportZone.High)
-	writeZoneVI(&b, "Support sâu", s.Analysis.DeepSupportZone.Low, s.Analysis.DeepSupportZone.High)
-	writeZoneVI(&b, "Kháng cự", s.Analysis.ResistanceZone.Low, s.Analysis.ResistanceZone.High)
-	writeZoneVI(&b, "Invalidation", s.Analysis.InvalidationZone.Low, s.Analysis.InvalidationZone.High)
+	b.WriteString("II. BTC & KỊCH BẢN\n")
+	b.WriteString(fmt.Sprintf("Bias W/D/4H: %s/%s/%s | Flow %s %.2f | risk %s\n", vietnameseBias(s.Analysis.WeeklyBias), vietnameseBias(s.Analysis.DailyBias), vietnameseBias(s.Analysis.FourHourBias), s.Analysis.Flow.Bias, s.Analysis.Flow.Score, vietnameseRisk(s.Analysis.RiskLevel)))
+	b.WriteString(fmt.Sprintf("Vùng: active %.0f–%.0f | support %.0f–%.0f | invalid %.0f–%.0f | resist %.0f–%.0f\n", s.Analysis.AccumulationZone.Low, s.Analysis.AccumulationZone.High, s.Analysis.PrimarySupportZone.Low, s.Analysis.PrimarySupportZone.High, s.Analysis.InvalidationZone.Low, s.Analysis.InvalidationZone.High, s.Analysis.ResistanceZone.Low, s.Analysis.ResistanceZone.High))
+	b.WriteString(shortMarketScenarioVI(s.Analysis))
+	b.WriteString("Cần: " + strings.Join(btcTriggerChecklistVI(s.Analysis), " | ") + "\n")
 	b.WriteString("───────────────────\n")
 
-	b.WriteString("III. KỊCH BẢN THỊ TRƯỜNG\n")
-	b.WriteString(marketScenarioVI(s.Analysis))
-	b.WriteString("Điều kiện BTC cần thấy:\n")
-	for _, item := range btcTriggerChecklistVI(s.Analysis) {
-		b.WriteString("- " + item + "\n")
-	}
-	b.WriteString("───────────────────\n")
-
-	b.WriteString("IV. KẾ HOẠCH BOT\n")
-	b.WriteString(fmt.Sprintf("Permission: %s | Plan: %s\n", vietnamesePermission(s.Analysis.ActionPermission), vietnamesePlanState(s.Plan.State)))
-	if s.Analysis.PermissionReason != "" {
-		b.WriteString("Lý do chính: " + s.Analysis.PermissionReason + "\n")
-	}
-	active := activeAssetsVI(s.Plan)
-	if len(active) > 0 {
-		b.WriteString("Coin đủ điều kiện ACTIVE_LIMIT:\n")
-		for _, asset := range active {
-			b.WriteString(assetPlanLineVI(asset) + "\n")
-			for _, layer := range asset.Layers {
-				b.WriteString(fmt.Sprintf("  Layer %d: entry %.4f × %.2f USDT | RR %.2f | invalid %.4f | target %.4f\n", layer.Index, layer.Price, layer.Notional, layer.RewardRisk, layer.Invalidation, layer.Target))
-			}
-		}
-	} else {
-		b.WriteString("Không có ACTIVE_LIMIT. Bot không đặt lệnh, không chase giá.\n")
-	}
-	unlock := BuildUnlockConditions(s.Analysis, s.Plan)
-	if len(unlock) > 0 {
-		b.WriteString("Điều kiện mở khóa:\n")
-		for _, item := range unlock {
-			b.WriteString("- " + item + "\n")
-		}
-	}
+	b.WriteString("III. WATCHLIST MM/LIQ\n")
 	if len(s.Plan.Watchlist.Candidates) > 0 {
-		b.WriteString("Watchlist theo MM/liquidity:\n")
 		limit := len(s.Plan.Watchlist.Candidates)
 		if limit > 3 {
 			limit = 3
 		}
 		for _, c := range s.Plan.Watchlist.Candidates[:limit] {
-			b.WriteString(watchCandidateLineVI(c) + "\n")
+			b.WriteString(shortWatchCandidateLineVI(c) + "\n")
 		}
 	} else if len(s.Plan.Assets) > 0 {
-		b.WriteString("Coin bị chặn theo plan:\n")
 		limit := len(s.Plan.Assets)
 		if limit > 3 {
 			limit = 3
 		}
 		for _, asset := range s.Plan.Assets[:limit] {
-			b.WriteString(assetPlanLineVI(asset) + "\n")
+			b.WriteString(shortAssetPlanLineVI(asset) + "\n")
 		}
+	} else {
+		b.WriteString("Chưa có watchlist đủ dữ liệu.\n")
+	}
+	b.WriteString("───────────────────\n")
+
+	b.WriteString("IV. BOT & SAFETY\n")
+	if s.Plan.State == agent2.StateActiveLimit {
+		for _, asset := range activeAssetsVI(s.Plan) {
+			b.WriteString(shortAssetPlanLineVI(asset) + "\n")
+		}
+	} else {
+		b.WriteString("Không ACTIVE_LIMIT: không đặt lệnh, không chase. WATCH không tạo probe; ARMED mới probe nhỏ; ALLOWED mới ladder.\n")
 	}
 	if s.ShadowProbe.Profile != "" {
-		b.WriteString("Shadow ARMED_PROBE_LIGHT:\n")
-		b.WriteString(fmt.Sprintf("- production=%s, research=%s | would_probe=%v | Shadow only — không đặt lệnh thật.\n", s.ShadowProbe.ProductionPermission, s.ShadowProbe.ResearchPermission, len(s.ShadowProbe.Candidates) > 0))
-		if len(s.ShadowProbe.Candidates) > 0 {
-			for _, c := range s.ShadowProbe.Candidates {
-				b.WriteString(fmt.Sprintf("- would_probe: %s layer %d entry %.4f RR %.2f notional %.2f\n", c.Symbol, c.Layer, c.Entry, c.RewardRisk, c.Notional))
-			}
-		} else if len(s.ShadowProbe.Blockers) > 0 {
-			b.WriteString("- blocker chính: " + strings.Join(limitStrings(s.ShadowProbe.Blockers, 3), "; ") + "\n")
-		}
+		b.WriteString(fmt.Sprintf("Shadow: production=%s research=%s would_probe=%v — shadow only, không đặt lệnh thật.\n", s.ShadowProbe.ProductionPermission, s.ShadowProbe.ResearchPermission, len(s.ShadowProbe.Candidates) > 0))
 	}
-	b.WriteString("───────────────────\n")
-
-	b.WriteString("V. TIN TỨC / RESEARCH\n")
-	b.WriteString(researchSummaryVI(s.ResearchSummary) + "\n")
-	b.WriteString("Research chỉ là bối cảnh phụ, không override Agent 1/2 và không tự mở lệnh.\n")
-	b.WriteString("───────────────────\n")
-
-	b.WriteString("VI. TRẠNG THÁI THỰC THI\n")
-	b.WriteString(fmt.Sprintf("Daily: %s | Reconcile: %s\n", okWarnVI(s.DailyOK), okWarnVI(s.ReconcileOK)))
-	if s.SupervisorSet {
-		b.WriteString(fmt.Sprintf("Supervisor: %s | Action: %s\n", s.Supervisor.Status, s.Supervisor.Action))
-		if s.Supervisor.Managed != nil {
-			m := s.Supervisor.Managed
-			b.WriteString(fmt.Sprintf("Orders: desired=%d đặt=%d hủy=%d thay=%d chặn=%d\n", len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
-			b.WriteString(fmt.Sprintf("Gates: data=%s | reconcile=%s | risk=%s\n", m.DataHealth.Status, m.ReconcileSafety.Status, m.RiskGovernor.Status))
-		}
+	if s.SupervisorSet && s.Supervisor.Managed != nil {
+		m := s.Supervisor.Managed
+		b.WriteString(fmt.Sprintf("Runtime: %s desired=%d đặt=%d hủy=%d thay=%d chặn=%d | data=%s reconcile=%s risk=%s\n", m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked), m.DataHealth.Status, m.ReconcileSafety.Status, m.RiskGovernor.Status))
+	} else {
+		b.WriteString(fmt.Sprintf("Daily=%s | Reconcile=%s | Supervisor=%s\n", okWarnVI(s.DailyOK), okWarnVI(s.ReconcileOK), s.Supervisor.Status))
+	}
+	if summary := researchSummaryVI(s.ResearchSummary); summary != "" {
+		b.WriteString("Research: " + summary + " (context only).\n")
 	}
 	if len(s.Notes) > 0 {
-		b.WriteString("Cảnh báo hệ thống: " + strings.Join(s.Notes, "; ") + "\n")
+		b.WriteString("Note: " + strings.Join(s.Notes, "; ") + "\n")
 	}
-	b.WriteString("\nAn toàn: không futures, không leverage, không market order. Chỉ spot limit BUY post-only only khi Agent 2 ACTIVE_LIMIT và safety gate sạch.\n")
+	b.WriteString("An toàn: không futures, không leverage, không market order. Chỉ spot limit BUY post-only only khi ACTIVE_LIMIT và safety gate sạch.\n")
 	return strings.TrimSpace(b.String()) + "\n"
 }
 
@@ -182,6 +138,24 @@ func CompactPlan(plan agent2.Plan) map[string]any {
 		})
 	}
 	return map[string]any{"state": plan.State, "summary": plan.Summary, "assets": assets, "watchlist": watch}
+}
+
+func shortMarketScenarioVI(analysis agent1.MarketAnalysis) string {
+	base := firstNonEmptyScheduler(analysis.ScenarioMain, "giữ vốn, chờ reclaim/flow rõ")
+	unlock := firstNonEmptyScheduler(analysis.ScenarioBullish, "reclaim support/kháng cự gần + volume bán giảm")
+	invalid := firstNonEmptyScheduler(analysis.ScenarioBearish, "mất support/invalidation với volume bán tăng")
+	return fmt.Sprintf("Kịch bản: chính=%s | mở khóa=%s | vô hiệu=%s\n", base, unlock, invalid)
+}
+
+func shortWatchCandidateLineVI(c agent2.WatchCandidate) string {
+	mmReason := firstNonEmptyScheduler(firstSchedulerString(c.MMMissing), firstSchedulerString(c.MMReasons), "thiếu footprint")
+	trigger := firstNonEmptyScheduler(c.NextTrigger, "chờ trigger rõ")
+	return fmt.Sprintf("- %s %.0f%% | MM=%s %.0f (%s) | Liq=%s %.0f | gap %.1f%% RR %.2f | %s", c.Symbol, c.ReadinessScore*100, emptyMMCase(c.MMCase), c.MMScore, mmReason, emptyScheduler(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score, c.DiscountGap*100, c.RewardRisk, trigger)
+}
+
+func shortAssetPlanLineVI(a agent2.AssetPlan) string {
+	blocker := firstNonEmptyScheduler(a.Reason, firstSchedulerString(a.HardBlockers), firstSchedulerString(a.SoftBlockers), "chưa đủ điều kiện")
+	return fmt.Sprintf("- %s [%s] | MM=%s %.0f | Liq=%s %.0f | gap %.1f%% RR %.2f | %s", a.Symbol, a.State, emptyMMCase(a.MMCase), a.MMScore, emptyScheduler(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score, a.DiscountGapPct*100, a.RewardRisk, blocker)
 }
 
 func dominantBlockerVI(analysis agent1.MarketAnalysis, plan agent2.Plan) string {

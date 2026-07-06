@@ -41,18 +41,18 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 	})
 	for _, want := range []string{
 		"I. KẾT LUẬN",
-		"II. PHÂN TÍCH KỸ THUẬT BTC",
-		"III. KỊCH BẢN THỊ TRƯỜNG",
-		"IV. KẾ HOẠCH BOT",
-		"V. TIN TỨC / RESEARCH",
-		"VI. TRẠNG THÁI THỰC THI",
-		"Không có ACTIVE_LIMIT. Bot không đặt lệnh",
-		"Kịch bản mở khóa",
+		"II. BTC & KỊCH BẢN",
+		"III. WATCHLIST MM/LIQ",
+		"IV. BOT & SAFETY",
+		"Research:",
+		"Daily=OK",
+		"Không ACTIVE_LIMIT: không đặt lệnh",
+		"mở khóa=",
 		"MM=NO_EDGE",
 		"Liq=D",
-		"trigger:",
-		"Shadow ARMED_PROBE_LIGHT",
-		"Shadow only — không đặt lệnh thật",
+
+		"Shadow:",
+		"shadow only",
 		"không futures, không leverage, không market order",
 	} {
 		if !strings.Contains(text, want) {
@@ -99,7 +99,7 @@ func TestCompactPlanIncludesMMLiquidityEvidence(t *testing.T) {
 
 func TestBuildDeterministicIncludesUnlockConditions(t *testing.T) {
 	text := BuildDeterministic(RunNowSnapshot{Analysis: agent1.MarketAnalysis{TrendScore: 19.8, MarketRegime: "DOWNTREND", ActionPermission: agent1.Watch}, Plan: agent2.Plan{State: agent2.StateWatch}, DailyOK: true, ReconcileOK: true})
-	for _, want := range []string{"Điều kiện mở khóa", "Trend score cần", "WATCH không tạo probe", "Kịch bản chính", "Kịch bản vô hiệu", "không futures, không leverage, không market order"} {
+	for _, want := range []string{"Cần:", "Trend score cần", "WATCH không tạo probe", "chính=", "vô hiệu=", "không futures, không leverage, không market order"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
 		}

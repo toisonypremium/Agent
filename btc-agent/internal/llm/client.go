@@ -35,7 +35,7 @@ func New(cfg Config) (*Client, error) {
 	if cfg.Model == "" {
 		cfg.Model = "Claw"
 	}
-	if cfg.MaxTokens <= 0 || cfg.MaxTokens > 2000 {
+	if cfg.MaxTokens <= 0 || cfg.MaxTokens > 6000 {
 		cfg.MaxTokens = 900
 	}
 	return &Client{cfg: cfg, http: &http.Client{Timeout: 90 * time.Second}}, nil

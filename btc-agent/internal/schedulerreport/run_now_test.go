@@ -63,3 +63,12 @@ func TestCompactPlanLimitsWatchlist(t *testing.T) {
 		t.Fatalf("watchlist len=%d want 5", len(watch))
 	}
 }
+
+func TestBuildDeterministicIncludesUnlockConditions(t *testing.T) {
+	text := BuildDeterministic(RunNowSnapshot{Analysis: agent1.MarketAnalysis{TrendScore: 19.8, MarketRegime: "DOWNTREND", ActionPermission: agent1.Watch}, Plan: agent2.Plan{State: agent2.StateWatch}, DailyOK: true, ReconcileOK: true})
+	for _, want := range []string{"Điều kiện mở khóa", "Trend score cần", "WATCH không tạo probe", "không futures, không leverage, không market order"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+}

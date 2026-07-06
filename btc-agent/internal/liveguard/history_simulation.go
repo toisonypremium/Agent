@@ -29,6 +29,8 @@ type LiveManagerHistoryResult struct {
 	ResearchExpiryDays                int                                `json:"research_expiry_days,omitempty"`
 	ResearchHoldWatch                 bool                               `json:"research_hold_through_watch,omitempty"`
 	ResearchHoldPriceAboveDiscountPct float64                            `json:"research_hold_if_price_above_discount_pct,omitempty"`
+	ProductionArmedProbe              bool                               `json:"production_armed_probe,omitempty"`
+	ArmedProbe                        LiveManagerHistoryStats            `json:"armed_probe,omitempty"`
 	Total                             LiveManagerHistoryStats            `json:"total"`
 	PerCoin                           map[string]LiveManagerHistoryStats `json:"per_coin"`
 	Events                            []LiveManagerHistoryEvent          `json:"events,omitempty"`
@@ -41,6 +43,7 @@ type LiveManagerHistoryOptions struct {
 	ResearchExpiryDays                int     `json:"research_expiry_days,omitempty"`
 	ResearchHoldWatch                 bool    `json:"research_hold_through_watch,omitempty"`
 	ResearchHoldPriceAboveDiscountPct float64 `json:"research_hold_if_price_above_discount_pct,omitempty"`
+	ProductionArmedProbe              bool    `json:"production_armed_probe,omitempty"`
 }
 
 type LiveManagerHistoryStats struct {
@@ -106,6 +109,7 @@ func RunLiveManagerHistorySimulationWithOptions(cfg config.Config, btc map[strin
 		ResearchExpiryDays:                opts.ResearchExpiryDays,
 		ResearchHoldWatch:                 opts.ResearchHoldWatch,
 		ResearchHoldPriceAboveDiscountPct: opts.ResearchHoldPriceAboveDiscountPct,
+		ProductionArmedProbe:              opts.ProductionArmedProbe,
 		PerCoin:                           map[string]LiveManagerHistoryStats{},
 		Notes: []string{
 			"Historical live manager simulation uses 1D candles and BTC 1D as fallback for 4H/1W frames; this is a local lifecycle audit, not exact intraday execution.",
@@ -115,6 +119,9 @@ func RunLiveManagerHistorySimulationWithOptions(cfg config.Config, btc map[strin
 	}
 	if opts.ResearchArmed {
 		result.Notes = append(result.Notes, "Research-only: Agent 1 ARMED is treated as ALLOWED inside this historical backtest only; production/live behavior unchanged.")
+	}
+	if opts.ProductionArmedProbe {
+		result.Notes = append(result.Notes, "Production ARMED probe mode: WATCH creates no order, ARMED uses one probe through live manager, ALLOWED uses normal ladder. Historical simulation only; no OKX calls.")
 	}
 	if strings.EqualFold(opts.ResearchProfile, "flow-soft") {
 		result.Notes = append(result.Notes, "Research-only profile flow-soft: asset flow entry filter is disabled inside this historical backtest only; production/live behavior unchanged.")
@@ -458,6 +465,37 @@ func recordHistoryCycle(result *LiveManagerHistoryResult, cycle ManagedCycleResu
 	}
 }
 
+func recordArmedProbeCycle(result *LiveManagerHistoryResult, cycle ManagedCycleResult, plan agent2.Plan) {
+	if !result.ProductionArmedProbe || plan.State != agent2.StateArmed {
+		return
+	}
+	probeDesired := 0
+	for _, desired := range cycle.Desired {
+		if strings.EqualFold(desired.AllocationTier, string(OpportunityProbe)) || desired.LayerIndex == 1 {
+			probeDesired++
+		}
+	}
+	probePlaced := 0
+	for _, decision := range cycle.Placed {
+		if strings.EqualFold(decision.Desired.AllocationTier, string(OpportunityProbe)) || decision.LayerIndex == 1 || decision.Desired.LayerIndex == 1 {
+			probePlaced++
+		}
+	}
+	result.ArmedProbe.Desired += probeDesired
+	result.ArmedProbe.Placed += probePlaced
+	result.ArmedProbe.Kept += len(cycle.Kept)
+	result.ArmedProbe.Canceled += len(cycle.Canceled)
+	result.ArmedProbe.Replaced += len(cycle.Replaced)
+	result.ArmedProbe.Blocked += len(cycle.Blocked)
+	if result.ArmedProbe.Blockers == nil {
+		result.ArmedProbe.Blockers = map[string]int{}
+	}
+	for _, decision := range cycle.Blocked {
+		reason := normalizeHistoryBlocker(decision.Reason)
+		result.ArmedProbe.Blockers[reason]++
+	}
+}
+
 func applyHistoryManagerResult(result *LiveManagerHistoryResult, openOrders *[]historyOpenOrder, cycle ManagedCycleResult, assets map[string][]market.Candle, index int, eventAt string) {
 	for _, decision := range cycle.Canceled {
 		removeHistoryOrder(openOrders, decision)
@@ -527,6 +565,7 @@ func processHistoryExpiry(result *LiveManagerHistoryResult, openOrders *[]histor
 }
 
 func finalizeHistoryStats(result *LiveManagerHistoryResult) {
+	finalizeOneHistoryStats(&result.ArmedProbe)
 	for symbol, stats := range result.PerCoin {
 		finalizeOneHistoryStats(&stats)
 		result.PerCoin[symbol] = stats
@@ -603,7 +642,7 @@ func historyOpenFromDesired(desired ManagedDesiredOrder, index int) historyOpenO
 	if qty <= 0 && desired.Price > 0 {
 		qty = desired.Notional / desired.Price
 	}
-	return historyOpenOrder{Status: live.OrderStatus{InstID: desired.InstID, Symbol: desired.Symbol, ClientOrderID: fmt.Sprintf("hist-%s-%d-%d", strings.ToLower(desired.Symbol), desired.LayerIndex, index), OrderID: fmt.Sprintf("hist-ord-%s-%d-%d", strings.ToLower(desired.Symbol), desired.LayerIndex, index), Status: live.StatusLiveOpen, Side: desired.Side, OrderType: desired.Type, Price: desired.Price, Quantity: qty, Notional: desired.Notional, LayerIndex: desired.LayerIndex, Source: desired.Source, InvalidationPrice: desired.InvalidationPrice, DecisionReason: desired.DecisionReason}, PlacedIndex: index, ActiveFromIndex: index + 1}
+	return historyOpenOrder{Status: live.OrderStatus{InstID: desired.InstID, Symbol: desired.Symbol, ClientOrderID: fmt.Sprintf("hist-%s-%d-%d", strings.ToLower(desired.Symbol), desired.LayerIndex, index), OrderID: fmt.Sprintf("hist-ord-%s-%d-%d", strings.ToLower(desired.Symbol), desired.LayerIndex, index), Status: live.StatusLiveOpen, Side: desired.Side, OrderType: desired.Type, Price: desired.Price, Quantity: qty, Notional: desired.Notional, LayerIndex: desired.LayerIndex, Source: strings.TrimSpace(desired.Source + " " + desired.AllocationTier), InvalidationPrice: desired.InvalidationPrice, DecisionReason: desired.DecisionReason}, PlacedIndex: index, ActiveFromIndex: index + 1}
 }
 
 func historyOrderStatuses(openOrders []historyOpenOrder) []live.OrderStatus {

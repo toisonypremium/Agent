@@ -265,6 +265,14 @@ func Markdown(r Result) string {
 		for _, row := range r.BTCPermissionAudit.Rows {
 			b.WriteString(fmt.Sprintf("| %s | %d | %.1f%% | %.1f | %s | %s | %s |\n", row.Permission, row.Count, row.Rate*100, row.AvgTrendScore, btcPermissionHorizonCell(row, 3), btcPermissionHorizonCell(row, 7), btcPermissionHorizonCell(row, 14)))
 		}
+		if len(r.BTCPermissionAudit.ScoreRows) > 0 {
+			b.WriteString("\nScore components by permission\n")
+			b.WriteString("| Permission | Count | Weekly | Daily | 4H | Trend | Flow | RR proxy |\n")
+			b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|\n")
+			for _, row := range r.BTCPermissionAudit.ScoreRows {
+				b.WriteString(fmt.Sprintf("| %s | %d | %.1f | %.1f | %.1f | %.1f | %.2f | %.2f |\n", row.Permission, row.Count, row.AvgWeeklyTrend, row.AvgDailyTrend, row.AvgFourHourTrend, row.AvgTrendScore, row.AvgFlowScore, row.AvgRRProxy))
+			}
+		}
 		if len(r.BTCPermissionAudit.Blockers) > 0 {
 			b.WriteString("\nTop blockers\n")
 			b.WriteString("| Blocker | Count | Rate |\n")

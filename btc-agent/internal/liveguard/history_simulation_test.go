@@ -106,6 +106,25 @@ func TestHistoryDesiredLossExplainsLostAsset(t *testing.T) {
 	}
 }
 
+func TestProductionArmedProbeModeAddsNote(t *testing.T) {
+	result := LiveManagerHistoryResult{ProductionArmedProbe: true, PerCoin: map[string]LiveManagerHistoryStats{}, Notes: []string{}}
+	cycle := ManagedCycleResult{Desired: []ManagedDesiredOrder{{Symbol: "ETHUSDT", AllocationTier: string(OpportunityProbe)}}, Placed: []ManagedOrderDecision{{Symbol: "ETHUSDT", Desired: ManagedDesiredOrder{Symbol: "ETHUSDT", AllocationTier: string(OpportunityProbe)}}}}
+	recordArmedProbeCycle(&result, cycle, agent2.Plan{State: agent2.StateArmed})
+	finalizeHistoryStats(&result)
+	if result.ArmedProbe.Desired != 1 || result.ArmedProbe.Placed != 1 {
+		t.Fatalf("bad armed probe stats: %+v", result.ArmedProbe)
+	}
+}
+
+func TestProductionArmedProbeIgnoresWatchCycle(t *testing.T) {
+	result := LiveManagerHistoryResult{ProductionArmedProbe: true, PerCoin: map[string]LiveManagerHistoryStats{}}
+	cycle := ManagedCycleResult{Desired: []ManagedDesiredOrder{{Symbol: "ETHUSDT"}}, Placed: []ManagedOrderDecision{{Symbol: "ETHUSDT"}}}
+	recordArmedProbeCycle(&result, cycle, agent2.Plan{State: agent2.StateWatch})
+	if result.ArmedProbe.Desired != 0 || result.ArmedProbe.Placed != 0 {
+		t.Fatalf("WATCH cycle must not count as armed probe: %+v", result.ArmedProbe)
+	}
+}
+
 func historyTestConfig() config.Config {
 	var cfg config.Config
 	cfg.Data.Symbols.BTC = "BTCUSDT"

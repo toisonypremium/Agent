@@ -415,11 +415,11 @@ BẮT BUỘC đủ 6 mục dưới đây, 1600-2600 ký tự:
 I. Kết luận: nói có đặt lệnh không, vì sao.
 II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score, risk.
 III. Vùng giá & kịch bản: vùng gom, support, deep support, kháng cự, invalidation; kịch bản chính/tốt/xấu.
-IV. Kế hoạch bot: permission, plan state, ACTIVE_LIMIT layer nếu có; nếu không có thì nói thiếu gì và watchlist chờ trigger nào.
+IV. Kế hoạch bot: permission, plan state, ACTIVE_LIMIT layer nếu có; nếu không có thì nói thiếu gì, watchlist chờ trigger nào, và điều kiện mở khóa cụ thể.
 V. Research context: chỉ bối cảnh phụ, không override.
 VI. Trạng thái an toàn: daily/reconcile/supervisor/gates, kết luận spot limit BUY post-only only.
 
-Nếu không có ACTIVE_LIMIT, phải ghi rõ: không đặt lệnh, không chase giá, chờ trigger. Không futures, không leverage, không market order.
+Nếu không có ACTIVE_LIMIT, phải ghi rõ: không đặt lệnh, không chase giá, chờ trigger, điều kiện mở khóa. Không futures, không leverage, không market order.
 
 Dữ liệu:
 %s`, string(b))

@@ -93,7 +93,7 @@ func run(ctx context.Context, args []string) error {
 		if err != nil {
 			return err
 		}
-		return runBacktestLiveManager(cfg, db, hasFlag(args, "--research-armed"), argValue(args, "--research-profile"), researchExpiryDays, hasFlag(args, "--research-hold-through-watch"), researchHoldPriceAboveDiscountPct)
+		return runBacktestLiveManager(cfg, db, hasFlag(args, "--research-armed"), argValue(args, "--research-profile"), researchExpiryDays, hasFlag(args, "--research-hold-through-watch"), researchHoldPriceAboveDiscountPct, hasFlag(args, "--production-armed-probe"))
 	case "learn":
 		return runLearning(cfg, db)
 	case "export-training":
@@ -144,7 +144,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -476,7 +476,7 @@ func runBacktest(cfg config.Config, db *storage.DB) error {
 	return nil
 }
 
-func runBacktestLiveManager(cfg config.Config, db *storage.DB, researchArmed bool, researchProfile string, researchExpiryDays int, researchHoldWatch bool, researchHoldPriceAboveDiscountPct float64) error {
+func runBacktestLiveManager(cfg config.Config, db *storage.DB, researchArmed bool, researchProfile string, researchExpiryDays int, researchHoldWatch bool, researchHoldPriceAboveDiscountPct float64, productionArmedProbe bool) error {
 	daily, err := db.LoadCandles(cfg.Data.Symbols.BTC, "1d", cfg.Data.CandleLimit)
 	if err != nil {
 		return err
@@ -490,7 +490,7 @@ func runBacktestLiveManager(cfg config.Config, db *storage.DB, researchArmed boo
 		}
 		assets[symbol] = candles
 	}
-	result, err := liveguard.RunLiveManagerHistorySimulationWithOptions(cfg, btc, assets, liveguard.LiveManagerHistoryOptions{ResearchArmed: researchArmed, ResearchProfile: researchProfile, ResearchExpiryDays: researchExpiryDays, ResearchHoldWatch: researchHoldWatch, ResearchHoldPriceAboveDiscountPct: researchHoldPriceAboveDiscountPct})
+	result, err := liveguard.RunLiveManagerHistorySimulationWithOptions(cfg, btc, assets, liveguard.LiveManagerHistoryOptions{ResearchArmed: researchArmed, ResearchProfile: researchProfile, ResearchExpiryDays: researchExpiryDays, ResearchHoldWatch: researchHoldWatch, ResearchHoldPriceAboveDiscountPct: researchHoldPriceAboveDiscountPct, ProductionArmedProbe: productionArmedProbe})
 	if err != nil {
 		return err
 	}
@@ -511,6 +511,9 @@ func runBacktestLiveManager(cfg config.Config, db *storage.DB, researchArmed boo
 func liveManagerHistoryMarkdown(result liveguard.LiveManagerHistoryResult) string {
 	md := "LIVE MANAGER HISTORICAL SIMULATION\n\n"
 	md += fmt.Sprintf("Summary: %s\n", result.Summary)
+	if result.ProductionArmedProbe {
+		md += "Mode: PRODUCTION_ARMED_PROBE — WATCH no order, ARMED one probe, ALLOWED normal ladder. Historical only.\n"
+	}
 	if result.ResearchArmed || result.ResearchProfile != "" || result.ResearchExpiryDays > 0 || result.ResearchHoldWatch || result.ResearchHoldPriceAboveDiscountPct > 0 {
 		md += "Mode: RESEARCH"
 		if result.ResearchArmed {
@@ -551,6 +554,20 @@ func liveManagerHistoryMarkdown(result liveguard.LiveManagerHistoryResult) strin
 		md += "\n"
 	}
 	md += fmt.Sprintf("Quality: %s %.1f/100 — %s\n\n", result.Total.QualityGrade, result.Total.QualityScore, result.Total.QualityReason)
+	if result.ProductionArmedProbe {
+		md += "ARMED probe stats:\n"
+		md += fmt.Sprintf("- Desired/Placed/Filled/Canceled/Replaced/Blocked: %d / %d / %d / %d / %d / %d\n", result.ArmedProbe.Desired, result.ArmedProbe.Placed, result.ArmedProbe.Filled, result.ArmedProbe.Canceled, result.ArmedProbe.Replaced, result.ArmedProbe.Blocked)
+		md += fmt.Sprintf("- Fill rate: %.2f%% | Cancel rate: %.2f%% | Quality: %s %.1f/100\n", result.ArmedProbe.FillRate*100, result.ArmedProbe.CancelRate*100, result.ArmedProbe.QualityGrade, result.ArmedProbe.QualityScore)
+		if len(result.ArmedProbe.Blockers) > 0 {
+			md += "- Top ARMED blockers: "
+			parts := []string{}
+			for _, blocker := range firstHistoryBlockers(result.ArmedProbe.Blockers, 5) {
+				parts = append(parts, fmt.Sprintf("%s=%d", blocker, result.ArmedProbe.Blockers[blocker]))
+			}
+			md += strings.Join(parts, "; ") + "\n"
+		}
+		md += "\n"
+	}
 	if len(result.Total.CancelReasons) > 0 {
 		md += "Cancel reasons:\n"
 		for _, reason := range firstHistoryCancelReasons(result.Total.CancelReasons, 12) {

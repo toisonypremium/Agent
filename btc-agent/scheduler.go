@@ -485,9 +485,7 @@ Dữ liệu:
 	}
 	text = strings.TrimSpace(strings.TrimPrefix(strings.TrimSuffix(text, "```"), "```"))
 	text = stripURLsScheduler(text)
-	if len(text) > 3200 {
-		text = strings.TrimSpace(text[:3200]) + "\n..."
-	}
+	text = truncateSchedulerTelegram(text, 3400)
 	return text, nil
 }
 
@@ -516,6 +514,21 @@ func compactPlanForAI(plan agent2.Plan) map[string]any {
 		})
 	}
 	return map[string]any{"state": plan.State, "summary": plan.Summary, "assets": assets, "watchlist": watch}
+}
+
+func truncateSchedulerTelegram(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if len(s) <= max {
+		return s
+	}
+	cut := strings.LastIndex(s[:max], "\n")
+	if cut < max/2 {
+		cut = strings.LastIndex(s[:max], ".")
+	}
+	if cut < max/2 {
+		cut = max
+	}
+	return strings.TrimSpace(s[:cut]) + "\n..."
 }
 
 func stripURLsScheduler(s string) string {

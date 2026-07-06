@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"btc-agent/internal/textsafe"
 )
 
 // AIBriefCaller is satisfied by *llm.Client (ChatJSON).
@@ -88,37 +90,10 @@ News items:
 	}
 
 	// Safety: never expose secret-like strings or raw URLs in Telegram.
-	if containsSecretLike(text) {
+	if textsafe.ContainsSecretLike(text) {
 		return "", fmt.Errorf("ai brief output failed safety check")
 	}
-	text = stripURLs(text)
+	text = textsafe.StripURLs(text)
 
 	return text, nil
-}
-
-func containsSecretLike(s string) bool {
-	lower := strings.ToLower(s)
-	for _, pat := range []string{"api_key", "api_secret", "passphrase value", "telegram_token", "bearer "} {
-		if strings.Contains(lower, pat) {
-			return true
-		}
-	}
-	return false
-}
-
-func stripURLs(s string) string {
-	lines := strings.Split(s, "\n")
-	for i, line := range lines {
-		words := strings.Fields(line)
-		kept := []string{}
-		for _, word := range words {
-			lower := strings.ToLower(strings.Trim(word, "()[]{}.,;"))
-			if strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://") || strings.HasPrefix(lower, "www.") {
-				continue
-			}
-			kept = append(kept, word)
-		}
-		lines[i] = strings.Join(kept, " ")
-	}
-	return strings.Join(lines, "\n")
 }

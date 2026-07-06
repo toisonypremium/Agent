@@ -10,6 +10,7 @@ import (
 	"btc-agent/internal/exchange/live"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/research"
+	"btc-agent/internal/textsafe"
 )
 
 type LiveReadinessView struct {
@@ -1036,10 +1037,5 @@ func empty(value, fallback string) string {
 }
 
 func trimTelegram(s string) string {
-	const max = 3500
-	s = strings.TrimSpace(s)
-	if len(s) <= max {
-		return s + "\n"
-	}
-	return strings.TrimSpace(s[:max]) + "\n...\n"
+	return textsafe.TrimTelegram(s, 3500)
 }

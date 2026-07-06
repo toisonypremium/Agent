@@ -306,7 +306,7 @@ func validateSchedulerTelegramAI(text string) error {
 	if trimmed == "" {
 		return fmt.Errorf("empty output")
 	}
-	if len(trimmed) < 1200 {
+	if len(trimmed) < 600 {
 		return fmt.Errorf("short output")
 	}
 	if textsafe.ContainsSecretLike(trimmed) {

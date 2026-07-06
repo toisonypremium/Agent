@@ -73,6 +73,8 @@ func run(ctx context.Context, args []string) error {
 	case "plan":
 		_, err := plan(ctx, cfg, db)
 		return err
+	case "accumulation-readiness":
+		return runAccumulationReadiness(ctx, cfg, db)
 	case "run-daily":
 		return runDaily(ctx, cfg, db)
 	case "status":
@@ -144,7 +146,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|accumulation-readiness|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {

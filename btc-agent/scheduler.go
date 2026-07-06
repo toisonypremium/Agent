@@ -312,7 +312,7 @@ func validateSchedulerTelegramAI(text string) error {
 	if textsafe.ContainsSecretLike(trimmed) {
 		return fmt.Errorf("unsafe secret-like output")
 	}
-	for _, want := range []string{"I.", "II.", "III.", "IV.", "V.", "VI."} {
+	for _, want := range []string{"I.", "II.", "III.", "IV."} {
 		if !strings.Contains(trimmed, want) {
 			return fmt.Errorf("missing section %s", want)
 		}
@@ -331,7 +331,7 @@ func validateSchedulerTelegramAI(text string) error {
 		if !strings.Contains(lower, "liq=") && !strings.Contains(lower, "liquidity") {
 			return fmt.Errorf("missing liquidity detail")
 		}
-		if !strings.Contains(lower, "trigger") && !strings.Contains(lower, "điều kiện mở khóa") {
+		if !strings.Contains(lower, "trigger") && !strings.Contains(lower, "điều kiện mở khóa") && !strings.Contains(lower, "cần:") && !strings.Contains(lower, "chờ btc") {
 			return fmt.Errorf("missing actionable trigger")
 		}
 	}
@@ -428,14 +428,12 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	prompt := fmt.Sprintf(`Viết 1 bản tin Telegram TIẾNG VIỆT như trader chuyên nghiệp báo cáo cho chủ tài khoản.
 Không trả JSON. Không markdown fence. Không URL. Không tiếng Anh, trừ WATCH/ACTIVE_LIMIT/NO_TRADE.
 
-BẮT BUỘC đủ 6 mục dưới đây, 1800-3200 ký tự:
-	📊 BTC Agent — Bản tin chiến lược
-	I. Kết luận: nói có đặt lệnh không, blocker chính là gì, mode hiện tại là WATCH/ARMED/ACTIVE_LIMIT.
-	II. Phân tích kỹ thuật BTC: giá, regime, trend score, bias tuần/ngày/4H, flow score, risk; chỉ dùng dữ liệu payload.
-	III. Vùng giá & kịch bản: bắt buộc có 3 dòng "Kịch bản chính", "Kịch bản mở khóa", "Kịch bản vô hiệu"; mỗi dòng nói rõ bot sẽ làm gì.
-	IV. Kế hoạch bot: mỗi coin top watchlist phải có format: COIN: MM=<case> <score>/100, Liq=<grade> <score>/100, Discount=<gap>, RR=<ratio>, thiếu=<top blockers>, trigger=<next trigger>. Nếu thiếu dữ liệu thì ghi n/a, không bịa.
-	V. Research context: tối đa 2 câu, chỉ bối cảnh phụ, không override, không URL.
-	VI. Trạng thái an toàn: daily/reconcile/supervisor/gates, kết luận spot limit BUY post-only only.
+BẮT BUỘC đủ 4 mục dưới đây, 1200-2400 ký tự:
+	📊 BTC Agent — Tóm tắt chiến lược
+	I. Kết luận: nói có đặt lệnh không, blocker chính là gì (1 dòng), mode hiện tại, BTC price/trend/regime/plan.
+	II. BTC & Kịch bản: bias W/D/4H, flow, risk, vùng key (1 dòng), kịch bản chính/mở khóa/vô hiệu, điều kiện cần (tối đa 4 bullet).
+	III. Watchlist MM/Liq: mỗi coin 1 dòng: COIN readiness%% | MM=<case> <score> (<top missing>) | Liq=<grade> <score> | gap <gap>%% RR <ratio> | <trigger>.
+	IV. Bot & Safety: không ACTIVE_LIMIT thì nói rõ "không đặt lệnh, không chase", shadow nếu có, runtime desired/placed/canceled/blocked, research tối đa 1 câu, safety line.
 
 	CẤM nội dung vô nghĩa:
 	- Không viết "theo dõi thêm" nếu không có trigger cụ thể.

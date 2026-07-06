@@ -285,57 +285,72 @@ func AddWatchlistMissing(w *WatchlistReport, missing string, cfg config.Config) 
 }
 
 func tuneWatchCandidate(c WatchCandidate, cfg config.Config) WatchCandidate {
+	if len(c.EntryChecklist) == 0 {
+		c.EntryChecklist = buildEntryChecklist(c, cfg)
+	}
+	return tuneWatchCandidateFromChecklist(c, cfg)
+}
+
+func tuneWatchCandidateFromChecklist(c WatchCandidate, cfg config.Config) WatchCandidate {
 	c.Actionable = false
 	c.Tier = WatchTierEarly
-	joined := strings.ToLower(strings.Join(c.Missing, " ") + " " + c.BlockReason)
 	capScore := 1.0
-	capReason := ""
-
-	if strings.Contains(joined, "chưa đủ dữ liệu") {
-		capScore = 0.0
-		capReason = "DATA_WAIT"
-		c.Tier = WatchTierDataWait
-	} else if strings.Contains(joined, "falling knife") || strings.Contains(joined, "fomo") || strings.Contains(joined, "relative strength") || strings.Contains(joined, "distribution") || strings.Contains(joined, "bull-trap") {
-		capScore = 0.35
-		capReason = "DANGER_OR_RELATIVE_WEAK"
-		c.Tier = WatchTierBlocked
-	} else if strings.Contains(joined, "btc permission") || strings.Contains(joined, "btc risk") {
-		capScore = 0.49
-		capReason = "BTC_NOT_ALLOWED"
-		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "rotation rank") {
-		capScore = 0.55
-		capReason = "ROTATION_RANK"
-		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "rotation score") || strings.Contains(joined, "rotation chưa đạt") {
-		capScore = 0.50
-		capReason = "ROTATION_SCORE"
-		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "liquidity") {
-		capScore = 0.60
-		capReason = "LIQUIDITY_NOT_READY"
-		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "mm case") || strings.Contains(joined, "flow") || strings.Contains(joined, "reclaim") || strings.Contains(joined, "absorption") {
-		capScore = 0.65
-		capReason = "FLOW_NOT_CONFIRMED"
-		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "discount") {
-		capScore = 0.65
-		capReason = "DISCOUNT_NOT_READY"
-		c.Tier = WatchTierEarly
-	} else if strings.Contains(joined, "reward/risk") {
-		capScore = 0.70
-		capReason = "RR_NOT_READY"
-		c.Tier = WatchTierEarly
+	capReasons := []string{}
+	hardFails := map[string]bool{}
+	softFails := map[string]bool{}
+	for _, item := range c.EntryChecklist {
+		if item.Pass {
+			continue
+		}
+		if item.Severity == EntryCheckHard {
+			hardFails[item.Name] = true
+		} else {
+			softFails[item.Name] = true
+		}
 	}
-
+	if containsAny(strings.ToLower(strings.Join(c.Missing, " ")+" "+c.BlockReason), "chưa đủ dữ liệu") {
+		capScore = 0
+		capReasons = append(capReasons, "DATA_WAIT")
+		c.Tier = WatchTierDataWait
+	} else if hardFails[EntryCheckBTCPermission] {
+		capScore = 0.49
+		capReasons = append(capReasons, "BTC_NOT_ALLOWED")
+		c.Tier = WatchTierEarly
+	} else if len(hardFails) > 0 {
+		capScore = 0.35
+		capReasons = append(capReasons, "HARD_CHECK_FAILED")
+		c.Tier = WatchTierBlocked
+	}
+	applySoftCap := func(name, reason string, cap float64) {
+		if !softFails[name] {
+			return
+		}
+		if cap < capScore {
+			capScore = cap
+		}
+		capReasons = append(capReasons, reason)
+		if c.Tier == "" || c.Tier == WatchTierActionable {
+			c.Tier = WatchTierEarly
+		}
+	}
+	applySoftCap(EntryCheckRotationRank, "ROTATION_RANK", 0.55)
+	applySoftCap(EntryCheckRotationScore, "ROTATION_SCORE", 0.50)
+	applySoftCap(EntryCheckLiquidityQuality, "LIQUIDITY_NOT_READY", 0.60)
+	applySoftCap(EntryCheckMMAccumulation, "MM_NOT_CONFIRMED", 0.65)
+	applySoftCap(EntryCheckAssetFlowEntry, "FLOW_NOT_CONFIRMED", 0.65)
+	applySoftCap(EntryCheckDiscountZone, "DISCOUNT_NOT_READY", 0.65)
+	applySoftCap(EntryCheckRewardRisk, "RR_NOT_READY", 0.70)
 	if c.ReadinessScore > capScore {
 		c.ReadinessScore = capScore
 	}
-	if capReason != "" {
-		c.NoiseFlags = uniqueStrings(append(c.NoiseFlags, capReason))
+	if len(capReasons) > 0 {
+		c.NoiseFlags = uniqueStrings(append(c.NoiseFlags, capReasons...))
 	}
-	if len(c.Missing) == 0 && c.ReadinessScore >= 0.70 {
+	minActionable := cfg.Risk.MinWatchReadinessForProbe
+	if minActionable <= 0 {
+		minActionable = 0.70
+	}
+	if len(hardFails) == 0 && len(softFails) == 0 && len(c.Missing) == 0 && c.ReadinessScore >= minActionable {
 		c.Tier = WatchTierActionable
 		c.Actionable = true
 	}

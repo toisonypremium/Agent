@@ -91,6 +91,22 @@ func TestWatchlistCapsRelativeWeakAsBlocked(t *testing.T) {
 	}
 }
 
+func TestWatchlistTypedChecklistCapsSoftWait(t *testing.T) {
+	cfg := testConfig()
+	c := tuneWatchCandidate(WatchCandidate{Symbol: "ETHUSDT", ReadinessScore: 0.90, EntryChecklist: []EntryChecklistItem{{Name: EntryCheckAssetFlowEntry, Pass: false, Severity: EntryCheckSoft, Reason: "flow wait"}}}, cfg)
+	if c.Actionable || c.Tier != WatchTierEarly || c.ReadinessScore > 0.65 || !containsString(c.NoiseFlags, "FLOW_NOT_CONFIRMED") {
+		t.Fatalf("soft flow wait should be typed/capped: %+v", c)
+	}
+}
+
+func TestWatchlistTypedChecklistCapsHardFail(t *testing.T) {
+	cfg := testConfig()
+	c := tuneWatchCandidate(WatchCandidate{Symbol: "ETHUSDT", ReadinessScore: 0.90, EntryChecklist: []EntryChecklistItem{{Name: EntryCheckFallingKnife, Pass: false, Severity: EntryCheckHard, Reason: "falling"}}}, cfg)
+	if c.Actionable || c.Tier != WatchTierBlocked || c.ReadinessScore > 0.35 || !containsString(c.NoiseFlags, "HARD_CHECK_FAILED") {
+		t.Fatalf("hard checklist fail should be blocked/capped: %+v", c)
+	}
+}
+
 func TestSummaryIncludesWatchlist(t *testing.T) {
 	p := Plan{State: StateWatch, Watchlist: WatchlistReport{Candidates: []WatchCandidate{{Symbol: "ETHUSDT", ReadinessScore: 0.62, Tier: WatchTierEarly, Missing: []string{"asset flow chưa reclaim/absorption"}, EntryChecklist: []EntryChecklistItem{{Name: EntryCheckAssetFlowEntry, Pass: false, Severity: EntryCheckSoft, Reason: "asset flow chưa reclaim/absorption"}}, NextTrigger: "Chờ sweep low + reclaim support."}}}}
 	got := Summary(p)

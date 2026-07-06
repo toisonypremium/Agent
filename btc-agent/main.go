@@ -492,11 +492,10 @@ func runBacktest(cfg config.Config, db *storage.DB) error {
 }
 
 func runBacktestLiveManager(cfg config.Config, db *storage.DB, researchArmed bool, researchProfile string, researchExpiryDays int, researchHoldWatch bool, researchHoldPriceAboveDiscountPct float64, productionArmedProbe bool) error {
-	daily, err := db.LoadCandles(cfg.Data.Symbols.BTC, "1d", cfg.Data.CandleLimit)
+	btc, err := loadBTC(cfg, db)
 	if err != nil {
 		return err
 	}
-	btc := map[string][]market.Candle{"1d": daily}
 	assets := map[string][]market.Candle{}
 	for _, symbol := range cfg.Data.Symbols.Assets {
 		candles, err := db.LoadCandles(symbol, "1d", cfg.Data.CandleLimit)
@@ -717,7 +716,7 @@ func runLearning(cfg config.Config, db *storage.DB) error {
 }
 
 func runExportTraining(cfg config.Config, db *storage.DB) error {
-	daily, err := db.LoadCandles(cfg.Data.Symbols.BTC, "1d", cfg.Data.CandleLimit)
+	btc, err := loadBTC(cfg, db)
 	if err != nil {
 		return err
 	}
@@ -729,7 +728,7 @@ func runExportTraining(cfg config.Config, db *storage.DB) error {
 		}
 		assets[sym] = candles
 	}
-	result, err := backtest.BuildTrainingDataset(cfg, map[string][]market.Candle{"1d": daily}, assets, "data/training", backtest.TrainingDatasetConfig{})
+	result, err := backtest.BuildTrainingDataset(cfg, btc, assets, "data/training", backtest.TrainingDatasetConfig{})
 	if err != nil {
 		return err
 	}

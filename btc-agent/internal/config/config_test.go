@@ -398,6 +398,33 @@ func TestValidateResearchEnabledValid(t *testing.T) {
 	}
 }
 
+func TestValidateRequiresExactlyThreeAccumulationAssets(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT", "SOLUSDT"}
+	delete(cfg.Portfolio.Allocation, "RENDERUSDT")
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected exactly 3 asset validation error")
+	}
+}
+
+func TestValidateRejectsBTCAsAccumulationAsset(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Data.Symbols.Assets = []string{"BTCUSDT", "ETHUSDT", "SOLUSDT"}
+	cfg.Portfolio.Allocation["BTCUSDT"] = 0.10
+	delete(cfg.Portfolio.Allocation, "RENDERUSDT")
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected BTC asset validation error")
+	}
+}
+
+func TestValidateRejectsAllocationOutsideAccumulationAssets(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Portfolio.Allocation["BNBUSDT"] = 0.01
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected extra allocation validation error")
+	}
+}
+
 func validTestConfig() Config {
 	var cfg Config
 	cfg.App.Mode = "live"

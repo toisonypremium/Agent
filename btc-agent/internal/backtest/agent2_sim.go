@@ -121,7 +121,7 @@ func RunAgent2SimulationWithOverrides(cfg config.Config, btc map[string][]market
 		return sim, nil
 	}
 	for i := warmup; i <= lastIndex; i++ {
-		btcWindow := map[string][]market.Candle{"1d": btc1d[:i+1], "4h": btc1d[:i+1], "1w": btc1d[:i+1]}
+		btcWindow := btcTimeframeWindow(btc, i)
 		analysis, err := agent1.Analyze(cfg, btcWindow, neutralFG)
 		if err != nil {
 			continue

@@ -77,6 +77,13 @@ func BuildDeterministic(s RunNowSnapshot) string {
 	} else {
 		b.WriteString("Chưa có coin ACTIVE_LIMIT. Bot không đặt lệnh.\n")
 	}
+	unlock := BuildUnlockConditions(s.Analysis, s.Plan)
+	if len(unlock) > 0 {
+		b.WriteString("Điều kiện mở khóa:\n")
+		for _, item := range unlock {
+			b.WriteString("- " + item + "\n")
+		}
+	}
 	if len(s.Plan.Watchlist.Candidates) > 0 {
 		b.WriteString("Watchlist gần đạt:\n")
 		limit := len(s.Plan.Watchlist.Candidates)

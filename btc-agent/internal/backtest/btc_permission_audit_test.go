@@ -77,6 +77,39 @@ func TestBTCPermissionAuditSummaryIncludesAllowedRate(t *testing.T) {
 	}
 }
 
+func TestBTCPermissionAuditScoreRows(t *testing.T) {
+	cfg := triggerAuditConfig()
+	btc := map[string][]market.Candle{"1d": auditCandles("BTCUSDT", 140, 100)}
+	got, err := RunBTCPermissionAudit(cfg, btc, BTCPermissionAuditConfig{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got.ScoreRows) != len(btcPermissionOrder()) {
+		t.Fatalf("score rows=%d: %+v", len(got.ScoreRows), got.ScoreRows)
+	}
+	for i, perm := range btcPermissionOrder() {
+		if got.ScoreRows[i].Permission != perm {
+			t.Fatalf("score row %d permission=%s want %s", i, got.ScoreRows[i].Permission, perm)
+		}
+	}
+}
+
+func TestPermissionUnlockConditionsExplainWatchGap(t *testing.T) {
+	analysis := agent1.MarketAnalysis{ActionPermission: agent1.Watch, TrendScore: 19.8, MarketRegime: "DOWNTREND", RiskLevel: agent1.Medium, FallingKnifeRisk: agent1.Medium, FomoRisk: agent1.Low}
+	analysis.Flow.Bias = flow.BiasNeutral
+	analysis.Flow.Score = 0
+	analysis.PrimarySupportZone = market.Zone{Low: 90, High: 100}
+	analysis.ResistanceZone = market.Zone{Low: 140, High: 150}
+	got := PermissionUnlockConditions(analysis)
+	joined := ""
+	for _, item := range got {
+		joined += item.Reason + " "
+	}
+	if !strings.Contains(joined, "trend score") || !strings.Contains(joined, "flow") {
+		t.Fatalf("unlock conditions missing trend/flow: %+v", got)
+	}
+}
+
 func hasString(items []string, want string) bool {
 	for _, item := range items {
 		if item == want {

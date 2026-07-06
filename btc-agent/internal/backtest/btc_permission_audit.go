@@ -2,7 +2,9 @@ package backtest
 
 import (
 	"fmt"
+	"math"
 	"sort"
+	"strings"
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/config"
@@ -41,6 +43,7 @@ type BTCPermissionAuditConfig struct {
 type BTCPermissionAuditResult struct {
 	Enabled              bool                                  `json:"enabled"`
 	Rows                 []BTCPermissionAuditRow               `json:"rows"`
+	ScoreRows            []BTCPermissionScoreRow               `json:"score_rows"`
 	Blockers             []BTCPermissionBlockerRow             `json:"blockers"`
 	BlockersByPermission []BTCPermissionBlockerByPermissionRow `json:"blockers_by_permission"`
 	RegimeCounts         map[string]int                        `json:"regime_counts"`
@@ -71,6 +74,26 @@ type BTCPermissionBlockerByPermissionRow struct {
 	RateWithinPermission float64           `json:"rate_within_permission"`
 }
 
+type BTCPermissionScoreRow struct {
+	Permission       agent1.Permission `json:"permission"`
+	Count            int               `json:"count"`
+	AvgWeeklyTrend   float64           `json:"avg_weekly_trend"`
+	AvgDailyTrend    float64           `json:"avg_daily_trend"`
+	AvgFourHourTrend float64           `json:"avg_four_hour_trend"`
+	AvgTrendScore    float64           `json:"avg_trend_score"`
+	AvgFlowScore     float64           `json:"avg_flow_score"`
+	AvgRRProxy       float64           `json:"avg_rr_proxy"`
+}
+
+type UnlockCondition struct {
+	Name    string  `json:"name"`
+	Pass    bool    `json:"pass"`
+	Current string  `json:"current,omitempty"`
+	Target  string  `json:"target,omitempty"`
+	Gap     float64 `json:"gap,omitempty"`
+	Reason  string  `json:"reason"`
+}
+
 type btcPermissionAcc struct {
 	count       int
 	trendTotal  float64
@@ -78,6 +101,16 @@ type btcPermissionAcc struct {
 	wins        map[int]int
 	worstDD     map[int]float64
 	initialized map[int]bool
+}
+
+type btcPermissionScoreAcc struct {
+	count         int
+	weeklyTotal   float64
+	dailyTotal    float64
+	fourHourTotal float64
+	trendTotal    float64
+	flowTotal     float64
+	rrProxyTotal  float64
 }
 
 func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, auditCfg BTCPermissionAuditConfig) (BTCPermissionAuditResult, error) {
@@ -96,6 +129,10 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 	blockerCounts := map[string]int{}
 	blockerByPermissionCounts := map[agent1.Permission]map[string]int{}
 	permissionCounts := map[agent1.Permission]int{}
+	scoreAcc := map[agent1.Permission]*btcPermissionScoreAcc{}
+	for _, perm := range btcPermissionOrder() {
+		scoreAcc[perm] = &btcPermissionScoreAcc{}
+	}
 	regimeCounts := map[string]int{}
 	riskCounts := map[string]int{}
 	neutralFG := exchange.FearGreed{Value: 50, Classification: "Neutral"}
@@ -123,6 +160,7 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 		a.count++
 		permissionCounts[analysis.ActionPermission]++
 		a.trendTotal += analysis.TrendScore
+		addBTCPermissionScore(scoreAcc, analysis)
 		for _, h := range auditCfg.HorizonDays {
 			future := btc1d[i+h]
 			ret := (future.Close - entry) / entry
@@ -150,11 +188,73 @@ func RunBTCPermissionAudit(cfg config.Config, btc map[string][]market.Candle, au
 	result := BTCPermissionAuditResult{Enabled: true, RegimeCounts: regimeCounts, RiskCounts: riskCounts}
 	for _, perm := range btcPermissionOrder() {
 		result.Rows = append(result.Rows, finalizeBTCPermissionRow(perm, acc[perm], auditCfg.HorizonDays, windows))
+		result.ScoreRows = append(result.ScoreRows, finalizeBTCPermissionScoreRow(perm, scoreAcc[perm]))
 	}
 	result.Blockers = finalizeBTCPermissionBlockers(blockerCounts, windows)
 	result.BlockersByPermission = finalizeBTCPermissionBlockersByPermission(blockerByPermissionCounts, permissionCounts)
 	result.Summary = summarizeBTCPermissionAudit(result.Rows, result.Blockers, windows)
 	return result, nil
+}
+
+func addBTCPermissionScore(acc map[agent1.Permission]*btcPermissionScoreAcc, analysis agent1.MarketAnalysis) {
+	a := acc[analysis.ActionPermission]
+	if a == nil {
+		a = &btcPermissionScoreAcc{}
+		acc[analysis.ActionPermission] = a
+	}
+	a.count++
+	a.weeklyTotal += analysis.ScoreBreakdown.WeeklyTrend
+	a.dailyTotal += analysis.ScoreBreakdown.DailyTrend
+	a.fourHourTotal += analysis.ScoreBreakdown.FourHourTrend
+	a.trendTotal += analysis.TrendScore
+	a.flowTotal += analysis.Flow.Score
+	a.rrProxyTotal += btcPermissionRRProxy(analysis)
+}
+
+func finalizeBTCPermissionScoreRow(perm agent1.Permission, a *btcPermissionScoreAcc) BTCPermissionScoreRow {
+	row := BTCPermissionScoreRow{Permission: perm}
+	if a == nil || a.count == 0 {
+		return row
+	}
+	row.Count = a.count
+	denom := float64(a.count)
+	row.AvgWeeklyTrend = a.weeklyTotal / denom
+	row.AvgDailyTrend = a.dailyTotal / denom
+	row.AvgFourHourTrend = a.fourHourTotal / denom
+	row.AvgTrendScore = a.trendTotal / denom
+	row.AvgFlowScore = a.flowTotal / denom
+	row.AvgRRProxy = a.rrProxyTotal / denom
+	return row
+}
+
+func btcPermissionRRProxy(a agent1.MarketAnalysis) float64 {
+	if !a.PrimarySupportZone.Valid() || !a.ResistanceZone.Valid() {
+		return 0
+	}
+	entry := a.PrimarySupportZone.High
+	invalidation := a.PrimarySupportZone.Low * 0.985
+	risk := entry - invalidation
+	if risk <= 0 {
+		return 0
+	}
+	return (a.ResistanceZone.High - entry) / risk
+}
+
+func PermissionUnlockConditions(a agent1.MarketAnalysis) []UnlockCondition {
+	out := []UnlockCondition{}
+	trendGapArmed := math.Max(0, 45-a.TrendScore)
+	out = append(out, UnlockCondition{Name: "TREND_TO_ARMED", Pass: trendGapArmed == 0, Current: fmt.Sprintf("%.1f", a.TrendScore), Target: "45.0", Gap: trendGapArmed, Reason: fmt.Sprintf("trend score cần +%.1f điểm để lên ARMED", trendGapArmed)})
+	trendGapAllowed := math.Max(0, 60-a.TrendScore)
+	out = append(out, UnlockCondition{Name: "TREND_TO_ALLOWED", Pass: trendGapAllowed == 0, Current: fmt.Sprintf("%.1f", a.TrendScore), Target: "60.0", Gap: trendGapAllowed, Reason: fmt.Sprintf("trend score cần +%.1f điểm để đủ ALLOWED", trendGapAllowed)})
+	allowedRegime := a.MarketRegime == "ACCUMULATION" || a.MarketRegime == "WEAK_UPTREND" || a.MarketRegime == "RANGE"
+	out = append(out, UnlockCondition{Name: "ALLOWED_REGIME", Pass: allowedRegime, Current: a.MarketRegime, Target: "ACCUMULATION/WEAK_UPTREND/RANGE", Reason: "regime phải là vùng cho phép để ALLOWED"})
+	flowPass := (a.Flow.Bias == flow.BiasAccumulation || a.Flow.Bias == flow.BiasBearTrap) && a.Flow.Score >= 0.25
+	out = append(out, UnlockCondition{Name: "FLOW_PROMOTE_ARMED", Pass: flowPass, Current: fmt.Sprintf("%s %.2f", a.Flow.Bias, a.Flow.Score), Target: "ACCUMULATION/BEAR_TRAP >=0.25", Gap: math.Max(0, 0.25-a.Flow.Score), Reason: "flow cần accumulation/bear-trap hoặc reclaim/absorption rõ để hỗ trợ ARMED"})
+	rr := btcPermissionRRProxy(a)
+	out = append(out, UnlockCondition{Name: "RR_PROXY", Pass: rr >= 2, Current: fmt.Sprintf("%.2f", rr), Target: "2.00", Gap: math.Max(0, 2-rr), Reason: "reward/risk proxy BTC cần >=2.00"})
+	hard := a.MarketRegime == "PANIC_SELLING" || a.RiskLevel == agent1.High || a.FallingKnifeRisk == agent1.High || a.FomoRisk == agent1.High || !a.PrimarySupportZone.Valid() || !a.ResistanceZone.Valid()
+	out = append(out, UnlockCondition{Name: "HARD_BLOCKERS", Pass: !hard, Current: strings.Join(btcPermissionBlockers(a), ";"), Target: "no panic/high risk/high falling knife/high FOMO/invalid zones", Reason: "hard blockers phải sạch trước khi live order"})
+	return out
 }
 
 func normalizeBTCPermissionAuditConfig(auditCfg BTCPermissionAuditConfig) BTCPermissionAuditConfig {

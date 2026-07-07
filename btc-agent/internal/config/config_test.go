@@ -117,6 +117,15 @@ func TestValidateAutoLadderBounds(t *testing.T) {
 	}
 }
 
+func TestValidateLiveEnabledRejectsOversizedOrderCap(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Live.Enabled = true
+	cfg.Live.MaxOrderNotionalUSDT = 11
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected live max order cap validation error")
+	}
+}
+
 func TestValidateCanaryModeValid(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true

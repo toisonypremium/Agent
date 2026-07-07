@@ -1873,7 +1873,11 @@ func persistManagedCycleResult(db *storage.DB, result liveguard.ManagedCycleResu
 		if !order.Submitted {
 			continue
 		}
-		meta := live.OrderStatus{LayerIndex: desired.LayerIndex, Source: desired.Source, InvalidationPrice: desired.InvalidationPrice, DecisionReason: desired.DecisionReason, LastManagementAction: "placed: " + decision.Reason, ExpiresAt: now}
+		expiresAt := now
+		if !desired.ExpiresAt.IsZero() {
+			expiresAt = desired.ExpiresAt.Unix()
+		}
+		meta := live.OrderStatus{LayerIndex: desired.LayerIndex, Source: desired.Source, InvalidationPrice: desired.InvalidationPrice, DecisionReason: desired.DecisionReason, LastManagementAction: "placed: " + decision.Reason, ExpiresAt: expiresAt}
 		if err := db.SaveManagedLiveOrder(order.ClientOrderID, order.OrderID, order.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusLiveOpen, meta); err != nil {
 			return fmt.Errorf("save managed live order: %w", err)
 		}

@@ -86,6 +86,13 @@ func telegramChunks(text string) []string {
 		end := telegramMaxMessageLen
 		if len(runes) < end {
 			end = len(runes)
+		} else {
+			for i := end - 1; i > 0; i-- {
+				if runes[i] == '\n' {
+					end = i + 1
+					break
+				}
+			}
 		}
 		out = append(out, string(runes[:end]))
 		runes = runes[end:]
@@ -122,7 +129,7 @@ func TelegramDelete(ctx context.Context, token, chatID string, messageID int) er
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("telegram delete http %d: %s", resp.StatusCode, string(data))
+		return fmt.Errorf("telegram delete http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
 	}
 	return nil
 }
@@ -144,8 +151,9 @@ func TelegramEdit(ctx context.Context, token, chatID string, messageID int, text
 		return err
 	}
 	defer resp.Body.Close()
+	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return fmt.Errorf("telegram edit http %d", resp.StatusCode)
+		return fmt.Errorf("telegram edit http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
 	}
 	return nil
 }

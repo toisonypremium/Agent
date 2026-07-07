@@ -3,9 +3,42 @@ package storage
 import (
 	"path/filepath"
 	"testing"
+	"time"
 
+	"btc-agent/internal/agent2"
 	"btc-agent/internal/exchange/live"
 )
+
+func TestSaveOrdersPreservesClosedPaperOrder(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Unix(1700000000, 0)
+	order := agent2.PaperOrder{ID: "paper-1", Timestamp: now, Symbol: "ETHUSDT", Side: "BUY", Layer: 1, Price: 100, Quantity: 1, Notional: 100, Status: "OPEN", ExpiresAt: now.Add(time.Hour), InvalidationPrice: 90, Reason: "first"}
+	if err := db.SaveOrders([]agent2.PaperOrder{order}); err != nil {
+		t.Fatalf("save open order: %v", err)
+	}
+	if _, err := db.Exec(`UPDATE paper_orders SET status='FILLED', reason='filled already' WHERE id=?`, order.ID); err != nil {
+		t.Fatalf("mark filled: %v", err)
+	}
+	order.Status = "OPEN"
+	order.Price = 95
+	order.Reason = "replacement"
+	if err := db.SaveOrders([]agent2.PaperOrder{order}); err != nil {
+		t.Fatalf("save duplicate order: %v", err)
+	}
+	var status, reason string
+	var price float64
+	if err := db.QueryRow(`SELECT status, price, reason FROM paper_orders WHERE id=?`, order.ID).Scan(&status, &price, &reason); err != nil {
+		t.Fatalf("query paper order: %v", err)
+	}
+	if status != "FILLED" || price != 100 || reason != "filled already" {
+		t.Fatalf("closed paper order overwritten: status=%s price=%v reason=%s", status, price, reason)
+	}
+}
 
 func TestLiveOrderStorageRoundTrip(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))

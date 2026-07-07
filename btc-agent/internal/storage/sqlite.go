@@ -195,7 +195,15 @@ func (d *DB) SavePlan(p agent2.Plan) error {
 }
 func (d *DB) SaveOrders(orders []agent2.PaperOrder) error {
 	for _, o := range orders {
-		_, err := d.Exec(`INSERT OR REPLACE INTO paper_orders(id,timestamp,symbol,side,layer,price,quantity,notional,status,expires_at,invalidation_price,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, o.ID, o.Timestamp.Unix(), o.Symbol, o.Side, o.Layer, o.Price, o.Quantity, o.Notional, o.Status, o.ExpiresAt.Unix(), o.InvalidationPrice, o.Reason)
+		var existingStatus string
+		err := d.QueryRow(`SELECT status FROM paper_orders WHERE id=?`, o.ID).Scan(&existingStatus)
+		if err != nil && err != sql.ErrNoRows {
+			return err
+		}
+		if err == nil && existingStatus != "OPEN" {
+			continue
+		}
+		_, err = d.Exec(`INSERT OR REPLACE INTO paper_orders(id,timestamp,symbol,side,layer,price,quantity,notional,status,expires_at,invalidation_price,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, o.ID, o.Timestamp.Unix(), o.Symbol, o.Side, o.Layer, o.Price, o.Quantity, o.Notional, o.Status, o.ExpiresAt.Unix(), o.InvalidationPrice, o.Reason)
 		if err != nil {
 			return err
 		}

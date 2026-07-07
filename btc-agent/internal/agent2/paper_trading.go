@@ -20,12 +20,14 @@ type PaperOrder struct {
 func OrdersFromPlan(p Plan, expiryHours int) []PaperOrder {
 	out := []PaperOrder{}
 	now := time.Now()
-	for _, a := range p.Assets {
+	stamp := now.Format("20060102150405.000000000")
+	for assetIndex, a := range p.Assets {
 		if a.State != StateActiveLimit {
 			continue
 		}
-		for _, l := range a.Layers {
-			out = append(out, PaperOrder{ID: fmt.Sprintf("%s-%s-L%d", now.Format("20060102150405"), a.Symbol, l.Index), Timestamp: now, Symbol: a.Symbol, Side: "BUY", Layer: l.Index, Price: l.Price, Quantity: l.Quantity, Notional: l.Notional, InvalidationPrice: a.Invalidation, Status: "OPEN", ExpiresAt: now.Add(time.Duration(expiryHours) * time.Hour), Reason: a.Reason})
+		for layerIndex, l := range a.Layers {
+			id := fmt.Sprintf("%s-A%d-%d-%s-L%d", stamp, assetIndex, layerIndex, a.Symbol, l.Index)
+			out = append(out, PaperOrder{ID: id, Timestamp: now, Symbol: a.Symbol, Side: "BUY", Layer: l.Index, Price: l.Price, Quantity: l.Quantity, Notional: l.Notional, InvalidationPrice: a.Invalidation, Status: "OPEN", ExpiresAt: now.Add(time.Duration(expiryHours) * time.Hour), Reason: a.Reason})
 		}
 	}
 	return out

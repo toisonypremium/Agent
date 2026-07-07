@@ -86,3 +86,55 @@ func TestTelegramNon2XXDoesNotLeakToken(t *testing.T) {
 		t.Fatalf("token leaked in error: %v", err)
 	}
 }
+
+func TestTelegramDeleteNon2XXDoesNotLeakToken(t *testing.T) {
+	secret := "secret-token"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad "+secret, http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	oldBase := telegramAPIBaseURL
+	telegramAPIBaseURL = srv.URL
+	defer func() { telegramAPIBaseURL = oldBase }()
+
+	err := TelegramDelete(context.Background(), secret, "chat", 123)
+	if err == nil || !strings.Contains(err.Error(), "telegram delete http 502") {
+		t.Fatalf("expected delete non-2xx error: %v", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("token leaked in delete error: %v", err)
+	}
+}
+
+func TestTelegramEditNon2XXDoesNotLeakToken(t *testing.T) {
+	secret := "secret-token"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad "+secret, http.StatusBadGateway)
+	}))
+	defer srv.Close()
+	oldBase := telegramAPIBaseURL
+	telegramAPIBaseURL = srv.URL
+	defer func() { telegramAPIBaseURL = oldBase }()
+
+	err := TelegramEdit(context.Background(), secret, "chat", 123, "hello")
+	if err == nil || !strings.Contains(err.Error(), "telegram edit http 502") {
+		t.Fatalf("expected edit non-2xx error: %v", err)
+	}
+	if strings.Contains(err.Error(), secret) {
+		t.Fatalf("token leaked in edit error: %v", err)
+	}
+}
+
+func TestTelegramChunksPreferLineBoundaries(t *testing.T) {
+	text := strings.Repeat("a", telegramMaxMessageLen-8) + "\n" + strings.Repeat("b", 20)
+	chunks := telegramChunks(text)
+	if len(chunks) != 2 {
+		t.Fatalf("expected 2 chunks, got %d", len(chunks))
+	}
+	if !strings.HasSuffix(chunks[0], "\n") || strings.HasPrefix(chunks[1], "\n") {
+		t.Fatalf("chunks should split after newline: %q | %q", chunks[0][len(chunks[0])-5:], chunks[1][:5])
+	}
+	if strings.Join(chunks, "") != text {
+		t.Fatal("chunks did not preserve text")
+	}
+}

@@ -11,6 +11,36 @@ import (
 	"testing"
 )
 
+func TestNewOKXFromEnvRejectsUnsafeCredentialValues(t *testing.T) {
+	t.Setenv("OKX_TEST_KEY", " key")
+	t.Setenv("OKX_TEST_SECRET", "secret")
+	t.Setenv("OKX_TEST_PASSPHRASE", "pass")
+	_, err := NewOKXFromEnv("", "OKX_TEST_KEY", "OKX_TEST_SECRET", "OKX_TEST_PASSPHRASE")
+	if err == nil || !strings.Contains(err.Error(), "OKX_TEST_KEY") || strings.Contains(err.Error(), " key") {
+		t.Fatalf("expected sanitized key env error, got %v", err)
+	}
+
+	t.Setenv("OKX_TEST_KEY", "key")
+	t.Setenv("OKX_TEST_SECRET", "sec\nret")
+	_, err = NewOKXFromEnv("", "OKX_TEST_KEY", "OKX_TEST_SECRET", "OKX_TEST_PASSPHRASE")
+	if err == nil || !strings.Contains(err.Error(), "OKX_TEST_SECRET") || strings.Contains(err.Error(), "sec") {
+		t.Fatalf("expected sanitized secret env error, got %v", err)
+	}
+}
+
+func TestNewOKXFromEnvAcceptsCleanCredentialValues(t *testing.T) {
+	t.Setenv("OKX_TEST_KEY", "key")
+	t.Setenv("OKX_TEST_SECRET", "secret")
+	t.Setenv("OKX_TEST_PASSPHRASE", "pass")
+	client, err := NewOKXFromEnv("", "OKX_TEST_KEY", "OKX_TEST_SECRET", "OKX_TEST_PASSPHRASE")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if client == nil || client.key != "key" || client.secret != "secret" || client.passphrase != "pass" {
+		t.Fatalf("bad client: %+v", client)
+	}
+}
+
 func TestOKXSign(t *testing.T) {
 	timestamp := "2020-12-08T09:08:57.715Z"
 	method := "GET"

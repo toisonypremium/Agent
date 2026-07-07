@@ -6,7 +6,8 @@ Rule-based BTC market analyst + ETH/SOL/RENDER accumulation planner for Termux/r
 
 - Default is paper trading/simulation.
 - No futures, no leverage.
-- No real order executor in phase 1.
+- Live execution code exists, but it is disabled/fail-closed by default.
+- Real spot-limit orders require explicit config, manual confirmation or gated auto runtime, proof mode off, canary/operator gates, and deterministic `ACTIVE_LIMIT`.
 - If edge is unclear, output is `NO_TRADE` or `WATCH`.
 
 ## Termux install

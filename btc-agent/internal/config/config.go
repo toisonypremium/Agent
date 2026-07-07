@@ -220,6 +220,9 @@ func (c Config) Validate() error {
 			return errors.New("live max_order_notional_usdt must be >0 and <=10")
 		}
 	}
+	if c.Live.Enabled && c.Live.MaxOrderNotionalUSDT > 10 {
+		return errors.New("live max_order_notional_usdt must be <=10 when live.enabled=true")
+	}
 	if !c.Execution.PaperTrading && !c.Execution.RealTradingEnabled {
 		return errors.New("paper_trading or real_trading_enabled must be true")
 	}

@@ -322,6 +322,22 @@ func TestPaperOrdersFromPlanFormatsLayerTenID(t *testing.T) {
 	}
 }
 
+func TestPaperOrdersFromPlanIDsUniqueWithinBatch(t *testing.T) {
+	p := Plan{Assets: []AssetPlan{{Symbol: "SOLUSDT", State: StateActiveLimit, Invalidation: 90, Layers: []Layer{{Index: 1, Price: 100, Quantity: 1, Notional: 100}, {Index: 1, Price: 99, Quantity: 1, Notional: 99}}}}}
+	orders := OrdersFromPlan(p, 48)
+	if len(orders) != 2 {
+		t.Fatalf("expected two orders: %+v", orders)
+	}
+	if orders[0].ID == orders[1].ID {
+		t.Fatalf("order IDs must be unique within one plan batch: %+v", orders)
+	}
+	for _, order := range orders {
+		if !strings.HasSuffix(order.ID, "-SOLUSDT-L1") {
+			t.Fatalf("expected stable symbol/layer suffix, got %s", order.ID)
+		}
+	}
+}
+
 func TestFallingKnifeClassifierSoftLowerLows(t *testing.T) {
 	candles := assetCandles(10, false)
 	for i := 6; i < 10; i++ {

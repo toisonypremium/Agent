@@ -40,15 +40,30 @@ func NewOKXFromEnv(baseURL, keyEnv, secretEnv, passphraseEnv string) (*OKXClient
 	if passphraseEnv == "" {
 		passphraseEnv = "OKX_API_PASSPHRASE"
 	}
-	key := os.Getenv(keyEnv)
-	secret := os.Getenv(secretEnv)
-	passphrase := os.Getenv(passphraseEnv)
-	for env, value := range map[string]string{keyEnv: key, secretEnv: secret, passphraseEnv: passphrase} {
-		if env == "" || value == "" {
-			return nil, fmt.Errorf("required OKX credential env is not set: %s", env)
-		}
+	key, err := okxCredentialFromEnv(keyEnv)
+	if err != nil {
+		return nil, err
+	}
+	secret, err := okxCredentialFromEnv(secretEnv)
+	if err != nil {
+		return nil, err
+	}
+	passphrase, err := okxCredentialFromEnv(passphraseEnv)
+	if err != nil {
+		return nil, err
 	}
 	return &OKXClient{baseURL: strings.TrimRight(baseURL, "/"), key: key, secret: secret, passphrase: passphrase, http: &http.Client{Timeout: 30 * time.Second}}, nil
+}
+
+func okxCredentialFromEnv(env string) (string, error) {
+	value := os.Getenv(env)
+	if env == "" || value == "" {
+		return "", fmt.Errorf("required OKX credential env is not set: %s", env)
+	}
+	if strings.TrimSpace(value) != value || strings.ContainsAny(value, "\x00\r\n") {
+		return "", fmt.Errorf("OKX credential env contains invalid whitespace/control characters: %s", env)
+	}
+	return value, nil
 }
 
 func (c *OKXClient) InstrumentFilters(ctx context.Context) ([]InstrumentFilter, error) {

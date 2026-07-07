@@ -1,10 +1,56 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/liveguard"
+	"btc-agent/internal/storage"
 )
+
+func TestPersistManagedCycleResultKeepsDesiredExpiry(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	expires := time.Unix(1700003600, 0)
+	result := liveguard.ManagedCycleResult{Placed: []liveguard.ManagedOrderDecision{{
+		Reason: "test place",
+		Desired: liveguard.ManagedDesiredOrder{
+			Symbol:            "ETHUSDT",
+			InstID:            "ETH-USDT",
+			LayerIndex:        2,
+			Side:              "BUY",
+			Type:              "limit",
+			Price:             100,
+			Quantity:          0.02,
+			Notional:          2,
+			InvalidationPrice: 90,
+			Source:            "deterministic_agent2_layer_2",
+			DecisionReason:    "active",
+			ExpiresAt:         expires,
+		},
+		PlaceResult: live.OrderResult{InstID: "ETH-USDT", OrderID: "ord-1", ClientOrderID: "client-1", Submitted: true},
+	}}}
+	if err := persistManagedCycleResult(db, result); err != nil {
+		t.Fatalf("persist managed cycle: %v", err)
+	}
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("open orders=%d", len(open))
+	}
+	if open[0].ExpiresAt != expires.Unix() {
+		t.Fatalf("expires_at=%d want %d", open[0].ExpiresAt, expires.Unix())
+	}
+}
 
 func TestValidateSchedulerTelegramAI(t *testing.T) {
 	base := `📊 BTC Agent — Tóm tắt chiến lược

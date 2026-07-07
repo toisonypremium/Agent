@@ -295,6 +295,9 @@ func (c Config) Validate() error {
 	if c.Live.AutoHaltAfterErrors < 0 {
 		return errors.New("live.auto_halt_after_errors cannot be negative")
 	}
+	if c.Live.MinAccountFreeUSDT < 0 {
+		return errors.New("live.min_account_free_usdt must be >=0")
+	}
 	if c.Live.SupervisorEnabled {
 		if !c.Live.Enabled {
 			return errors.New("live supervisor requires live.enabled=true")
@@ -318,6 +321,9 @@ func (c Config) Validate() error {
 	if c.Portfolio.TotalCapital <= 0 {
 		return errors.New("portfolio.total_capital must be positive")
 	}
+	if c.Portfolio.ReserveCashRatio < 0 || c.Portfolio.ReserveCashRatio >= 1 {
+		return errors.New("portfolio.reserve_cash_ratio must be >=0 and <1")
+	}
 	if strings.ToUpper(c.Portfolio.BaseCurrency) != "USDT" {
 		return errors.New("only USDT base currency supported")
 	}
@@ -325,6 +331,11 @@ func (c Config) Validate() error {
 		return errors.New("data.symbols.assets must contain exactly 3 accumulation assets")
 	}
 	assetSet := map[string]bool{}
+	allocation := map[string]float64{}
+	for sym, value := range c.Portfolio.Allocation {
+		normalized := strings.ToUpper(strings.TrimSpace(sym))
+		allocation[normalized] += value
+	}
 	btcSymbol := strings.ToUpper(strings.TrimSpace(c.Data.Symbols.BTC))
 	for _, s := range c.Data.Symbols.Assets {
 		sym := strings.ToUpper(strings.TrimSpace(s))
@@ -338,20 +349,19 @@ func (c Config) Validate() error {
 			return fmt.Errorf("duplicate asset symbol %s", s)
 		}
 		assetSet[sym] = true
-		if c.Portfolio.Allocation[s] <= 0 {
-			return fmt.Errorf("missing allocation for %s", s)
+		if allocation[sym] <= 0 {
+			return fmt.Errorf("missing or zero allocation for %s", sym)
 		}
 	}
 	sum := 0.0
-	for sym, v := range c.Portfolio.Allocation {
+	for sym, v := range allocation {
 		if v < 0 {
 			return errors.New("allocation cannot be negative")
 		}
-		normalized := strings.ToUpper(strings.TrimSpace(sym))
-		if normalized == btcSymbol {
+		if sym == btcSymbol {
 			return errors.New("portfolio allocation must not include BTC; BTC is market gate only")
 		}
-		if !assetSet[normalized] {
+		if !assetSet[sym] {
 			return fmt.Errorf("allocation for %s is not in data.symbols.assets", sym)
 		}
 		sum += v
@@ -359,11 +369,23 @@ func (c Config) Validate() error {
 	if sum > 1.000001 {
 		return errors.New("allocation sum must be <=1")
 	}
+	if c.Risk.MaxTotalDeploymentPerCycle <= 0 || c.Risk.MaxTotalDeploymentPerCycle > 1 {
+		return errors.New("risk.max_total_deployment_per_cycle must be >0 and <=1")
+	}
+	if c.Risk.MaxSingleAssetDeployment <= 0 || c.Risk.MaxSingleAssetDeployment > 1 {
+		return errors.New("risk.max_single_asset_deployment must be >0 and <=1")
+	}
 	if c.Risk.MinRewardRisk <= 0 {
 		return errors.New("risk.min_reward_risk must be positive")
 	}
 	if c.Risk.BTCTrendArmedThreshold < 0 || c.Risk.BTCTrendAllowedThreshold < 0 || c.Risk.BTCFlowPromoteThreshold < 0 || c.Risk.BTCPermissionMinRewardRisk < 0 {
 		return errors.New("BTC decision thresholds cannot be negative")
+	}
+	if c.Risk.RelativeStrengthLookbackDays < 0 {
+		return errors.New("risk.relative_strength_lookback_days must be >0 when set")
+	}
+	if c.Risk.MaxRotationRank < 0 {
+		return errors.New("risk.max_rotation_rank must be >0 when set")
 	}
 	if c.Risk.BTCTrendArmedThreshold > 0 && c.Risk.BTCTrendAllowedThreshold > 0 && c.Risk.BTCTrendAllowedThreshold < c.Risk.BTCTrendArmedThreshold {
 		return errors.New("risk.btc_trend_allowed_threshold must be >= btc_trend_armed_threshold")
@@ -408,6 +430,9 @@ func (c Config) Validate() error {
 		if c.Research.RSS.Enabled && len(c.Research.RSS.Feeds) == 0 {
 			return errors.New("research.rss.feeds required when research RSS is enabled")
 		}
+	}
+	if c.Execution.OrderExpiryHours <= 0 {
+		return errors.New("execution.order_expiry_hours must be >0")
 	}
 	if len(c.Execution.LayerDistribution) == 0 {
 		return errors.New("execution.layer_distribution required")

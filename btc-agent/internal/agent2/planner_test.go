@@ -314,6 +314,14 @@ func TestPaperOrdersFromPlanOnlyActiveLimit(t *testing.T) {
 	}
 }
 
+func TestPaperOrdersFromPlanFormatsLayerTenID(t *testing.T) {
+	p := Plan{Assets: []AssetPlan{{Symbol: "SOLUSDT", State: StateActiveLimit, Invalidation: 90, Layers: []Layer{{Index: 10, Price: 100, Quantity: 1, Notional: 100}}}}}
+	orders := OrdersFromPlan(p, 48)
+	if len(orders) != 1 || !strings.HasSuffix(orders[0].ID, "-SOLUSDT-L10") {
+		t.Fatalf("expected layer 10 ID suffix, got %+v", orders)
+	}
+}
+
 func TestFallingKnifeClassifierSoftLowerLows(t *testing.T) {
 	candles := assetCandles(10, false)
 	for i := 6; i < 10; i++ {

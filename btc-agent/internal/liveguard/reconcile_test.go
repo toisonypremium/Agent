@@ -122,3 +122,14 @@ func TestReconcileSafetyClean(t *testing.T) {
 		t.Fatalf("expected clean safety: %+v", got)
 	}
 }
+
+func TestReconcileSafetyHandlesCanonicalPartialFill(t *testing.T) {
+	bad := ReconcileSafety(ReconcileResult{Checked: 1, Orders: []live.OrderStatus{{ClientOrderID: "c1", OrderID: "o1", Status: live.StatusPartialFill}}})
+	if bad.Status != ReconcileBlock || len(bad.Blockers) == 0 {
+		t.Fatalf("partial fill missing fill details should block: %+v", bad)
+	}
+	good := ReconcileSafety(ReconcileResult{Checked: 1, Orders: []live.OrderStatus{{ClientOrderID: "c1", OrderID: "o1", Status: live.StatusPartialFill, AccumulatedFillSz: 0.01, AvgPrice: 100}}})
+	if good.Status != ReconcileClean || len(good.Blockers) != 0 {
+		t.Fatalf("partial fill with details should be clean: %+v", good)
+	}
+}

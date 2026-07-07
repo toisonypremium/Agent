@@ -104,7 +104,7 @@ func ReconcileSafety(result ReconcileResult) ReconcileSafetyResult {
 		if order.Status == live.StatusUnknownNeedsManualCheck {
 			safety.Blockers = append(safety.Blockers, fmt.Sprintf("%s/%s needs manual check", order.ClientOrderID, order.OrderID))
 		}
-		if order.Status == live.StatusPartiallyFilled || order.Status == live.StatusFilled {
+		if live.NormalizeOrderStatus(order.Status) == live.StatusPartialFill || live.NormalizeOrderStatus(order.Status) == live.StatusFilled {
 			filled := order.AccumulatedFillSz
 			if filled == 0 {
 				filled = order.FilledQuantity

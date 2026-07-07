@@ -26,6 +26,7 @@ import (
 	"btc-agent/internal/llm"
 	"btc-agent/internal/market"
 	"btc-agent/internal/notify"
+	"btc-agent/internal/paper"
 	"btc-agent/internal/reportio"
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
@@ -73,6 +74,8 @@ func run(ctx context.Context, args []string) error {
 	case "plan":
 		_, err := plan(ctx, cfg, db)
 		return err
+	case "paper-manager":
+		return runPaperManager(cfg, db)
 	case "accumulation-readiness":
 		return runAccumulationReadiness(ctx, cfg, db)
 	case "btc-gate-diagnostic":
@@ -148,7 +151,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -316,6 +319,49 @@ func plan(ctx context.Context, cfg config.Config, db *storage.DB) (agent2.Plan, 
 	}
 	fmt.Println(p.JSON())
 	return p, nil
+}
+
+func runPaperManager(cfg config.Config, db *storage.DB) error {
+	orders, err := db.OpenPaperOrders()
+	if err != nil {
+		return fmt.Errorf("load open paper orders: %w", err)
+	}
+	plan, err := db.LatestPlan()
+	if err != nil {
+		return fmt.Errorf("load latest plan: %w", err)
+	}
+	candlesBySymbol := map[string][]market.Candle{}
+	seen := map[string]bool{}
+	for _, order := range orders {
+		symbol := strings.ToUpper(order.Symbol)
+		if symbol == "" || seen[symbol] {
+			continue
+		}
+		seen[symbol] = true
+		candles, err := db.LoadCandles(symbol, "1d", cfg.Data.CandleLimit)
+		if err != nil {
+			return fmt.Errorf("load paper candles %s: %w", symbol, err)
+		}
+		candlesBySymbol[symbol] = candles
+	}
+	result := paper.ManageOpenOrders(time.Now(), orders, candlesBySymbol, plan)
+	for _, event := range result.Events {
+		if err := db.UpdatePaperOrderStatus(event.OrderID, event.NewStatus, event.Reason); err != nil {
+			return fmt.Errorf("update paper order %s: %w", event.OrderID, err)
+		}
+	}
+	if err := saveJSONFile("reports", "paper_manager_latest.json", result); err != nil {
+		return err
+	}
+	md := paper.Markdown(result)
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join("reports", "paper_manager_latest.md"), []byte(md), 0600); err != nil {
+		return err
+	}
+	fmt.Println(md)
+	return nil
 }
 
 func runDaily(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -1520,7 +1566,11 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 				return fmt.Errorf("load instrument filters for order management: %w", err)
 			}
 		}
-		result := liveguard.ManageLiveOrdersDryRun(ctx, cfg, p, open, positions, filters, placer, canceler, db, dryRun)
+		var recorder liveguard.ManagedOrderRecorder
+		if !dryRun {
+			recorder = db
+		}
+		result := liveguard.ManageLiveOrdersWithRecorder(ctx, cfg, p, open, positions, filters, placer, canceler, db, recorder, dryRun)
 		result.DataHealth = dataHealth
 		result.ReconcileSafety = reconcileSafety
 		result.RiskGovernor = riskGovernor
@@ -1877,11 +1927,13 @@ func persistManagedCycleResult(db *storage.DB, result liveguard.ManagedCycleResu
 		if !desired.ExpiresAt.IsZero() {
 			expiresAt = desired.ExpiresAt.Unix()
 		}
-		meta := live.OrderStatus{LayerIndex: desired.LayerIndex, Source: desired.Source, InvalidationPrice: desired.InvalidationPrice, DecisionReason: desired.DecisionReason, LastManagementAction: "placed: " + decision.Reason, ExpiresAt: expiresAt}
-		if err := db.SaveManagedLiveOrder(order.ClientOrderID, order.OrderID, order.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusLiveOpen, meta); err != nil {
-			return fmt.Errorf("save managed live order: %w", err)
+		meta := live.OrderStatus{ClientOrderID: order.ClientOrderID, OrderID: order.OrderID, InstID: order.InstID, Symbol: desired.Symbol, Side: desired.Side, OrderType: desired.Type, Price: desired.Price, Quantity: desired.Quantity, Notional: desired.Notional, Status: live.StatusSubmitted, LayerIndex: desired.LayerIndex, Source: desired.Source, InvalidationPrice: desired.InvalidationPrice, DecisionReason: desired.DecisionReason, LastManagementAction: "placed: " + decision.Reason, ExpiresAt: expiresAt}
+		if err := db.SaveLiveOrderStatus(meta); err != nil {
+			if err := db.SaveManagedLiveOrder(order.ClientOrderID, order.OrderID, order.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusSubmitted, meta); err != nil {
+				return fmt.Errorf("save managed live order status: %w", err)
+			}
 		}
-		if err := db.SaveLiveOrderEvent(live.OrderStatus{ClientOrderID: order.ClientOrderID, OrderID: order.OrderID, InstID: order.InstID, Symbol: desired.Symbol, LayerIndex: desired.LayerIndex, Status: live.StatusLiveOpen}); err != nil {
+		if err := db.SaveLiveOrderEvent(meta); err != nil {
 			return fmt.Errorf("save managed live order event: %w", err)
 		}
 	}
@@ -2147,6 +2199,8 @@ func protectedReportFiles() []string {
 		"cancel_all_live_orders_latest.md",
 		"cancel_all_live_orders_latest.json",
 		"telegram_state.json",
+		"paper_manager_latest.md",
+		"paper_manager_latest.json",
 	}
 }
 
@@ -2299,6 +2353,9 @@ Agent 2
 		}
 	}
 	out += fmt.Sprintf("- Open paper orders: %d", len(orders))
+	if counts, err := db.PaperOrderStatusCounts(); err == nil && len(counts) > 0 {
+		out += fmt.Sprintf("\n- Paper orders: OPEN=%d FILLED=%d EXPIRED=%d CANCELLED=%d INVALIDATED=%d", counts[paper.StatusOpen], counts[paper.StatusFilled], counts[paper.StatusExpired], counts[paper.StatusCancelled], counts[paper.StatusInvalidated])
+	}
 	return out, nil
 }
 

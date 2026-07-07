@@ -1,13 +1,19 @@
 package main
 
 import (
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"btc-agent/internal/agent1"
+	"btc-agent/internal/agent2"
+	"btc-agent/internal/config"
 	"btc-agent/internal/exchange/live"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/market"
+	"btc-agent/internal/paper"
 	"btc-agent/internal/storage"
 )
 
@@ -49,6 +55,53 @@ func TestPersistManagedCycleResultKeepsDesiredExpiry(t *testing.T) {
 	}
 	if open[0].ExpiresAt != expires.Unix() {
 		t.Fatalf("expires_at=%d want %d", open[0].ExpiresAt, expires.Unix())
+	}
+}
+
+func TestRunPaperManagerUpdatesOrderAndWritesReports(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(oldWD)
+
+	db, err := storage.Open(filepath.Join(dir, "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Unix(1700000000, 0)
+	plan := agent2.Plan{Timestamp: now, State: agent2.StateActiveLimit, ActionPermission: agent1.Allowed, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1}}}}}
+	if err := db.SavePlan(plan); err != nil {
+		t.Fatal(err)
+	}
+	order := agent2.PaperOrder{ID: "paper-1", Timestamp: now, Symbol: "ETHUSDT", Side: "BUY", Layer: 1, Price: 100, Quantity: 1, Notional: 100, Status: "OPEN", ExpiresAt: now.Add(48 * time.Hour), InvalidationPrice: 90, Reason: "test"}
+	if err := db.SaveOrders([]agent2.PaperOrder{order}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveCandles([]market.Candle{{Symbol: "ETHUSDT", Interval: "1d", OpenTime: now.Add(24 * time.Hour), CloseTime: now.Add(48 * time.Hour), Open: 105, High: 106, Low: 99, Close: 104, Volume: 1000}}); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Config{}
+	cfg.Data.CandleLimit = 10
+	if err := runPaperManager(cfg, db); err != nil {
+		t.Fatalf("run paper manager: %v", err)
+	}
+	counts, err := db.PaperOrderStatusCounts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counts[paper.StatusFilled] != 1 {
+		t.Fatalf("expected filled count, got %+v", counts)
+	}
+	for _, name := range []string{"paper_manager_latest.md", "paper_manager_latest.json"} {
+		if _, err := os.Stat(filepath.Join("reports", name)); err != nil {
+			t.Fatalf("missing report %s: %v", name, err)
+		}
 	}
 }
 

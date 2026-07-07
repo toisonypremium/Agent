@@ -140,7 +140,7 @@ func TestParseOKXOrderStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{StatusLiveOpen, StatusPartiallyFilled, StatusFilled, StatusCanceled, StatusRejected, StatusUnknownNeedsManualCheck}
+	want := []string{StatusSubmitted, StatusPartialFill, StatusFilled, StatusCancelled, StatusRejected, StatusUnknownNeedsManualCheck}
 	if len(got) != len(want) {
 		t.Fatalf("len=%d want %d", len(got), len(want))
 	}
@@ -176,7 +176,7 @@ func TestOrderStatusSignsFullQueryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.Status != StatusLiveOpen || status.OrderID != "ord-123" || sawPath == "" {
+	if status.Status != StatusSubmitted || status.OrderID != "ord-123" || sawPath == "" {
 		t.Fatalf("bad status: %+v", status)
 	}
 }
@@ -228,7 +228,7 @@ func TestPendingOrdersSignsFullQueryPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(statuses) != 1 || statuses[0].Status != StatusLiveOpen {
+	if len(statuses) != 1 || statuses[0].Status != StatusSubmitted {
 		t.Fatalf("bad pending statuses: %+v", statuses)
 	}
 }

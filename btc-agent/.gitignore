@@ -1,5 +1,7 @@
 config.yaml
 config.local.yaml
+.env
+data/
 data/*.db
 data/*.db-*
 data/training/*.jsonl
@@ -8,10 +10,10 @@ data/ai_eval/*.jsonl
 backups/*.db
 backups/*.db-*
 bin/
+*.db
 *.log
 *.tmp
 .DS_Store
-.env
 secrets.env
 .codebase-memory/
 reports/

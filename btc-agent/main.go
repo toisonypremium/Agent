@@ -2217,8 +2217,8 @@ func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
 	result, err := telegramManager.Send(ctx, token, chatID, label, text)
 	if err != nil {
-		if errors.Is(err, notify.ErrTelegramSkipped) {
-			log.Printf("telegram skipped [%s]: missing token/chat", label)
+		if errors.Is(err, notify.ErrTelegramConfig) {
+			log.Printf("telegram config warning [%s]: %v", label, err)
 			return
 		}
 		log.Printf("telegram warning [%s]: %v", label, err)

@@ -8,10 +8,14 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
-var ErrTelegramSkipped = errors.New("telegram skipped: missing token/chat")
+const telegramMaxMessageLen = 4000
+
+var ErrTelegramConfig = errors.New("telegram config error")
+var ErrTelegramSkipped = ErrTelegramConfig
 
 var telegramAPIBaseURL = "https://api.telegram.org"
 
@@ -28,9 +32,25 @@ func Telegram(ctx context.Context, token, chatID, text string) error {
 
 // TelegramSend sends a new message and returns message_id + error.
 func TelegramSend(ctx context.Context, token, chatID, text string) (SendResult, error) {
-	if token == "" || chatID == "" {
-		return SendResult{}, ErrTelegramSkipped
+	if strings.TrimSpace(token) == "" {
+		return SendResult{}, fmt.Errorf("%w: missing telegram token", ErrTelegramConfig)
 	}
+	if strings.TrimSpace(chatID) == "" {
+		return SendResult{}, fmt.Errorf("%w: missing telegram chat_id", ErrTelegramConfig)
+	}
+	chunks := telegramChunks(text)
+	var result SendResult
+	for _, chunk := range chunks {
+		sent, err := telegramSendChunk(ctx, token, chatID, chunk)
+		if err != nil {
+			return result, err
+		}
+		result = sent
+	}
+	return result, nil
+}
+
+func telegramSendChunk(ctx context.Context, token, chatID, text string) (SendResult, error) {
 	body, _ := json.Marshal(map[string]string{"chat_id": chatID, "text": text})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBaseURL, token), bytes.NewReader(body))
 	if err != nil {
@@ -45,7 +65,7 @@ func TelegramSend(ctx context.Context, token, chatID, text string) (SendResult, 
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
-		return SendResult{}, fmt.Errorf("telegram http %d", resp.StatusCode)
+		return SendResult{}, fmt.Errorf("telegram http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
 	}
 	var raw struct {
 		Result struct {
@@ -54,6 +74,33 @@ func TelegramSend(ctx context.Context, token, chatID, text string) (SendResult, 
 	}
 	_ = json.Unmarshal(data, &raw)
 	return SendResult{MessageID: raw.Result.MessageID}, nil
+}
+
+func telegramChunks(text string) []string {
+	if text == "" {
+		return []string{""}
+	}
+	runes := []rune(text)
+	out := []string{}
+	for len(runes) > 0 {
+		end := telegramMaxMessageLen
+		if len(runes) < end {
+			end = len(runes)
+		}
+		out = append(out, string(runes[:end]))
+		runes = runes[end:]
+	}
+	return out
+}
+
+func telegramRedact(text, token string) string {
+	if token != "" {
+		text = strings.ReplaceAll(text, token, "<REDACTED>")
+	}
+	if len(text) > 500 {
+		text = text[:500] + "..."
+	}
+	return text
 }
 
 // TelegramDelete deletes a previously sent message. Errors are non-fatal (message may already be gone).

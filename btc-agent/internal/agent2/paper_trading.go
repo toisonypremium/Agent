@@ -1,6 +1,9 @@
 package agent2
 
-import "time"
+import (
+	"fmt"
+	"time"
+)
 
 type PaperOrder struct {
 	ID                                           string    `json:"id"`
@@ -22,7 +25,7 @@ func OrdersFromPlan(p Plan, expiryHours int) []PaperOrder {
 			continue
 		}
 		for _, l := range a.Layers {
-			out = append(out, PaperOrder{ID: now.Format("20060102150405") + "-" + a.Symbol + "-L" + string(rune('0'+l.Index)), Timestamp: now, Symbol: a.Symbol, Side: "BUY", Layer: l.Index, Price: l.Price, Quantity: l.Quantity, Notional: l.Notional, InvalidationPrice: a.Invalidation, Status: "OPEN", ExpiresAt: now.Add(time.Duration(expiryHours) * time.Hour), Reason: a.Reason})
+			out = append(out, PaperOrder{ID: fmt.Sprintf("%s-%s-L%d", now.Format("20060102150405"), a.Symbol, l.Index), Timestamp: now, Symbol: a.Symbol, Side: "BUY", Layer: l.Index, Price: l.Price, Quantity: l.Quantity, Notional: l.Notional, InvalidationPrice: a.Invalidation, Status: "OPEN", ExpiresAt: now.Add(time.Duration(expiryHours) * time.Hour), Reason: a.Reason})
 		}
 	}
 	return out

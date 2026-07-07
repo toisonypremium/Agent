@@ -3,6 +3,8 @@ package liveguard
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -71,9 +73,10 @@ func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof
 	order, err := placer.PlaceSpotLimitOrder(ctx, req)
 	result.Order = order
 	if err != nil {
+		safeErr := sanitizeExchangeError(cfg, err)
 		result.Status = LiveOrderRejected
-		result.Reasons = []string{err.Error()}
-		result.Summary = LiveOrderRejected + ": " + err.Error()
+		result.Reasons = []string{safeErr}
+		result.Summary = LiveOrderRejected + ": " + safeErr
 		return result
 	}
 	result.Status = LiveOrderSubmitted
@@ -100,9 +103,10 @@ func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, 
 	order, err := placer.PlaceSpotLimitOrder(ctx, req)
 	result.Order = order
 	if err != nil {
+		safeErr := sanitizeExchangeError(cfg, err)
 		result.Status = LiveOrderRejected
-		result.Reasons = []string{err.Error()}
-		result.Summary = LiveOrderRejected + ": " + err.Error()
+		result.Reasons = []string{safeErr}
+		result.Summary = LiveOrderRejected + ": " + safeErr
 		return result
 	}
 	result.Status = LiveOrderSubmitted
@@ -133,9 +137,10 @@ func ExecuteAutoLadderProofOrder(ctx context.Context, cfg config.Config, proof L
 		order, err := placer.PlaceSpotLimitOrder(ctx, req)
 		result.Orders = append(result.Orders, order)
 		if err != nil {
+			safeErr := sanitizeExchangeError(cfg, err)
 			result.Status = LiveOrderRejected
-			result.Reasons = append(result.Reasons, err.Error())
-			result.Summary = fmt.Sprintf("%s: submitted %d/%d before error: %v", LiveOrderRejected, len(result.Orders)-1, len(proof.Candidates), err)
+			result.Reasons = append(result.Reasons, safeErr)
+			result.Summary = fmt.Sprintf("%s: submitted %d/%d before error: %s", LiveOrderRejected, len(result.Orders)-1, len(proof.Candidates), safeErr)
 			return result
 		}
 	}
@@ -215,6 +220,34 @@ func clientOrderID(symbol string, canary bool) string {
 		prefix = "btccanary"
 	}
 	return fmt.Sprintf("%s%s%s", prefix, s, nextClientOrderIDSuffix())
+}
+
+func sanitizeExchangeError(cfg config.Config, err error) string {
+	if err == nil {
+		return ""
+	}
+	out := err.Error()
+	for _, envName := range []string{cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv} {
+		if envName == "" {
+			continue
+		}
+		if secret := os.Getenv(envName); secret != "" {
+			out = strings.ReplaceAll(out, secret, "<REDACTED>")
+		}
+	}
+	out = redactExchangeField(out, `(?i)(OK-ACCESS-KEY\s*[:=]\s*)[^\s,;]+`)
+	out = redactExchangeField(out, `(?i)(OK-ACCESS-SIGN\s*[:=]\s*)[^\s,;]+`)
+	out = redactExchangeField(out, `(?i)(OK-ACCESS-PASSPHRASE\s*[:=]\s*)[^\s,;]+`)
+	out = redactExchangeField(out, `(?i)((?:api_?key|secret|passphrase)\s*[:=]\s*)[^\s,;]+`)
+	if len(out) > 500 {
+		out = out[:500] + "..."
+	}
+	return out
+}
+
+func redactExchangeField(s, pattern string) string {
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllString(s, `${1}<REDACTED>`)
 }
 
 func nextClientOrderIDSuffix() string {

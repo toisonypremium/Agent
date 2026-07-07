@@ -331,6 +331,50 @@ func TestClientOrderIDUniqueAndWithinOKXLimit(t *testing.T) {
 	}
 }
 
+func TestExecuteManualProofOrderSanitizesExchangeError(t *testing.T) {
+	cfg, proof := executableConfigAndProof()
+	secret := "manual-secret-value"
+	t.Setenv("OKX_API_SECRET", secret)
+	cfg.Live.APISecretEnv = "OKX_API_SECRET"
+	placer := &fakeOrderPlacer{err: fmt.Errorf("okx order failed secret=%s OK-ACCESS-KEY=abc", secret)}
+	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
+	joined := got.Summary + " " + strings.Join(got.Reasons, " ")
+	if got.Status != LiveOrderRejected || strings.Contains(joined, secret) || strings.Contains(joined, "abc") {
+		t.Fatalf("exchange error not sanitized: %+v", got)
+	}
+}
+
+func TestExecuteAutoProofOrderSanitizesExchangeError(t *testing.T) {
+	cfg, proof := autoExecutableConfigAndProof()
+	secret := "auto-secret-value"
+	t.Setenv("OKX_API_KEY", secret)
+	cfg.Live.APIKeyEnv = "OKX_API_KEY"
+	placer := &fakeOrderPlacer{err: fmt.Errorf("okx order failed apiKey=%s", secret)}
+	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
+	joined := got.Summary + " " + strings.Join(got.Reasons, " ")
+	if got.Status != LiveOrderRejected || strings.Contains(joined, secret) {
+		t.Fatalf("exchange error not sanitized: %+v", got)
+	}
+}
+
+func TestExecuteAutoLadderProofOrderSanitizesExchangeError(t *testing.T) {
+	cfg, _ := autoExecutableConfigAndProof()
+	cfg.Live.AutoLadderEnabled = true
+	cfg.Live.MaxAutoLayersPerCycle = 1
+	cfg.Live.MaxOpenLiveOrders = 1
+	cfg.Live.AutoLadderMaxNotionalUSDT = 2
+	secret := "ladder-secret-value"
+	t.Setenv("OKX_API_PASSPHRASE", secret)
+	cfg.Live.APIPassphraseEnv = "OKX_API_PASSPHRASE"
+	proof := LadderProof{Status: ReadyForManualLiveProofOrder, Account: AccountCheck{AuthOK: true, BalanceOK: true}, Candidates: []CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true}}, Preflights: []PreflightResult{{Pass: true, Symbol: "ETHUSDT", InstID: "ETH-USDT"}}, TotalNotional: 2}
+	placer := &fakeOrderPlacer{err: fmt.Errorf("okx ladder failed passphrase=%s", secret)}
+	got := ExecuteAutoLadderProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
+	joined := got.Summary + " " + strings.Join(got.Reasons, " ")
+	if got.Status != LiveOrderRejected || strings.Contains(joined, secret) {
+		t.Fatalf("exchange error not sanitized: %+v", got)
+	}
+}
+
 func TestExecuteManualProofOrderCanaryPrefix(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
 	cfg.Live.CanaryMode = true

@@ -425,6 +425,68 @@ func TestValidateRejectsAllocationOutsideAccumulationAssets(t *testing.T) {
 	}
 }
 
+func TestValidateDynamicAssetAllocations(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Data.Symbols.Assets = []string{"ADAUSDT", "LINKUSDT", "AVAXUSDT"}
+	cfg.Portfolio.Allocation = map[string]float64{"adausdt": 0.30, "LINKUSDT": 0.30, " AVAXUSDT ": 0.40}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected dynamic configured assets to validate: %v", err)
+	}
+}
+
+func TestValidateRejectsMissingOrZeroConfiguredAssetAllocation(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"missing", func(cfg *Config) { delete(cfg.Portfolio.Allocation, "SOLUSDT") }},
+		{"zero", func(cfg *Config) { cfg.Portfolio.Allocation["SOLUSDT"] = 0 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected allocation validation error")
+			}
+		})
+	}
+}
+
+func TestValidateRejectsAllocationSumAboveOne(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Portfolio.Allocation = map[string]float64{"ETHUSDT": 0.50, "SOLUSDT": 0.30, "RENDERUSDT": 0.30}
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected allocation sum validation error")
+	}
+}
+
+func TestValidateRequiredBounds(t *testing.T) {
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"max total zero", func(cfg *Config) { cfg.Risk.MaxTotalDeploymentPerCycle = 0 }},
+		{"max total above one", func(cfg *Config) { cfg.Risk.MaxTotalDeploymentPerCycle = 1.1 }},
+		{"max single zero", func(cfg *Config) { cfg.Risk.MaxSingleAssetDeployment = 0 }},
+		{"max single above one", func(cfg *Config) { cfg.Risk.MaxSingleAssetDeployment = 1.1 }},
+		{"reserve negative", func(cfg *Config) { cfg.Portfolio.ReserveCashRatio = -0.01 }},
+		{"reserve one", func(cfg *Config) { cfg.Portfolio.ReserveCashRatio = 1 }},
+		{"expiry zero", func(cfg *Config) { cfg.Execution.OrderExpiryHours = 0 }},
+		{"live min free negative", func(cfg *Config) { cfg.Live.MinAccountFreeUSDT = -1 }},
+		{"relative lookback negative", func(cfg *Config) { cfg.Risk.RelativeStrengthLookbackDays = -1 }},
+		{"rotation rank negative", func(cfg *Config) { cfg.Risk.MaxRotationRank = -1 }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestValidateDecisionThresholdBounds(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Risk.BTCTrendAllowedThreshold = 40
@@ -460,6 +522,8 @@ func validTestConfig() Config {
 	cfg.Risk.NoLeverage = true
 	cfg.Risk.SpotLimitOnly = true
 	cfg.Risk.MinRewardRisk = 3
+	cfg.Risk.MaxTotalDeploymentPerCycle = 0.70
+	cfg.Risk.MaxSingleAssetDeployment = 0.45
 	cfg.Data.BinanceBaseURL = "https://api.binance.com"
 	cfg.Data.Symbols.BTC = "BTCUSDT"
 	cfg.Data.Symbols.Assets = []string{"ETHUSDT", "SOLUSDT", "RENDERUSDT"}

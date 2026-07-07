@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"btc-agent/internal/config"
 	"btc-agent/internal/market"
 )
 
@@ -54,5 +55,19 @@ func TestAssetFlowEntryWatchesNeutral(t *testing.T) {
 	}
 	if !strings.Contains(got.Reason, "soft wait") {
 		t.Fatalf("expected soft-wait reason: %+v", got)
+	}
+}
+
+func TestAssetFlowEntryParamsPreservesAllowNeutralReclaimFalse(t *testing.T) {
+	var cfg config.Config
+	cfg.Risk.AllowNeutralReclaimEntry = false
+	_, _, allowNeutral := assetFlowEntryParams(cfg)
+	if allowNeutral {
+		t.Fatal("allowNeutralReclaim should follow config false value")
+	}
+	cfg.Risk.AllowNeutralReclaimEntry = true
+	_, _, allowNeutral = assetFlowEntryParams(cfg)
+	if !allowNeutral {
+		t.Fatal("allowNeutralReclaim should follow config true value")
 	}
 }

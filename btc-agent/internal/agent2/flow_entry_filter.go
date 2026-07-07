@@ -87,9 +87,6 @@ func assetFlowEntryParams(cfg config.Config) (bool, float64, bool) {
 	if minBullScore <= 0 {
 		minBullScore = 0.25
 	}
-	allowNeutralReclaim := true
-	if cfg.Risk.AllowNeutralReclaimEntry {
-		allowNeutralReclaim = true
-	}
+	allowNeutralReclaim := cfg.Risk.AllowNeutralReclaimEntry
 	return true, minBullScore, allowNeutralReclaim
 }

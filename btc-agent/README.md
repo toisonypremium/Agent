@@ -47,6 +47,18 @@ cp config.yaml.example config.yaml
 
 Edit `config.yaml` notify section. Leave disabled unless configured.
 
+## Repo hygiene
+
+`config.yaml` is local-only and ignored. Commit `config.yaml.example`, not real local config or secrets.
+
+Use the standard verification gate before reporting work done:
+
+```bash
+make verify
+```
+
+Future coding agents should follow `AGENT_DONE_CHECK.md`: report changed files, exact command results, and remaining real risks. If no source/test/docs files changed, they must say `NOT DONE - no source files changed`.
+
 ## Decision pipeline
 
 Agent 1 is BTC market gate/benchmark. BTC is not an accumulation target. Agent 2 evaluates only configured ETH/SOL/RENDER assets.

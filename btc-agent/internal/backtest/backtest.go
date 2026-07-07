@@ -609,10 +609,73 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("20. Kết luận\n")
+	b.WriteString("20. Strategy Intelligence Summary\n")
+	b.WriteString("- Research only; no live config changed; no order authority changed. WATCH/SCOUT/ARMED must not create orders.\n")
+	b.WriteString(strategyIntelligenceSummary(r))
+	b.WriteString("\n")
+
+	b.WriteString("21. Kết luận\n")
 	b.WriteString("- " + r.Summary + "\n")
 	b.WriteString("- Đây là audit rule bằng dữ liệu quá khứ, không phải cam kết lợi nhuận. Mẫu ít thì chỉ dùng để debug rule. Agent 2 simulation chưa mô hình take-profit.\n")
 	return b.String()
+}
+
+func strategyIntelligenceSummary(r Result) string {
+	parts := []string{}
+	if r.BTCPermissionAudit.Enabled {
+		blocker := "none"
+		if len(r.BTCPermissionAudit.Blockers) > 0 {
+			blocker = fmt.Sprintf("%s count=%d rate=%.1f%%", r.BTCPermissionAudit.Blockers[0].Blocker, r.BTCPermissionAudit.Blockers[0].Count, r.BTCPermissionAudit.Blockers[0].Rate*100)
+		}
+		parts = append(parts, "- BTC gate bottleneck: "+blocker+"; diagnostic only, BTC permission remains execution authority.")
+	}
+	if r.Agent2OpportunityAudit.Enabled {
+		row := topOpportunityRow(r.Agent2OpportunityAudit.Rows)
+		if row.Symbol != "" {
+			parts = append(parts, fmt.Sprintf("- Agent2 closest unlock: %s top_missing=%s near_miss=%d avg_score=%.2f avg_discount_gap=%.1f%% avg_RR_gap=%.2f; no gate loosened.", row.Symbol, emptyDash(row.TopMissingGate), row.NearMissCount, row.AvgSetupScore, row.AvgDiscountGapPct*100, row.AvgRewardRiskGap))
+		}
+	}
+	if r.ExitAudit.Enabled {
+		row := topExitAuditRow(r.ExitAudit.Rows)
+		if row.Symbol != "" {
+			parts = append(parts, fmt.Sprintf("- Exit planner research-only: %s TP=%.2f%% time_stop=%dd verdict=%s; do not place take-profit orders automatically.", row.Symbol, row.TakeProfitPct*100, row.TimeStopDays, row.Verdict))
+		} else {
+			parts = append(parts, "- Exit planner research-only: no candidate; keep manual exit review only.")
+		}
+	}
+	if len(parts) == 0 {
+		parts = append(parts, "- Strategy intelligence skipped: not enough audit evidence yet.")
+	}
+	return strings.Join(parts, "\n") + "\n"
+}
+
+func topOpportunityRow(rows []Agent2OpportunityAuditRow) Agent2OpportunityAuditRow {
+	if len(rows) == 0 {
+		return Agent2OpportunityAuditRow{}
+	}
+	best := rows[0]
+	for _, row := range rows[1:] {
+		if row.NearMissCount > best.NearMissCount || (row.NearMissCount == best.NearMissCount && row.AvgSetupScore > best.AvgSetupScore) {
+			best = row
+		}
+	}
+	return best
+}
+
+func topExitAuditRow(rows []ExitAuditRow) ExitAuditRow {
+	if len(rows) == 0 {
+		return ExitAuditRow{}
+	}
+	best := ExitAuditRow{}
+	for _, row := range rows {
+		if row.Verdict == "CANDIDATE" {
+			return row
+		}
+		if best.Symbol == "" || row.OrdersFilled > best.OrdersFilled {
+			best = row
+		}
+	}
+	return best
 }
 
 func flowParamQualityBullishHorizonCell(row FlowParamQualityAuditRow, horizon int) string {

@@ -210,6 +210,7 @@ func btcGateDiagnosticMarkdown(r btcGateDiagnosticReport) string {
 	md += fmt.Sprintf("Generated: %s\n", r.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"))
 	md += fmt.Sprintf("Current: %s | reason=%s\n", r.Permission, emptyDefault(r.PermissionReason, "n/a"))
 	md += fmt.Sprintf("Regime/Risk: %s | risk=%s falling=%s fomo=%s\n", r.Regime, r.Risk, r.FallingKnifeRisk, r.FomoRisk)
+	md += fmt.Sprintf("Diagnostic only: permission=%s regime=%s trend=%.2f; WATCH/SCOUT/ARMED have no order authority.\n", r.Permission, r.Regime, r.TrendScore)
 	md += fmt.Sprintf("BTC price: %.8f\n", r.BTCPrice)
 	md += fmt.Sprintf("Support: %.8f-%.8f | Resistance: %.8f-%.8f | RR proxy: %.2f\n\n", r.Support.Low, r.Support.High, r.Resistance.Low, r.Resistance.High, r.RewardRiskProxy)
 	md += "Trend route:\n"
@@ -221,9 +222,12 @@ func btcGateDiagnosticMarkdown(r btcGateDiagnosticReport) string {
 		md += fmt.Sprintf("- %s: trend=%.2f weight=%.0f%% contribution=%.2f bias=%s %s RSI=%.1f structure=%s\n", frame.Timeframe, frame.TrendScore, frame.Weight*100, frame.Contribution, emptyDefault(frame.Bias, "UNKNOWN"), frameEMANote(frame, r.BTCPrice), frame.RSI14, emptyDefault(frame.StructureLabel, "UNKNOWN"))
 	}
 	md += "\nFlow route:\n"
+	flowGap := math.Max(0, r.Policy.FlowPromoteThreshold-r.FlowScore)
 	md += fmt.Sprintf("- Flow: %s score=%.2f\n", r.FlowBias, r.FlowScore)
-	md += fmt.Sprintf("- Promote to ARMED requires ACCUMULATION/BEAR_TRAP >=%.2f\n", r.Policy.FlowPromoteThreshold)
+	md += fmt.Sprintf("- Promote to ARMED requires ACCUMULATION/BEAR_TRAP >=%.2f (score gap %.2f plus bullish flow confirmation)\n", r.Policy.FlowPromoteThreshold, flowGap)
 	md += "- Next trigger: " + emptyDefault(r.FlowNextTrigger, "n/a") + "\n\n"
+	md += "Hard/soft blockers:\n"
+	md += btcGateBlockerMarkdown(r) + "\n"
 	md += "Unlock checklist:\n"
 	for _, item := range r.UnlockConditions {
 		md += fmt.Sprintf("- %s: %s current=%s target=%s gap=%.2f — %s\n", item.Name, passFail(item.Pass), emptyDefault(item.Current, "n/a"), emptyDefault(item.Target, "n/a"), item.Gap, item.Reason)
@@ -231,6 +235,38 @@ func btcGateDiagnosticMarkdown(r btcGateDiagnosticReport) string {
 	md += "\nSummary: " + r.Summary + "\n\n"
 	md += "No order was placed. Report-only BTC gate diagnostic.\n"
 	return md
+}
+
+func btcGateBlockerMarkdown(r btcGateDiagnosticReport) string {
+	items := []string{}
+	if r.Regime == "PANIC_SELLING" || r.Regime == "DISTRIBUTION" {
+		items = append(items, "hard: regime "+r.Regime)
+	} else if r.Regime == "DOWNTREND" || r.Regime == "TRANSITION" {
+		items = append(items, "soft: regime "+r.Regime)
+	}
+	if r.FallingKnifeRisk == agent1.High {
+		items = append(items, "hard: falling knife high")
+	} else if r.FallingKnifeRisk == agent1.Medium {
+		items = append(items, "soft: falling knife medium")
+	}
+	if r.FomoRisk == agent1.High {
+		items = append(items, "hard: FOMO high")
+	} else if r.FomoRisk == agent1.Medium {
+		items = append(items, "soft: FOMO medium")
+	}
+	if r.FlowBias == flow.BiasDistribution || r.FlowBias == flow.BiasBullTrap {
+		items = append(items, "soft: flow "+string(r.FlowBias))
+	} else if r.FlowBias == flow.BiasNeutral {
+		items = append(items, "info: flow neutral needs bullish confirmation")
+	}
+	if len(items) == 0 {
+		return "- none; hard blockers clear in current diagnostic\n"
+	}
+	out := ""
+	for _, item := range items {
+		out += "- " + item + "\n"
+	}
+	return out
 }
 
 func frameEMANote(frame btcGateFrameContribution, price float64) string {

@@ -12,9 +12,22 @@ import (
 func TestBTCGateDiagnosticMarkdownShowsUnlockRoutes(t *testing.T) {
 	report := buildBTCGateDiagnosticReport(readinessTestConfig(), btcGateDiagnosticTestAnalysis())
 	md := btcGateDiagnosticMarkdown(report)
-	for _, want := range []string{"BTC GATE DIAGNOSTIC", "Current: WATCH", "Gap to ARMED", "Gap to ALLOWED", "Frame contribution", "Flow route", "TREND_TO_ARMED", "FLOW_PROMOTE_ARMED", "HARD_BLOCKERS: pass current=none", "No order was placed"} {
+	for _, want := range []string{"BTC GATE DIAGNOSTIC", "Current: WATCH", "Diagnostic only", "Gap to ARMED", "Gap to ALLOWED", "score gap", "Hard/soft blockers", "Frame contribution", "Flow route", "TREND_TO_ARMED", "FLOW_PROMOTE_ARMED", "HARD_BLOCKERS: pass current=none", "No order was placed"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
+		}
+	}
+}
+
+func TestBTCGateDiagnosticMarkdownShowsHardBlockers(t *testing.T) {
+	a := btcGateDiagnosticTestAnalysis()
+	a.MarketRegime = "PANIC_SELLING"
+	a.FallingKnifeRisk = agent1.High
+	report := buildBTCGateDiagnosticReport(readinessTestConfig(), a)
+	md := btcGateDiagnosticMarkdown(report)
+	for _, want := range []string{"hard: regime PANIC_SELLING", "hard: falling knife high", "HARD_BLOCKERS: fail"} {
+		if !strings.Contains(md, want) {
+			t.Fatalf("markdown missing hard blocker %q:\n%s", want, md)
 		}
 	}
 }

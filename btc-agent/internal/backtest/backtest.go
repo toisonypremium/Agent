@@ -53,6 +53,7 @@ type Result struct {
 	AssetFlowEntryAudit           AssetFlowEntryAuditResult     `json:"asset_flow_entry_audit"`
 	NearMissLayerAudit            NearMissLayerAuditResult      `json:"near_miss_layer_audit"`
 	ChecklistPassCountAudit       ChecklistPassCountAuditResult `json:"checklist_pass_count_audit"`
+	Agent2OpportunityAudit        Agent2OpportunityAuditResult  `json:"agent2_opportunity_audit"`
 	LayerAudit                    LayerAuditResult              `json:"layer_audit"`
 	ExitAudit                     ExitAuditResult               `json:"exit_audit"`
 	Summary                       string                        `json:"summary"`
@@ -560,7 +561,21 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("17. Agent 2 Invalidation/Layer Audit\n")
+	b.WriteString("17. Agent 2 Opportunity Audit\n")
+	if !r.Agent2OpportunityAudit.Enabled {
+		b.WriteString("- Agent2 opportunity audit: skipped / not enough aligned candles\n\n")
+	} else {
+		b.WriteString("- " + r.Agent2OpportunityAudit.Summary + "\n")
+		b.WriteString("- Diagnostic only: explains why ACTIVE_LIMIT is missing; does not loosen rules or place orders.\n")
+		b.WriteString("| Symbol | Samples | Active | Near-miss | BTC wait | Flow miss | Discount fail | RR fail | Avg score | Avg gap | Avg RR gap | Top missing | Verdict | Action |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|\n")
+		for _, row := range r.Agent2OpportunityAudit.Rows {
+			b.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %.1f%% | %.1f%% | %.1f%% | %.1f%% | %.2f | %.1f%% | %.2f | %s | %s | %s |\n", row.Symbol, row.Samples, row.ActiveLimitCount, row.NearMissCount, row.BTCWaitRate*100, row.FlowMissingRate*100, row.DiscountFailRate*100, row.RewardRiskFailRate*100, row.AvgSetupScore, row.AvgDiscountGapPct*100, row.AvgRewardRiskGap, emptyDash(row.TopMissingGate), row.ResearchOnlyVerdict, row.RecommendedAction))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("18. Agent 2 Invalidation/Layer Audit\n")
 	if !r.LayerAudit.Enabled {
 		b.WriteString("- Layer audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -577,7 +592,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("18. Agent 2 Exit / Take-Profit Audit\n")
+	b.WriteString("19. Agent 2 Exit / Take-Profit Audit\n")
 	if !r.ExitAudit.Enabled {
 		b.WriteString("- Exit audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -594,7 +609,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("19. Kết luận\n")
+	b.WriteString("20. Kết luận\n")
 	b.WriteString("- " + r.Summary + "\n")
 	b.WriteString("- Đây là audit rule bằng dữ liệu quá khứ, không phải cam kết lợi nhuận. Mẫu ít thì chỉ dùng để debug rule. Agent 2 simulation chưa mô hình take-profit.\n")
 	return b.String()

@@ -467,6 +467,12 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 	} else {
 		result.ChecklistPassCountAudit = checklistAudit
 	}
+	opportunityAudit, err := backtest.RunAgent2OpportunityAudit(cfg, btc, assets, backtest.Agent2OpportunityAuditConfig{})
+	if err != nil {
+		result.Agent2OpportunityAudit = backtest.Agent2OpportunityAuditResult{Enabled: false, Summary: err.Error()}
+	} else {
+		result.Agent2OpportunityAudit = opportunityAudit
+	}
 	audit, err := backtest.RunLayerAudit(cfg, btc, assets, backtest.LayerAuditConfig{})
 	if err != nil {
 		result.LayerAudit = backtest.LayerAuditResult{Enabled: false, Summary: err.Error()}
@@ -2283,10 +2289,45 @@ Agent 2
 	} else {
 		for _, asset := range plan.Assets {
 			out += fmt.Sprintf("- %s: %s | rank %d score %.2f | asset flow %s %.2f | RR %.2f | %s\n", asset.Symbol, asset.State, asset.RotationRank, asset.RotationScore, asset.AssetFlowBias, asset.AssetFlowScore, asset.RewardRisk, asset.Reason)
+			if unlock := assetUnlockPath(asset); unlock != "" {
+				out += "  unlock: " + unlock + "\n"
+			}
 		}
 	}
 	out += fmt.Sprintf("- Open paper orders: %d", len(orders))
 	return out, nil
+}
+
+func assetUnlockPath(asset agent2.AssetPlan) string {
+	missing := []string{}
+	for _, gate := range asset.SetupGates {
+		if gate.Pass {
+			continue
+		}
+		switch gate.Name {
+		case agent2.EntryCheckAssetFlowEntry, agent2.EntryCheckMMAccumulation:
+			missing = append(missing, "flow reclaim/absorption")
+		case agent2.EntryCheckDiscountZone:
+			missing = append(missing, fmt.Sprintf("price closer to support (gap %.1f%%)", asset.DiscountGapPct*100))
+		case agent2.EntryCheckRewardRisk:
+			missing = append(missing, fmt.Sprintf("RR >= target (now %.2f)", asset.RewardRisk))
+		case agent2.EntryCheckFallingKnife:
+			missing = append(missing, "falling-knife clears")
+		case agent2.EntryCheckRotationRank, agent2.EntryCheckRotationScore:
+			missing = append(missing, "rotation improves")
+		}
+	}
+	for _, reason := range asset.Reasons {
+		if reason.Code == agent2.ReasonBTCPermission || reason.Code == agent2.ReasonBTCDowntrend {
+			missing = append([]string{"BTC permission ALLOWED"}, missing...)
+			break
+		}
+	}
+	missing = uniqueStringsMain(missing)
+	if len(missing) > 4 {
+		missing = missing[:4]
+	}
+	return strings.Join(missing, "; ")
 }
 
 func runReconcileLiveOrders(ctx context.Context, cfg config.Config, db *storage.DB) error {

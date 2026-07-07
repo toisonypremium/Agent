@@ -46,6 +46,26 @@ func TestBuildRecommendationsOpportunityAudit(t *testing.T) {
 	}
 }
 
+func TestBuildRecommendationsStrategyIntelligenceIsDiagnosticOnly(t *testing.T) {
+	result := BuildRecommendations(backtest.Result{Agent2OpportunityAudit: backtest.Agent2OpportunityAuditResult{Enabled: true, Rows: []backtest.Agent2OpportunityAuditRow{{Symbol: "ETHUSDT", Samples: 12, TopMissingGate: "REWARD_RISK"}}}})
+	found := false
+	for _, rec := range result.Recommendations {
+		if rec.Area != AreaStrategyIntelligence {
+			continue
+		}
+		found = true
+		text := rec.Recommendation + " " + rec.ManualAction
+		for _, want := range []string{"Manual review required", "no live config changed", "no order authority changed", "WATCH/SCOUT/ARMED must not create orders"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("strategy intelligence recommendation missing %q: %+v", want, rec)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing strategy intelligence recommendation: %+v", result.Recommendations)
+	}
+}
+
 func TestBuildRecommendationsLayerAndExitCandidates(t *testing.T) {
 	result := BuildRecommendations(backtest.Result{
 		LayerAudit: backtest.LayerAuditResult{Enabled: true, Rows: []backtest.LayerAuditRow{{Symbol: "ETHUSDT", InvalidationBuffer: 0.03, LayerDepthMultiplier: 1.25, OrdersPlaced: 12, OrdersFilled: 8, FinalPnL: 20, MaxDrawdown: -0.05, Verdict: "CANDIDATE"}}},

@@ -75,7 +75,7 @@ func TestMarkdownContainsAuditSections(t *testing.T) {
 	got.LayerAudit = LayerAuditResult{Enabled: true, Summary: "layer audit test", Rows: []LayerAuditRow{{Symbol: "ETHUSDT", InvalidationBuffer: 0.015, LayerDepthMultiplier: 1, PlansCreated: 1, OrdersFilled: 1, Verdict: "WATCH"}}}
 	got.ExitAudit = ExitAuditResult{Enabled: true, Summary: "exit audit test", Rows: []ExitAuditRow{{Symbol: "ETHUSDT", TakeProfitPct: 0.03, TimeStopDays: 3, PlansCreated: 1, OrdersFilled: 1, TakeProfits: 1, Verdict: "WATCH"}}}
 	md = Markdown(got)
-	for _, want := range []string{"BTC FLOW BACKTEST / AUDIT", "Detector params", "Flow bias counts", "Forward returns", "Drawdown audit", "Agent 2 Layer Simulation", "Diagnostics", "Agent 1 permissions", "Top asset block reasons", "Agent 2 Asset Flow Entry Forward Audit", "Agent 2 Near-Miss Forced Layer Mechanics Audit", "Agent 2 Invalidation/Layer Audit", "Agent 2 Exit / Take-Profit Audit"} {
+	for _, want := range []string{"BTC FLOW BACKTEST / AUDIT", "Detector params", "Flow bias counts", "Forward returns", "Drawdown audit", "Agent 2 Layer Simulation", "Diagnostics", "Agent 1 permissions", "Top asset block reasons", "Agent 2 Asset Flow Entry Forward Audit", "Agent 2 Near-Miss Forced Layer Mechanics Audit", "Agent 2 Invalidation/Layer Audit", "Agent 2 Exit / Take-Profit Audit", "Strategy Intelligence Summary", "Research only; no live config changed; no order authority changed"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)
 		}

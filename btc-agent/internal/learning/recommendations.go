@@ -9,13 +9,14 @@ import (
 )
 
 const (
-	AreaFlowParams    = "FLOW_PARAMS"
-	AreaBTCPermission = "BTC_PERMISSION"
-	AreaWatchlist     = "WATCHLIST"
-	AreaChecklist     = "CHECKLIST"
-	AreaLayering      = "LAYERING"
-	AreaExit          = "EXIT"
-	AreaDataQuality   = "DATA_QUALITY"
+	AreaFlowParams           = "FLOW_PARAMS"
+	AreaBTCPermission        = "BTC_PERMISSION"
+	AreaWatchlist            = "WATCHLIST"
+	AreaChecklist            = "CHECKLIST"
+	AreaLayering             = "LAYERING"
+	AreaExit                 = "EXIT"
+	AreaStrategyIntelligence = "STRATEGY_INTELLIGENCE"
+	AreaDataQuality          = "DATA_QUALITY"
 
 	ConfidenceLow    = "LOW"
 	ConfidenceMedium = "MEDIUM"
@@ -55,6 +56,7 @@ func BuildRecommendations(result backtest.Result) RecommendationResult {
 	out.Recommendations = append(out.Recommendations, watchlistRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, checklistRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, opportunityRecommendations(result)...)
+	out.Recommendations = append(out.Recommendations, strategyIntelligenceRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, layerRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, exitRecommendations(result)...)
 	if len(out.Recommendations) == 0 {
@@ -209,6 +211,47 @@ func opportunityRecommendations(result backtest.Result) []Recommendation {
 	return nil
 }
 
+func strategyIntelligenceRecommendations(result backtest.Result) []Recommendation {
+	if !result.Agent2OpportunityAudit.Enabled && !result.BTCPermissionAudit.Enabled && !result.ExitAudit.Enabled {
+		return nil
+	}
+	evidence := []Evidence{}
+	if result.BTCPermissionAudit.Enabled && len(result.BTCPermissionAudit.Blockers) > 0 {
+		top := result.BTCPermissionAudit.Blockers[0]
+		evidence = append(evidence, Evidence{Metric: "btc_top_blocker", Value: top.Blocker, Note: fmt.Sprintf("count=%d rate=%s", top.Count, pct(top.Rate))})
+	}
+	if result.Agent2OpportunityAudit.Enabled {
+		for _, row := range result.Agent2OpportunityAudit.Rows {
+			if row.Samples <= 0 {
+				continue
+			}
+			evidence = append(evidence, Evidence{Metric: "agent2_top_missing", Value: row.TopMissingGate, Note: row.Symbol})
+			break
+		}
+	}
+	if result.ExitAudit.Enabled {
+		for _, row := range result.ExitAudit.Rows {
+			if row.OrdersPlaced <= 0 {
+				continue
+			}
+			evidence = append(evidence, Evidence{Metric: "exit_research", Value: row.Verdict, Note: row.Symbol})
+			break
+		}
+	}
+	if len(evidence) == 0 {
+		return nil
+	}
+	return []Recommendation{{
+		Area:           AreaStrategyIntelligence,
+		Title:          "Use strategy intelligence as diagnostic context only",
+		Recommendation: "Prioritize BTC gate gaps, Agent2 closest-unlock gates, and exit research in the next manual review. Do not treat this as trade authority.",
+		ManualAction:   "Manual review required; no live config changed; no order authority changed; WATCH/SCOUT/ARMED must not create orders; do not place take-profit orders automatically.",
+		Confidence:     ConfidenceMedium,
+		Severity:       SeverityWatch,
+		Evidence:       evidence,
+	}}
+}
+
 func layerRecommendations(result backtest.Result) []Recommendation {
 	if !result.LayerAudit.Enabled {
 		return nil
@@ -242,7 +285,7 @@ func exitRecommendations(result backtest.Result) []Recommendation {
 			Area:           AreaExit,
 			Title:          "Review exit settings for " + row.Symbol,
 			Recommendation: "Exit audit found a candidate take-profit/time-stop combination for manual review.",
-			ManualAction:   "Review candidate against invalidation behavior and position-management policy; do not place take-profit orders automatically.",
+			ManualAction:   "Review candidate against invalidation behavior and position-management policy; research-only/manual review required; no live config changed; do not place take-profit orders automatically.",
 			Confidence:     confidenceByCount(row.OrdersPlaced),
 			Severity:       SeverityActionable,
 			Evidence:       []Evidence{{Metric: "symbol", Value: row.Symbol}, {Metric: "take_profit", Value: pct(row.TakeProfitPct)}, {Metric: "time_stop_days", Value: fmt.Sprint(row.TimeStopDays)}, {Metric: "take_profits", Value: fmt.Sprint(row.TakeProfits)}, {Metric: "invalidations", Value: fmt.Sprint(row.Invalidations)}, {Metric: "final_pnl", Value: fmt.Sprintf("%.2f", row.FinalPnL)}, {Metric: "max_drawdown", Value: pct(row.MaxDrawdown)}},

@@ -83,7 +83,7 @@ func run(ctx context.Context, args []string) error {
 	case "run-daily":
 		return runDaily(ctx, cfg, db)
 	case "status":
-		status, err := formatStatus(db)
+		status, err := formatStatus(cfg, db)
 		if err != nil {
 			return err
 		}
@@ -813,7 +813,7 @@ func runAIWatch(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	if err != nil {
 		return err
 	}
-	status, _ := formatStatus(db)
+	status, _ := formatStatus(cfg, db)
 	snap := aiagent.Snapshot{Analysis: analysis, Plan: p, Status: status}
 	var caller aiagent.JSONCaller
 	if cfg.AI.Enabled {
@@ -2291,7 +2291,7 @@ func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 	log.Printf("telegram sent ok [%s] msg_id=%d", label, result.MessageID)
 }
 
-func formatStatus(db *storage.DB) (string, error) {
+func formatStatus(cfg config.Config, db *storage.DB) (string, error) {
 	analysis, err := db.LatestAnalysis()
 	if err != nil {
 		return "no analysis yet; run fetch then analyze", nil
@@ -2350,6 +2350,7 @@ Agent 2
 			if unlock := assetUnlockPath(asset); unlock != "" {
 				out += "  unlock: " + unlock + "\n"
 			}
+			out += "  " + agent2.StrategyIntelligenceLine(cfg, asset, analysis.ActionPermission) + "\n"
 		}
 	}
 	out += fmt.Sprintf("- Open paper orders: %d", len(orders))

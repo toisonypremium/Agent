@@ -203,12 +203,69 @@ func (d *DB) SaveOrders(orders []agent2.PaperOrder) error {
 		if err == nil && existingStatus != "OPEN" {
 			continue
 		}
+		if err == sql.ErrNoRows && strings.EqualFold(o.Status, "OPEN") {
+			exists, err := d.HasEquivalentOpenPaperOrder(o.Symbol, o.Layer, o.Price)
+			if err != nil {
+				return err
+			}
+			if exists {
+				continue
+			}
+		}
 		_, err = d.Exec(`INSERT OR REPLACE INTO paper_orders(id,timestamp,symbol,side,layer,price,quantity,notional,status,expires_at,invalidation_price,reason) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, o.ID, o.Timestamp.Unix(), o.Symbol, o.Side, o.Layer, o.Price, o.Quantity, o.Notional, o.Status, o.ExpiresAt.Unix(), o.InvalidationPrice, o.Reason)
 		if err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (d *DB) HasEquivalentOpenPaperOrder(symbol string, layer int, price float64) (bool, error) {
+	rows, err := d.Query(`SELECT price FROM paper_orders WHERE status='OPEN' AND UPPER(symbol)=? AND layer=?`, strings.ToUpper(symbol), layer)
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var existingPrice float64
+		if err := rows.Scan(&existingPrice); err != nil {
+			return false, err
+		}
+		if absFloat(existingPrice-price) <= 1e-9 {
+			return true, nil
+		}
+	}
+	return false, rows.Err()
+}
+
+func (d *DB) UpdatePaperOrderStatus(id, status, reason string) error {
+	_, err := d.Exec(`UPDATE paper_orders SET status=?, reason=? WHERE id=?`, status, reason, id)
+	return err
+}
+
+func (d *DB) PaperOrderStatusCounts() (map[string]int, error) {
+	rows, err := d.Query(`SELECT status, COUNT(*) FROM paper_orders GROUP BY status`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var status string
+		var count int
+		if err := rows.Scan(&status, &count); err != nil {
+			return nil, err
+		}
+		out[status] = count
+	}
+	return out, rows.Err()
+}
+
+func absFloat(v float64) float64 {
+	if v < 0 {
+		return -v
+	}
+	return v
 }
 
 func (d *DB) OpenPaperOrders() ([]agent2.PaperOrder, error) {
@@ -257,12 +314,64 @@ func (d *DB) SaveManagedLiveOrder(clientOrderID, orderID, instID, symbol, side, 
 	return err
 }
 
+func (d *DB) ReserveManagedLiveOrder(clientOrderID string, desired liveguard.ManagedDesiredOrder, reason string) error {
+	if clientOrderID == "" {
+		return fmt.Errorf("client_order_id required")
+	}
+	now := time.Now().Unix()
+	expiresAt := int64(0)
+	if !desired.ExpiresAt.IsZero() {
+		expiresAt = desired.ExpiresAt.Unix()
+	}
+	_, err := d.Exec(
+		`INSERT INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		clientOrderID, "", desired.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusPlanned, now, now, desired.LayerIndex, desired.Source, desired.InvalidationPrice, expiresAt, desired.DecisionReason, "planned: "+reason,
+	)
+	return err
+}
+
+func (d *DB) MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error {
+	if clientOrderID == "" {
+		return fmt.Errorf("client_order_id required")
+	}
+	res, err := d.Exec(`UPDATE live_orders SET order_id=CASE WHEN ?<>'' THEN ? ELSE order_id END, inst_id=CASE WHEN ?<>'' THEN ? ELSE inst_id END, status=?, updated_at=?, last_management_action=? WHERE client_order_id=?`, result.OrderID, result.OrderID, result.InstID, result.InstID, live.StatusSubmitted, time.Now().Unix(), "submitted", clientOrderID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("live order reservation not found: client_order_id=%q", clientOrderID)
+	}
+	return nil
+}
+
+func (d *DB) MarkManagedLiveOrderRejected(clientOrderID string, reason string) error {
+	if clientOrderID == "" {
+		return fmt.Errorf("client_order_id required")
+	}
+	res, err := d.Exec(`UPDATE live_orders SET status=?, updated_at=?, last_management_action=? WHERE client_order_id=?`, live.StatusRejected, time.Now().Unix(), "rejected: "+reason, clientOrderID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("live order reservation not found: client_order_id=%q", clientOrderID)
+	}
+	return nil
+}
+
 func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
 	return d.OpenLiveOrdersDetailed()
 }
 
 func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
-	rows, err := d.Query(`SELECT client_order_id, order_id, inst_id, symbol, type, side, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action FROM live_orders WHERE status IN ('LIVE_OPEN', 'PARTIALLY_FILLED', 'SUBMITTED')`)
+	rows, err := d.Query(`SELECT client_order_id, order_id, inst_id, symbol, type, side, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action FROM live_orders WHERE status IN ('PLANNED', 'SUBMITTED', 'PARTIAL_FILL', 'LIVE_OPEN', 'PARTIALLY_FILLED')`)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +418,7 @@ func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
 }
 
 func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
+	o.Status = live.NormalizeOrderStatus(o.Status)
 	updatedAt := o.UpdatedAt
 	if updatedAt == 0 {
 		updatedAt = time.Now().Unix()

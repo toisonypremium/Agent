@@ -27,6 +27,7 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent fetch --config config.yaml
 ./bin/btc-agent analyze --config config.yaml
 ./bin/btc-agent plan --config config.yaml
+./bin/btc-agent paper-manager --config config.yaml
 ./bin/btc-agent run-daily --config config.yaml
 ./bin/btc-agent run-ai-watch --config config.yaml
 ./bin/btc-agent status --config config.yaml
@@ -79,6 +80,14 @@ Plan states:
 - `ACTIVE_LIMIT`: strict final gates passed and valid layers exist. Only this state can create paper/live-proof orders.
 
 `OrdersFromPlan` emits orders only for `ACTIVE_LIMIT`. `SCOUT` and `ARMED` are diagnostic/planning states, not execution authority.
+
+## Paper order manager
+
+`paper-manager` advances paper-only orders using stored candles and the latest deterministic plan. It can mark paper orders `FILLED`, `EXPIRED`, `CANCELLED`, or `INVALIDATED`, writes `reports/paper_manager_latest.md/json`, and never calls live exchange order or cancel endpoints.
+
+## Disabled live order manager
+
+Managed live execution remains disabled by default. When explicitly enabled with all live gates, it uses DB lifecycle states `PLANNED`, `SUBMITTED`, `PARTIAL_FILL`, `FILLED`, `CANCELLED`, `EXPIRED`, and `REJECTED`; new managed submissions are pre-reserved in SQLite before exchange submit. Normal verification and tests use fake exchange paths and do not place real orders.
 
 ## Liquidity Flow Engine
 

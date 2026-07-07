@@ -52,13 +52,42 @@ type CancelOrderResult struct {
 }
 
 const (
-	StatusLiveOpen                = "LIVE_OPEN"
-	StatusPartiallyFilled         = "PARTIALLY_FILLED"
+	StatusPlanned                 = "PLANNED"
+	StatusSubmitted               = "SUBMITTED"
+	StatusPartialFill             = "PARTIAL_FILL"
 	StatusFilled                  = "FILLED"
-	StatusCanceled                = "CANCELED"
+	StatusCancelled               = "CANCELLED"
+	StatusExpired                 = "EXPIRED"
 	StatusRejected                = "REJECTED"
 	StatusUnknownNeedsManualCheck = "UNKNOWN_NEEDS_MANUAL_CHECK"
+
+	// Legacy status names kept for existing DB rows and exchange compatibility.
+	StatusLiveOpen        = "LIVE_OPEN"
+	StatusPartiallyFilled = "PARTIALLY_FILLED"
+	StatusCanceled        = "CANCELED"
 )
+
+func NormalizeOrderStatus(status string) string {
+	switch status {
+	case StatusLiveOpen:
+		return StatusSubmitted
+	case StatusPartiallyFilled:
+		return StatusPartialFill
+	case StatusCanceled:
+		return StatusCancelled
+	default:
+		return status
+	}
+}
+
+func IsOpenStatus(status string) bool {
+	switch NormalizeOrderStatus(status) {
+	case StatusPlanned, StatusSubmitted, StatusPartialFill:
+		return true
+	default:
+		return false
+	}
+}
 
 type OrderStatus struct {
 	InstID               string  `json:"inst_id"`

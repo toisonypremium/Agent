@@ -3,6 +3,7 @@ package liveguard
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -18,16 +19,47 @@ import (
 type fakeManagedExchange struct {
 	placed   []live.LimitOrderRequest
 	canceled []live.CancelOrderRequest
+	placeErr error
 }
 
 func (f *fakeManagedExchange) PlaceSpotLimitOrder(ctx context.Context, req live.LimitOrderRequest) (live.OrderResult, error) {
 	f.placed = append(f.placed, req)
+	if f.placeErr != nil {
+		return live.OrderResult{InstID: req.InstID, ClientOrderID: req.ClientOrderID}, f.placeErr
+	}
 	return live.OrderResult{InstID: req.InstID, OrderID: "ord", ClientOrderID: req.ClientOrderID, Submitted: true}, nil
 }
 
 func (f *fakeManagedExchange) CancelOrder(ctx context.Context, req live.CancelOrderRequest) (live.CancelOrderResult, error) {
 	f.canceled = append(f.canceled, req)
 	return live.CancelOrderResult{InstID: req.InstID, OrderID: req.OrderID, ClientOrderID: req.ClientOrderID, Canceled: true, Code: "0"}, nil
+}
+
+type fakeManagedRecorder struct {
+	reserveErr   error
+	reserved     []string
+	submitted    []string
+	rejected     []string
+	rejectReason []string
+}
+
+func (f *fakeManagedRecorder) ReserveManagedLiveOrder(clientOrderID string, desired ManagedDesiredOrder, reason string) error {
+	if f.reserveErr != nil {
+		return f.reserveErr
+	}
+	f.reserved = append(f.reserved, clientOrderID)
+	return nil
+}
+
+func (f *fakeManagedRecorder) MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error {
+	f.submitted = append(f.submitted, clientOrderID)
+	return nil
+}
+
+func (f *fakeManagedRecorder) MarkManagedLiveOrderRejected(clientOrderID string, reason string) error {
+	f.rejected = append(f.rejected, clientOrderID)
+	f.rejectReason = append(f.rejectReason, reason)
+	return nil
 }
 
 func TestManageLiveOrdersAllowsMultipleAssetsAndLayers(t *testing.T) {
@@ -98,6 +130,45 @@ func managedPlan() agent2.Plan {
 		{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, DiscountZone: market.Zone{Low: 90, High: 100}, Invalidation: 88, Reason: "eth active", Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}, {Index: 2, Price: 95, Notional: 10}}},
 		{Symbol: "SOLUSDT", State: agent2.StateActiveLimit, DiscountZone: market.Zone{Low: 45, High: 50}, Invalidation: 44, Reason: "sol active", Layers: []agent2.Layer{{Index: 1, Price: 50, Notional: 10}, {Index: 2, Price: 47, Notional: 10}}},
 	}}
+}
+
+func TestManageLiveOrdersWithRecorderReservesBeforeSubmit(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{}
+	rec := &fakeManagedRecorder{}
+	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	if got.Status != ManagedCycleCompleted {
+		t.Fatalf("status=%s summary=%s", got.Status, got.Summary)
+	}
+	if len(rec.reserved) != 4 || len(rec.submitted) != 4 || len(ex.placed) != 4 {
+		t.Fatalf("reserve=%d submitted=%d placed=%d result=%+v", len(rec.reserved), len(rec.submitted), len(ex.placed), got)
+	}
+}
+
+func TestManageLiveOrdersWithRecorderBlocksWhenReserveFails(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{}
+	rec := &fakeManagedRecorder{reserveErr: fmt.Errorf("duplicate client id")}
+	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	if got.Status != ManagedCyclePartial || len(ex.placed) != 0 || len(got.Blocked) == 0 {
+		t.Fatalf("reserve failure should block before exchange call: placed=%d result=%+v", len(ex.placed), got)
+	}
+}
+
+func TestManageLiveOrdersWithRecorderMarksRejectedOnSubmitError(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{placeErr: fmt.Errorf("exchange rejected api_secret=bad")}
+	rec := &fakeManagedRecorder{}
+	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	if got.Status != ManagedCyclePartial || len(rec.rejected) == 0 || len(got.Blocked) == 0 {
+		t.Fatalf("submit error should mark rejected: %+v recorder=%+v", got, rec)
+	}
 }
 
 func TestManageLiveOrdersDryRunDoesNotCallExchangeWhenHalted(t *testing.T) {

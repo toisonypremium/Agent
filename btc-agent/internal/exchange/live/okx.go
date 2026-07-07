@@ -502,13 +502,13 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 		status := StatusUnknownNeedsManualCheck
 		switch strings.ToLower(item.State) {
 		case "live":
-			status = StatusLiveOpen
+			status = StatusSubmitted
 		case "partially_filled":
-			status = StatusPartiallyFilled
+			status = StatusPartialFill
 		case "filled":
 			status = StatusFilled
 		case "canceled":
-			status = StatusCanceled
+			status = StatusCancelled
 		case "rejected":
 			status = StatusRejected
 		}

@@ -1,12 +1,14 @@
 package storage
 
 import (
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
 
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/liveguard"
 )
 
 func TestSaveOrdersPreservesClosedPaperOrder(t *testing.T) {
@@ -37,6 +39,69 @@ func TestSaveOrdersPreservesClosedPaperOrder(t *testing.T) {
 	}
 	if status != "FILLED" || price != 100 || reason != "filled already" {
 		t.Fatalf("closed paper order overwritten: status=%s price=%v reason=%s", status, price, reason)
+	}
+}
+
+func TestManagedLiveOrderReservationLifecycle(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	desired := liveguard.ManagedDesiredOrder{Symbol: "ETHUSDT", InstID: "ETH-USDT", LayerIndex: 1, Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, Source: "test", InvalidationPrice: 90, DecisionReason: "active", ExpiresAt: time.Unix(1700003600, 0)}
+	if err := db.ReserveManagedLiveOrder("client-r", desired, "test reserve"); err != nil {
+		t.Fatalf("reserve: %v", err)
+	}
+	if err := db.ReserveManagedLiveOrder("client-r", desired, "duplicate"); err == nil {
+		t.Fatal("expected duplicate reservation error")
+	}
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Status != live.StatusPlanned || open[0].LayerIndex != 1 || open[0].ExpiresAt != desired.ExpiresAt.Unix() {
+		t.Fatalf("bad planned order: %+v", open)
+	}
+	if err := db.MarkManagedLiveOrderSubmitted("client-r", live.OrderResult{InstID: "ETH-USDT", OrderID: "ord-r", ClientOrderID: "client-r", Submitted: true}); err != nil {
+		t.Fatalf("mark submitted: %v", err)
+	}
+	open, err = db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Status != live.StatusSubmitted || open[0].OrderID != "ord-r" {
+		t.Fatalf("bad submitted order: %+v", open)
+	}
+	if err := db.MarkManagedLiveOrderRejected("client-r", "test reject"); err != nil {
+		t.Fatalf("mark rejected: %v", err)
+	}
+	open, err = db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 0 {
+		t.Fatalf("rejected order should not be open: %+v", open)
+	}
+}
+
+func TestOpenLiveOrdersDetailedIncludesCanonicalAndLegacyOpenStatuses(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	statuses := []string{live.StatusPlanned, live.StatusSubmitted, live.StatusPartialFill, live.StatusLiveOpen, live.StatusPartiallyFilled, live.StatusFilled, live.StatusCancelled, live.StatusRejected}
+	for i, status := range statuses {
+		if err := db.SaveManagedLiveOrder(fmt.Sprintf("client-%d", i), fmt.Sprintf("order-%d", i), "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.02, 2, status, live.OrderStatus{LayerIndex: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 5 {
+		t.Fatalf("open len=%d want 5: %+v", len(open), open)
 	}
 }
 
@@ -130,8 +195,8 @@ func TestSaveLiveOrderStatusCanMatchByOrderID(t *testing.T) {
 	if err := db.QueryRow(`SELECT status FROM live_orders WHERE client_order_id=?`, "client-2").Scan(&savedStatus); err != nil {
 		t.Fatal(err)
 	}
-	if savedStatus != live.StatusCanceled {
-		t.Fatalf("status=%s want %s", savedStatus, live.StatusCanceled)
+	if savedStatus != live.StatusCancelled {
+		t.Fatalf("status=%s want %s", savedStatus, live.StatusCancelled)
 	}
 }
 

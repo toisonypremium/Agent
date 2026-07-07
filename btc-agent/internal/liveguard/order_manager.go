@@ -28,6 +28,12 @@ type OrderCanceler interface {
 	CancelOrder(ctx context.Context, req live.CancelOrderRequest) (live.CancelOrderResult, error)
 }
 
+type ManagedOrderRecorder interface {
+	ReserveManagedLiveOrder(clientOrderID string, desired ManagedDesiredOrder, reason string) error
+	MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error
+	MarkManagedLiveOrderRejected(clientOrderID string, reason string) error
+}
+
 type ManagedDesiredOrder struct {
 	Symbol            string      `json:"symbol"`
 	InstID            string      `json:"inst_id"`
@@ -106,10 +112,14 @@ type ManagedCoinSummary struct {
 }
 
 func ManageLiveOrders(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader) ManagedCycleResult {
-	return ManageLiveOrdersDryRun(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, false)
+	return ManageLiveOrdersWithRecorder(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, nil, false)
 }
 
 func ManageLiveOrdersDryRun(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader, dryRun bool) ManagedCycleResult {
+	return ManageLiveOrdersWithRecorder(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, nil, dryRun)
+}
+
+func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
 	result := ManagedCycleResult{GeneratedAt: time.Now(), Status: ManagedCycleCompleted, PlanState: plan.State, Desired: []ManagedDesiredOrder{}, DryRun: dryRun}
 	if halted, err := haltedState(haltReader); err != nil || halted {
 		result.Reasons = append(result.Reasons, "operator halt active")
@@ -228,17 +238,39 @@ func ManageLiveOrdersDryRun(ctx context.Context, cfg config.Config, plan agent2.
 			openNotionalTotal += desiredOrder.Notional
 			continue
 		}
-		req := live.LimitOrderRequest{InstID: desiredOrder.InstID, Side: strings.ToLower(desiredOrder.Side), Price: desiredOrder.Price, Quantity: desiredOrder.Quantity, PostOnly: desiredOrder.PostOnly, ClientOrderID: clientOrderID(desiredOrder.Symbol, cfg.Live.CanaryMode)}
+		clientID := clientOrderID(desiredOrder.Symbol, cfg.Live.CanaryMode)
+		if recorder != nil {
+			if err := recorder.ReserveManagedLiveOrder(clientID, desiredOrder, decision.Reason); err != nil {
+				decision.Error = err.Error()
+				decision.Reason = "reserve live order failed"
+				result.Blocked = append(result.Blocked, decision)
+				result.Status = ManagedCyclePartial
+				continue
+			}
+		}
+		req := live.LimitOrderRequest{InstID: desiredOrder.InstID, Side: strings.ToLower(desiredOrder.Side), Price: desiredOrder.Price, Quantity: desiredOrder.Quantity, PostOnly: desiredOrder.PostOnly, ClientOrderID: clientID}
 		placed, err := placer.PlaceSpotLimitOrder(ctx, req)
 		decision.PlaceResult = placed
 		if err != nil {
-			decision.Error = err.Error()
+			safeErr := sanitizeExchangeError(cfg, err)
+			if recorder != nil {
+				_ = recorder.MarkManagedLiveOrderRejected(clientID, safeErr)
+			}
+			decision.Error = safeErr
 			result.Blocked = append(result.Blocked, decision)
 			result.Status = ManagedCyclePartial
 			continue
 		}
+		if recorder != nil {
+			if err := recorder.MarkManagedLiveOrderSubmitted(clientID, placed); err != nil {
+				decision.Error = err.Error()
+				result.Blocked = append(result.Blocked, decision)
+				result.Status = ManagedCyclePartial
+				continue
+			}
+		}
 		result.Placed = append(result.Placed, decision)
-		openByKey[key] = live.OrderStatus{Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Notional: desiredOrder.Notional}
+		openByKey[key] = live.OrderStatus{Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Notional: desiredOrder.Notional, ClientOrderID: clientID, OrderID: placed.OrderID, Status: live.StatusSubmitted}
 		openNotionalBySymbol[desiredOrder.Symbol] += desiredOrder.Notional
 		openNotionalTotal += desiredOrder.Notional
 	}

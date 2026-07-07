@@ -54,6 +54,7 @@ func BuildRecommendations(result backtest.Result) RecommendationResult {
 	out.Recommendations = append(out.Recommendations, btcPermissionRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, watchlistRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, checklistRecommendations(result)...)
+	out.Recommendations = append(out.Recommendations, opportunityRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, layerRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, exitRecommendations(result)...)
 	if len(out.Recommendations) == 0 {
@@ -171,6 +172,38 @@ func checklistRecommendations(result backtest.Result) []Recommendation {
 			Confidence:     confidenceByCount(row.Samples),
 			Severity:       SeverityWatch,
 			Evidence:       []Evidence{{Metric: "symbol", Value: row.Symbol}, {Metric: "near_actionable", Value: fmt.Sprint(row.NearActionableCount)}, {Metric: "samples", Value: fmt.Sprint(row.Samples)}, {Metric: "top_blocker", Value: blocker}, {Metric: "hard_fail_rate", Value: pct(row.HardFailRate)}},
+		}}
+	}
+	return nil
+}
+
+func opportunityRecommendations(result backtest.Result) []Recommendation {
+	if !result.Agent2OpportunityAudit.Enabled {
+		return nil
+	}
+	for _, row := range result.Agent2OpportunityAudit.Rows {
+		if row.Samples < 10 {
+			continue
+		}
+		severity := SeverityWatch
+		if row.ResearchOnlyVerdict == backtest.OpportunityVerdictTuneReview {
+			severity = SeverityActionable
+		}
+		return []Recommendation{{
+			Area:           AreaChecklist,
+			Title:          "Review Agent2 opportunity bottleneck for " + row.Symbol,
+			Recommendation: row.RecommendedAction,
+			ManualAction:   "Use backtest/learn evidence for manual review only; no live config was changed and WATCH/SCOUT/ARMED must not create orders.",
+			Confidence:     confidenceByCount(row.Samples),
+			Severity:       severity,
+			Evidence: []Evidence{
+				{Metric: "symbol", Value: row.Symbol},
+				{Metric: "samples", Value: fmt.Sprint(row.Samples)},
+				{Metric: "active_limit", Value: fmt.Sprint(row.ActiveLimitCount)},
+				{Metric: "near_miss", Value: fmt.Sprint(row.NearMissCount)},
+				{Metric: "top_missing", Value: row.TopMissingGate},
+				{Metric: "verdict", Value: row.ResearchOnlyVerdict},
+			},
 		}}
 	}
 	return nil

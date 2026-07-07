@@ -35,6 +35,17 @@ func TestBuildRecommendationsDataQualityFallback(t *testing.T) {
 	}
 }
 
+func TestBuildRecommendationsOpportunityAudit(t *testing.T) {
+	result := BuildRecommendations(backtest.Result{Agent2OpportunityAudit: backtest.Agent2OpportunityAuditResult{Enabled: true, Rows: []backtest.Agent2OpportunityAuditRow{{Symbol: "ETHUSDT", Samples: 20, NearMissCount: 12, TopMissingGate: "DISCOUNT_ZONE", RecommendedAction: "Many candidates are close to discount; review discount premium in backtest only before any config change.", ResearchOnlyVerdict: backtest.OpportunityVerdictTuneReview}}}})
+	if len(result.Recommendations) == 0 || result.Recommendations[0].Severity != SeverityActionable {
+		t.Fatalf("expected actionable opportunity recommendation: %+v", result.Recommendations)
+	}
+	text := result.Recommendations[0].Recommendation + " " + result.Recommendations[0].ManualAction
+	if !strings.Contains(text, "no live config was changed") {
+		t.Fatalf("recommendation must stay research-only: %+v", result.Recommendations[0])
+	}
+}
+
 func TestBuildRecommendationsLayerAndExitCandidates(t *testing.T) {
 	result := BuildRecommendations(backtest.Result{
 		LayerAudit: backtest.LayerAuditResult{Enabled: true, Rows: []backtest.LayerAuditRow{{Symbol: "ETHUSDT", InvalidationBuffer: 0.03, LayerDepthMultiplier: 1.25, OrdersPlaced: 12, OrdersFilled: 8, FinalPnL: 20, MaxDrawdown: -0.05, Verdict: "CANDIDATE"}}},

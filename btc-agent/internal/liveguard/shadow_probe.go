@@ -92,6 +92,11 @@ func BuildShadowProbeJournal(cfg config.Config, production agent1.MarketAnalysis
 	return j
 }
 
+// shadowProbeJournalMaxEntries is the maximum number of entries kept in
+// shadow_probe_journal.jsonl. Older entries are dropped when the cap is
+// exceeded so the file never grows unboundedly during 24/7 operation.
+const shadowProbeJournalMaxEntries = 200
+
 func SaveShadowProbeJournal(dir string, j ShadowProbeJournal) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
@@ -107,13 +112,45 @@ func SaveShadowProbeJournal(dir string, j ShadowProbeJournal) error {
 	if err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(dir, "shadow_probe_journal.jsonl"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+	journalPath := filepath.Join(dir, "shadow_probe_journal.jsonl")
+	return appendShadowProbeJournalCapped(journalPath, line, shadowProbeJournalMaxEntries)
+}
+
+// appendShadowProbeJournalCapped appends newLine to the journal file and
+// trims it to at most maxEntries lines so the file stays bounded.
+func appendShadowProbeJournalCapped(path string, newLine []byte, maxEntries int) error {
+	// Read existing entries.
+	var lines [][]byte
+	if data, err := os.ReadFile(path); err == nil && len(data) > 0 {
+		for _, l := range strings.Split(strings.TrimRight(string(data), "\n"), "\n") {
+			if l != "" {
+				lines = append(lines, []byte(l))
+			}
+		}
+	}
+	lines = append(lines, newLine)
+	// Trim oldest entries if over cap.
+	if len(lines) > maxEntries {
+		lines = lines[len(lines)-maxEntries:]
+	}
+	// Write atomically via temp file.
+	tmp := path + ".tmp"
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	_, err = f.Write(append(line, '\n'))
-	return err
+	for _, l := range lines {
+		if _, err := f.Write(append(l, '\n')); err != nil {
+			f.Close()
+			os.Remove(tmp)
+			return err
+		}
+	}
+	if err := f.Close(); err != nil {
+		os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 func LoadShadowProbeLatest(path string) (ShadowProbeJournal, bool) {

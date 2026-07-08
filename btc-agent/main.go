@@ -869,9 +869,6 @@ func requireAutoLiveRuntime(cfg config.Config) error {
 	if cfg.Live.RequireManualConfirm {
 		return fmt.Errorf("live.require_manual_confirm=true")
 	}
-	if !cfg.Live.CanaryMode {
-		return fmt.Errorf("live.canary_mode=true required for auto live execution")
-	}
 	if cfg.Live.ProofOnly {
 		return fmt.Errorf("live.proof_only=true")
 	}
@@ -1566,6 +1563,19 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		filterReader = client
 		placer = client
 		canceler = client
+		// Refresh total_capital from live OKX USDT balance each cycle so
+		// AllocateLiveCapital uses real funds instead of a stale config value.
+		if liveBalances, berr := client.AccountBalance(ctx); berr == nil {
+			for _, b := range liveBalances {
+				if strings.EqualFold(b.Asset, "USDT") && b.Free > 0 {
+					cfg.Portfolio.TotalCapital = b.Free
+					log.Printf("live capital updated from OKX balance: %.2f USDT", b.Free)
+					break
+				}
+			}
+		} else {
+			log.Printf("live balance fetch warning (using config value %.2f): %v", cfg.Portfolio.TotalCapital, berr)
+		}
 	}
 	if cfg.Live.OrderManagementEnabled {
 		// #9: skip OKX InstrumentFilters HTTP call when plan is not ACTIVE_LIMIT

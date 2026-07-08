@@ -483,6 +483,11 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 	} else {
 		result.Agent2ArmedResearchSimulation = armedResearchSim
 	}
+
+	walkForward, err := backtest.RunWalkForwardSimulation(cfg, btc, assets, 3, 0.6)
+	if err == nil {
+		result.WalkForwardReport = walkForward
+	}
 	watchAudit, err := backtest.RunWatchlistTriggerAudit(cfg, btc, assets, backtest.WatchlistTriggerAuditConfig{})
 	if err != nil {
 		result.WatchlistTriggerAudit = backtest.WatchlistTriggerAuditResult{Enabled: false, Summary: err.Error()}

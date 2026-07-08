@@ -58,7 +58,7 @@ func telegramSendChunk(ctx context.Context, token, chatID, text string) (SendRes
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, data, err := doWithRetry(req)
+	resp, data, err := doWithRetry(req, token)
 	if err != nil {
 		return SendResult{}, err
 	}
@@ -74,7 +74,7 @@ func telegramSendChunk(ctx context.Context, token, chatID, text string) (SendRes
 	return SendResult{MessageID: raw.Result.MessageID}, nil
 }
 
-func doWithRetry(req *http.Request) (*http.Response, []byte, error) {
+func doWithRetry(req *http.Request, token string) (*http.Response, []byte, error) {
 	client := http.Client{Timeout: 15 * time.Second}
 	var lastErr error
 	var resp *http.Response
@@ -119,7 +119,7 @@ func doWithRetry(req *http.Request) (*http.Response, []byte, error) {
 		}
 
 		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("http %d: %s", resp.StatusCode, string(bytes.TrimSpace(data)))
+			lastErr = fmt.Errorf("telegram http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
 			continue
 		}
 		return resp, data, nil

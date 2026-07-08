@@ -216,6 +216,7 @@ func newAgent2Diagnostics(symbols []string) Agent2Diagnostics {
 		Notes: []string{
 			"Historical Agent 1 simulation uses BTC 1D candles as fallback for 4H and 1W; this keeps backtest local but is not true multi-timeframe alignment.",
 			"Limit orders become active from the next candle to avoid same-candle lookahead.",
+			"Conservative OHLCV ambiguity rule: if take-profit and invalidation are both crossed in one candle, invalidation wins.",
 		},
 	}
 	for _, sym := range symbols {
@@ -387,24 +388,26 @@ func processOrdersAndPositionsWithOverrides(sim *Agent2Simulation, openOrders ma
 			if dd < stats.MaxDrawdown {
 				stats.MaxDrawdown = dd
 			}
-			if pos.invalidation > 0 && candle.Low <= pos.invalidation {
+			tp := 0.0
+			if overrides.TakeProfitPct > 0 && index > pos.firstFillIndex {
+				tp = avg * (1 + overrides.TakeProfitPct)
+			}
+			exit := ConservativeOHLCVExitDecision(candle, avg, pos.invalidation, tp)
+			switch exit.Exit {
+			case OHLCVExitInvalidation:
 				stats.Invalidations++
 				pos.realized += (pos.invalidation - avg) * pos.qty
-				appendEvent(sim, Agent2SimEvent{Time: eventAt, Symbol: sym, Type: "INVALIDATION", Price: pos.invalidation, Invalidation: pos.invalidation, Reason: "candle low crossed invalidation"})
+				appendEvent(sim, Agent2SimEvent{Time: eventAt, Symbol: sym, Type: "INVALIDATION", Price: pos.invalidation, Invalidation: pos.invalidation, Reason: exit.Reason})
 				pos.qty = 0
 				pos.cost = 0
 				closed = true
-			}
-			if !closed && overrides.TakeProfitPct > 0 && index > pos.firstFillIndex {
-				tp := avg * (1 + overrides.TakeProfitPct)
-				if candle.High >= tp {
-					stats.TakeProfits++
-					pos.realized += (tp - avg) * pos.qty
-					appendEvent(sim, Agent2SimEvent{Time: eventAt, Symbol: sym, Type: "TAKE_PROFIT", Price: tp, Invalidation: pos.invalidation, Reason: fmt.Sprintf("take_profit_pct=%.4f", overrides.TakeProfitPct)})
-					pos.qty = 0
-					pos.cost = 0
-					closed = true
-				}
+			case OHLCVExitTakeProfit:
+				stats.TakeProfits++
+				pos.realized += (tp - avg) * pos.qty
+				appendEvent(sim, Agent2SimEvent{Time: eventAt, Symbol: sym, Type: "TAKE_PROFIT", Price: tp, Invalidation: pos.invalidation, Reason: fmt.Sprintf("take_profit_pct=%.4f", overrides.TakeProfitPct)})
+				pos.qty = 0
+				pos.cost = 0
+				closed = true
 			}
 			if !closed && overrides.TimeStopDays > 0 && index-pos.firstFillIndex >= overrides.TimeStopDays {
 				stats.TimeStops++

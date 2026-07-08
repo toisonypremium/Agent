@@ -56,6 +56,7 @@ type Result struct {
 	Agent2OpportunityAudit        Agent2OpportunityAuditResult  `json:"agent2_opportunity_audit"`
 	LayerAudit                    LayerAuditResult              `json:"layer_audit"`
 	ExitAudit                     ExitAuditResult               `json:"exit_audit"`
+	WalkForwardReport             WalkForwardReport             `json:"walk_forward_report"`
 	Summary                       string                        `json:"summary"`
 }
 
@@ -609,12 +610,26 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("20. Strategy Intelligence Summary\n")
+	b.WriteString("20. Walk-Forward Split Audit\n")
+	if !r.WalkForwardReport.Enabled {
+		b.WriteString("- Walk-forward audit: skipped / not enough local history\n\n")
+	} else {
+		b.WriteString("- " + r.WalkForwardReport.Summary + "\n")
+		b.WriteString("- Research only: train/evaluate split report; no config changed and no order authority changed.\n")
+		b.WriteString("| Split | Train days | Eval days | Train summary | Eval summary |\n")
+		b.WriteString("|---:|---:|---:|---|---|\n")
+		for _, split := range r.WalkForwardReport.Splits {
+			b.WriteString(fmt.Sprintf("| %d | %d | %d | %s | %s |\n", split.SplitIndex, split.TrainDays, split.EvalDays, emptyDash(split.Train.Summary), emptyDash(split.Eval.Summary)))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("21. Strategy Intelligence Summary\n")
 	b.WriteString("- Research only; no live config changed; no order authority changed. WATCH/SCOUT/ARMED must not create orders.\n")
 	b.WriteString(strategyIntelligenceSummary(r))
 	b.WriteString("\n")
 
-	b.WriteString("21. Kết luận\n")
+	b.WriteString("22. Kết luận\n")
 	b.WriteString("- " + r.Summary + "\n")
 	b.WriteString("- Đây là audit rule bằng dữ liệu quá khứ, không phải cam kết lợi nhuận. Mẫu ít thì chỉ dùng để debug rule. Agent 2 simulation chưa mô hình take-profit.\n")
 	return b.String()

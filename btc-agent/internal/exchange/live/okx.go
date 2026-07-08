@@ -105,7 +105,7 @@ func (c *OKXClient) PlaceSpotLimitOrder(ctx context.Context, order LimitOrderReq
 		"ordType": ordType,
 		"px":      formatNumber(order.Price),
 		"sz":      formatNumber(order.Quantity),
-		"clOrdId": order.ClientOrderID,
+		"clOrdId": sanitizeClientOrderID(order.ClientOrderID),
 	}
 	b, err := json.Marshal(body)
 	if err != nil {
@@ -532,4 +532,21 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 		})
 	}
 	return out, nil
+}
+
+// sanitizeClientOrderID strips characters not allowed by OKX clOrdId field.
+// OKX accepts only alphanumeric and underscore; dashes cause sCode=51000.
+// Max 32 chars; truncate if needed.
+func sanitizeClientOrderID(id string) string {
+	var b strings.Builder
+	for _, r := range id {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if len(s) > 32 {
+		s = s[:32]
+	}
+	return s
 }

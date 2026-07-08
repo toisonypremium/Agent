@@ -28,6 +28,31 @@ func TestTelegramDeleteReturnsHTTPError(t *testing.T) {
 	}
 }
 
+func TestTelegramRetryOn429(t *testing.T) {
+	tries := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		tries++
+		if tries < 2 {
+			http.Error(w, "too many requests", http.StatusTooManyRequests)
+			return
+		}
+		_, _ = w.Write([]byte(`{"result":{"message_id":999}}`))
+	}))
+	defer srv.Close()
+	oldBase := telegramAPIBaseURL
+	telegramAPIBaseURL = srv.URL
+	defer func() { telegramAPIBaseURL = oldBase }()
+
+	// Quick retry for testing
+	err := Telegram(context.Background(), "token", "chat", "retry me")
+	if err != nil {
+		t.Fatalf("expected retry success: %v", err)
+	}
+	if tries != 2 {
+		t.Fatalf("expected 2 tries, got %d", tries)
+	}
+}
+
 func TestTelegramMissingConfigReturnsError(t *testing.T) {
 	secret := "secret-token"
 	if err := Telegram(context.Background(), "", "chat", "hello"); err == nil || !strings.Contains(err.Error(), "missing telegram token") || strings.Contains(err.Error(), secret) {

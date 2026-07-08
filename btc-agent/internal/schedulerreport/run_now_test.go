@@ -50,10 +50,9 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 		"mở khóa=",
 		"MM=NO_EDGE",
 		"Liq=D",
-
 		"Shadow:",
 		"shadow only",
-		"không futures, không leverage, không market order",
+		"Không futures",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
@@ -99,9 +98,15 @@ func TestCompactPlanIncludesMMLiquidityEvidence(t *testing.T) {
 
 func TestBuildDeterministicIncludesUnlockConditions(t *testing.T) {
 	text := BuildDeterministic(RunNowSnapshot{Analysis: agent1.MarketAnalysis{TrendScore: 19.8, MarketRegime: "DOWNTREND", ActionPermission: agent1.Watch}, Plan: agent2.Plan{State: agent2.StateWatch}, DailyOK: true, ReconcileOK: true})
-	for _, want := range []string{"Cần:", "Trend score cần", "WATCH không tạo probe", "chính=", "vô hiệu=", "không futures, không leverage, không market order"} {
+	for _, want := range []string{"Cần:", "Trend score cần", "Không ACTIVE_LIMIT", "chính=", "vô hiệu=", "Không futures"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q in:\n%s", want, text)
+		}
+	}
+	// Old probe language must be gone
+	for _, stale := range []string{"WATCH không tạo probe", "ARMED mới probe nhỏ", "ALLOWED mới ladder"} {
+		if strings.Contains(text, stale) {
+			t.Fatalf("stale phrase %q still present:\n%s", stale, text)
 		}
 	}
 }

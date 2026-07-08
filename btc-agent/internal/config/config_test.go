@@ -46,6 +46,8 @@ func TestValidateAutoLiveTradingRejectsManualConfirm(t *testing.T) {
 }
 
 func TestValidateAutoLiveTradingRequiresCanaryMode(t *testing.T) {
+	// Canary mode is no longer required for auto live execution.
+	// Auto live with canary_mode=false is now valid.
 	cfg := validTestConfig()
 	cfg.Execution.RealTradingEnabled = true
 	cfg.Execution.PaperTrading = false
@@ -54,8 +56,8 @@ func TestValidateAutoLiveTradingRequiresCanaryMode(t *testing.T) {
 	cfg.Live.RequireManualConfirm = false
 	cfg.Live.AutoExecute = true
 	cfg.Live.CanaryMode = false
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected auto live to require canary mode")
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("auto live without canary_mode should now be valid: %v", err)
 	}
 }
 
@@ -102,7 +104,7 @@ func TestValidateAutoLadderBounds(t *testing.T) {
 		{"zero layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerCycle = 0 }},
 		{"too many layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerCycle = 4 }},
 		{"zero open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 0 }},
-		{"too many open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 4 }},
+		{"too many open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 11 }},
 		{"zero notional", func(cfg *Config) { cfg.Live.AutoLadderMaxNotionalUSDT = 0 }},
 		{"too much notional", func(cfg *Config) { cfg.Live.AutoLadderMaxNotionalUSDT = 11 }},
 	}
@@ -120,7 +122,7 @@ func TestValidateAutoLadderBounds(t *testing.T) {
 func TestValidateLiveEnabledRejectsOversizedOrderCap(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true
-	cfg.Live.MaxOrderNotionalUSDT = 11
+	cfg.Live.MaxOrderNotionalUSDT = 10001
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected live max order cap validation error")
 	}
@@ -329,7 +331,6 @@ func TestValidateSupervisorRequiresManagedLiveShape(t *testing.T) {
 	}{
 		{"live disabled", func(cfg *Config) { cfg.Live.Enabled = false }},
 		{"auto disabled", func(cfg *Config) { cfg.Live.AutoExecute = false }},
-		{"canary disabled", func(cfg *Config) { cfg.Live.CanaryMode = false }},
 		{"management disabled", func(cfg *Config) { cfg.Live.OrderManagementEnabled = false }},
 		{"zero interval", func(cfg *Config) { cfg.Live.ManagementIntervalMinutes = 0 }},
 	}

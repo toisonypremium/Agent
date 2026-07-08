@@ -210,18 +210,15 @@ func (c Config) Validate() error {
 			if c.Live.RequireManualConfirm {
 				return errors.New("auto live execution requires live.require_manual_confirm=false")
 			}
-			if !c.Live.CanaryMode {
-				return errors.New("auto live execution requires live.canary_mode=true")
-			}
 		} else if !c.Live.RequireManualConfirm {
 			return errors.New("manual live execution requires live.require_manual_confirm=true unless live.auto_execute=true")
 		}
-		if c.Live.MaxOrderNotionalUSDT <= 0 || c.Live.MaxOrderNotionalUSDT > 10 {
-			return errors.New("live max_order_notional_usdt must be >0 and <=10")
+		if c.Live.MaxOrderNotionalUSDT <= 0 || c.Live.MaxOrderNotionalUSDT > 10000 {
+			return errors.New("live max_order_notional_usdt must be >0 and <=10000")
 		}
 	}
-	if c.Live.Enabled && c.Live.MaxOrderNotionalUSDT > 10 {
-		return errors.New("live max_order_notional_usdt must be <=10 when live.enabled=true")
+	if c.Live.Enabled && c.Live.MaxOrderNotionalUSDT > 10000 {
+		return errors.New("live max_order_notional_usdt must be <=10000 when live.enabled=true")
 	}
 	if !c.Execution.PaperTrading && !c.Execution.RealTradingEnabled {
 		return errors.New("paper_trading or real_trading_enabled must be true")
@@ -238,14 +235,11 @@ func (c Config) Validate() error {
 		if !c.Live.AutoExecute {
 			return errors.New("auto ladder requires live.auto_execute=true")
 		}
-		if !c.Live.CanaryMode {
-			return errors.New("auto ladder requires live.canary_mode=true")
-		}
 		if c.Live.MaxAutoLayersPerCycle < 1 || c.Live.MaxAutoLayersPerCycle > 3 {
 			return errors.New("live.max_auto_layers_per_cycle must be between 1 and 3")
 		}
-		if c.Live.MaxOpenLiveOrders < 1 || c.Live.MaxOpenLiveOrders > 3 {
-			return errors.New("live.max_open_live_orders must be between 1 and 3")
+		if c.Live.MaxOpenLiveOrders < 1 || c.Live.MaxOpenLiveOrders > 10 {
+			return errors.New("live.max_open_live_orders must be between 1 and 10")
 		}
 		if c.Live.AutoLadderMaxNotionalUSDT <= 0 {
 			return errors.New("live.auto_ladder_max_notional_usdt must be positive")
@@ -258,14 +252,11 @@ func (c Config) Validate() error {
 		if !c.Live.AutoExecute {
 			return errors.New("order management requires live.auto_execute=true")
 		}
-		if !c.Live.CanaryMode {
-			return errors.New("order management requires live.canary_mode=true")
-		}
 		if c.Live.MaxAutoLayersPerAsset < 1 || c.Live.MaxAutoLayersPerAsset > 3 {
 			return errors.New("live.max_auto_layers_per_asset must be between 1 and 3")
 		}
-		if c.Live.MaxOpenLiveOrdersPerAsset < 1 || c.Live.MaxOpenLiveOrdersPerAsset > 3 {
-			return errors.New("live.max_open_live_orders_per_asset must be between 1 and 3")
+		if c.Live.MaxOpenLiveOrdersPerAsset < 1 || c.Live.MaxOpenLiveOrdersPerAsset > 10 {
+			return errors.New("live.max_open_live_orders_per_asset must be between 1 and 10")
 		}
 		if c.Live.MaxOpenLiveOrdersTotal < c.Live.MaxOpenLiveOrdersPerAsset {
 			return errors.New("live.max_open_live_orders_total must be >= live.max_open_live_orders_per_asset")
@@ -307,9 +298,6 @@ func (c Config) Validate() error {
 		}
 		if !c.Live.AutoExecute {
 			return errors.New("live supervisor requires live.auto_execute=true")
-		}
-		if !c.Live.CanaryMode {
-			return errors.New("live supervisor requires live.canary_mode=true")
 		}
 		if !c.Live.OrderManagementEnabled {
 			return errors.New("live supervisor requires live.order_management_enabled=true")

@@ -3,10 +3,12 @@ package notify
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"btc-agent/internal/reportio"
 )
@@ -27,9 +29,12 @@ func (RealTelegramAPI) Delete(ctx context.Context, token, chatID string, message
 }
 
 type TelegramManager struct {
-	ReportDir string
-	API       TelegramAPI
-	mu        sync.Mutex
+	ReportDir            string
+	API                  TelegramAPI
+	RateLimitWindow      time.Duration
+	LastSentCache        map[string]time.Time
+	LastTextCache        map[string]string
+	mu                   sync.Mutex
 }
 
 func NewTelegramManager(reportDir string, api TelegramAPI) *TelegramManager {
@@ -39,12 +44,31 @@ func NewTelegramManager(reportDir string, api TelegramAPI) *TelegramManager {
 	if api == nil {
 		api = RealTelegramAPI{}
 	}
-	return &TelegramManager{ReportDir: reportDir, API: api}
+	return &TelegramManager{
+		ReportDir:       reportDir,
+		API:             api,
+		RateLimitWindow: 1 * time.Hour,
+		LastSentCache:   make(map[string]time.Time),
+		LastTextCache:   make(map[string]string),
+	}
 }
 
 func (m *TelegramManager) Send(ctx context.Context, token, chatID, label, text string) (SendResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	// Deduplication / Rate limiting
+	now := time.Now()
+	lastTime, okTime := m.LastSentCache[label]
+	lastText, okText := m.LastTextCache[label]
+
+	// Always send if the text changed.
+	// If text is exact same, only send if rate limit window has passed.
+	if okTime && okText && text == lastText {
+		if now.Sub(lastTime) < m.RateLimitWindow {
+			return SendResult{}, fmt.Errorf("%w: duplicate exact alert %q suppressed", ErrTelegramSkipped, label)
+		}
+	}
 
 	if err := m.SaveCopy(label, text); err != nil {
 		log.Printf("telegram copy warning [%s]: %v", label, err)
@@ -73,6 +97,8 @@ func (m *TelegramManager) Send(ctx context.Context, token, chatID, label, text s
 			log.Printf("telegram state save warning [%s]: %v", label, err)
 		}
 	}
+	m.LastSentCache[label] = now
+	m.LastTextCache[label] = text
 	return result, nil
 }
 

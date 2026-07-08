@@ -129,9 +129,9 @@ func run(ctx context.Context, args []string) error {
 	case "simulate-live-manager":
 		return runSimulateLiveManager(cfg)
 	case "operator-halt":
-		return runOperatorHalt(db)
+		return runOperatorHalt(ctx, cfg, db)
 	case "operator-resume":
-		return runOperatorResume(db)
+		return runOperatorResume(ctx, cfg, db)
 	case "operator-status":
 		return runOperatorStatus(db)
 	case "reconcile-live-orders":
@@ -2685,19 +2685,27 @@ func runCancelAllLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 	return nil
 }
 
-func runOperatorHalt(db *storage.DB) error {
+func runOperatorHalt(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	if err := db.SetHaltStatus(true); err != nil {
 		return fmt.Errorf("set halt status: %w", err)
 	}
-	fmt.Println("Operator halt: ACTIVE (Live trading halted)")
+	text := "Operator halt: ACTIVE (Live trading halted)"
+	fmt.Println(text)
+	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		sendTelegram(ctx, cfg, "operator-halt", text)
+	}
 	return nil
 }
 
-func runOperatorResume(db *storage.DB) error {
+func runOperatorResume(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	if err := db.SetHaltStatus(false); err != nil {
 		return fmt.Errorf("clear halt status: %w", err)
 	}
-	fmt.Println("Operator halt: INACTIVE (Live trading resumed)")
+	text := "Operator halt: INACTIVE (Live trading resumed)"
+	fmt.Println(text)
+	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		sendTelegram(ctx, cfg, "operator-resume", text)
+	}
 	return nil
 }
 

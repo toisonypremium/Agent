@@ -57,13 +57,11 @@ func telegramSendChunk(ctx context.Context, token, chatID, text string) (SendRes
 		return SendResult{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	client := http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Do(req)
+
+	resp, data, err := doWithRetry(req)
 	if err != nil {
 		return SendResult{}, err
 	}
-	defer resp.Body.Close()
-	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode/100 != 2 {
 		return SendResult{}, fmt.Errorf("telegram http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
 	}
@@ -74,6 +72,59 @@ func telegramSendChunk(ctx context.Context, token, chatID, text string) (SendRes
 	}
 	_ = json.Unmarshal(data, &raw)
 	return SendResult{MessageID: raw.Result.MessageID}, nil
+}
+
+func doWithRetry(req *http.Request) (*http.Response, []byte, error) {
+	client := http.Client{Timeout: 15 * time.Second}
+	var lastErr error
+	var resp *http.Response
+	var data []byte
+
+	backoff := 1 * time.Second
+	for i := 0; i < 3; i++ {
+		if i > 0 {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+
+		// Clone request body for retry
+		var bodyReader io.Reader
+		if req.GetBody != nil {
+			bodyReadCloser, _ := req.GetBody()
+			bodyReader = bodyReadCloser
+		} else if req.Body != nil {
+			buf, _ := io.ReadAll(req.Body)
+			req.Body.Close()
+			req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(bytes.NewReader(buf)), nil }
+			bodyReader = bytes.NewReader(buf)
+		}
+
+		clone := req.Clone(req.Context())
+		if bodyReader != nil {
+			clone.Body = io.NopCloser(bodyReader)
+		}
+
+		var err error
+		resp, err = client.Do(clone)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		data, err = io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			lastErr = fmt.Errorf("http %d: %s", resp.StatusCode, string(bytes.TrimSpace(data)))
+			continue
+		}
+		return resp, data, nil
+	}
+	return resp, data, lastErr
 }
 
 func telegramChunks(text string) []string {

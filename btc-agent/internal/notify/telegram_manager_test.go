@@ -72,3 +72,36 @@ func TestTelegramManagerMissingTokenStillSavesCopy(t *testing.T) {
 		t.Fatalf("copy mismatch: %q", string(b))
 	}
 }
+
+func TestTelegramManagerDedupe(t *testing.T) {
+	dir := t.TempDir()
+	api := &fakeTelegramAPI{nextID: 100}
+	m := NewTelegramManager(dir, api)
+
+	// first send OK
+	_, err := m.Send(context.Background(), "token", "chat", "my-alert", "exact text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sent) != 1 {
+		t.Fatalf("expected 1 send, got %d", len(api.sent))
+	}
+
+	// second send exact text blocked
+	_, err = m.Send(context.Background(), "token", "chat", "my-alert", "exact text")
+	if err == nil || !errors.Is(err, ErrTelegramSkipped) {
+		t.Fatalf("expected ErrTelegramSkipped due to dedupe, got %v", err)
+	}
+	if len(api.sent) != 1 {
+		t.Fatalf("expected still 1 send, got %d", len(api.sent))
+	}
+
+	// third send different text OK
+	_, err = m.Send(context.Background(), "token", "chat", "my-alert", "different text")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(api.sent) != 2 {
+		t.Fatalf("expected 2 sends, got %d", len(api.sent))
+	}
+}

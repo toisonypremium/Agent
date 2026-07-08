@@ -43,6 +43,7 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent reconcile-live-orders --config config.yaml
 ./bin/btc-agent live-positions --config config.yaml
 ./bin/btc-agent maintenance --config config.yaml
+./bin/btc-agent canary-drill --config config.yaml --cycles 50
 ```
 
 ## Telegram/ntfy
@@ -272,6 +273,18 @@ reports/live_position_latest.json
 Reconciliation never places orders. Unknown exchange errors are marked for manual check. `live-positions` prints the local live position ledger without calling the exchange.
 
 ### 24/7 live rollout runbook
+
+`canary-drill` runs simulation-only order-path drills before any real canary:
+
+```bash
+./bin/btc-agent canary-drill --config config.yaml --cycles 50
+```
+
+- Uses `FakeOKX` only — no OKX credentials required.
+- Never places or cancels real orders (`real_exchange_calls=0` always).
+- Runs submit → partial-fill → full-fill → cancel cycles; verifies filter rejections and authority guard (only `ACTIVE_LIMIT` can pass order gate).
+- Writes `reports/canary_drill_latest.md` and `reports/canary_drill_latest.json`.
+- Passing the drill does **not** approve real canary; market state (`ACTIVE_LIMIT`), `live-readiness`, and operator gates are still required.
 
 1. Keep operator halt active by default:
 

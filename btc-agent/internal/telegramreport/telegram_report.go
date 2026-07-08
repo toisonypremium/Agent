@@ -60,76 +60,54 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 	b.WriteString(fmt.Sprintf("🕐 %s\n", analysis.Timestamp.Format("02/01 15:04 UTC")))
 	b.WriteString(separatorLine())
 
-	// ── I. Tổng quan thị trường ───────────────────────────────────────────
-	b.WriteString("I. THỊ TRƯỜNG BTC\n")
+	// ── I. BTC & Thị trường ───────────────────────────────────────────────
+	b.WriteString("I. BTC & THỊ TRƯỜNG\n")
 	b.WriteString(fmt.Sprintf("Giá: $%.0f  |  Regime: %s\n", analysis.BTCPrice, humanRegime(analysis.MarketRegime)))
-	b.WriteString(fmt.Sprintf("Trend: %.1f/100  |  F&G: %s (%d)\n",
+	b.WriteString(fmt.Sprintf("Trend: %.1f/100  |  F&G: %s (%d)  |  Rủi ro: %s\n",
 		analysis.TrendScore,
 		analysis.FearGreed.Classification,
-		analysis.FearGreed.Value))
-	b.WriteString(fmt.Sprintf("Bias: W=%s  D=%s  4H=%s\n",
+		analysis.FearGreed.Value,
+		humanRiskEmoji(analysis.RiskLevel)))
+	b.WriteString(fmt.Sprintf("Bias W/D/4H: %s/%s/%s  |  Flow: %s %.2f\n",
 		shortBias(analysis.WeeklyBias),
 		shortBias(analysis.DailyBias),
-		shortBias(analysis.FourHourBias)))
-	b.WriteString(fmt.Sprintf("Flow: %s %.2f — %s\n",
-		analysis.Flow.Bias, analysis.Flow.Score, humanFlow(analysis.Flow.Bias)))
+		shortBias(analysis.FourHourBias),
+		analysis.Flow.Bias, analysis.Flow.Score))
 	b.WriteString(separatorLine())
 
-	// ── II. Rủi ro ────────────────────────────────────────────────────────
-	b.WriteString("II. RỦI RO\n")
-	b.WriteString(fmt.Sprintf("Tổng rủi ro: %s\n", humanRiskEmoji(analysis.RiskLevel)))
-	b.WriteString(fmt.Sprintf("Falling knife: %s  |  FOMO: %s\n",
-		humanRiskEmoji(analysis.FallingKnifeRisk),
-		humanRiskEmoji(analysis.FomoRisk)))
-	b.WriteString(separatorLine())
-
-	// ── III. Vùng giá then chốt ───────────────────────────────────────────
-	b.WriteString("III. VÙNG GIÁ\n")
+	// ── II. Vùng giá & Kịch bản ───────────────────────────────────────────
+	b.WriteString("II. VÙNG GIÁ & KỊCH BẢN\n")
 	if analysis.AccumulationZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("🟢 Gom active: $%.0f – $%.0f\n",
-			analysis.AccumulationZone.Low, analysis.AccumulationZone.High))
-	}
-	if analysis.MacroAccumulationZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("🧭 Macro/stress: $%.0f – $%.0f (context only)\n",
-			analysis.MacroAccumulationZone.Low, analysis.MacroAccumulationZone.High))
+		b.WriteString(fmt.Sprintf("🟢 Gom: $%.0f–%.0f  |", analysis.AccumulationZone.Low, analysis.AccumulationZone.High))
 	}
 	if analysis.PrimarySupportZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("🔵 Support: $%.0f – $%.0f\n",
-			analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High))
-	}
-	if analysis.DeepSupportZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("⚫ Deep: $%.0f – $%.0f\n",
-			analysis.DeepSupportZone.Low, analysis.DeepSupportZone.High))
-	}
-	if analysis.ResistanceZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("🔴 Kháng cự: $%.0f – $%.0f\n",
-			analysis.ResistanceZone.Low, analysis.ResistanceZone.High))
+		b.WriteString(fmt.Sprintf("  🔵 Support: $%.0f–%.0f\n", analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High))
+	} else {
+		b.WriteString("\n")
 	}
 	if analysis.InvalidationZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("❌ Invalidation: $%.0f – $%.0f\n",
-			analysis.InvalidationZone.Low, analysis.InvalidationZone.High))
+		b.WriteString(fmt.Sprintf("❌ Invalidation: $%.0f–%.0f  |", analysis.InvalidationZone.Low, analysis.InvalidationZone.High))
 	}
-	b.WriteString(separatorLine())
-
-	// ── IV. Kịch bản ─────────────────────────────────────────────────────
-	b.WriteString("IV. KỊCH BẢN\n")
+	if analysis.ResistanceZone.Low > 0 {
+		b.WriteString(fmt.Sprintf("  🔴 Kháng cự: $%.0f–%.0f\n", analysis.ResistanceZone.Low, analysis.ResistanceZone.High))
+	} else {
+		b.WriteString("\n")
+	}
 	if analysis.ScenarioMain != "" {
-		b.WriteString(fmt.Sprintf("📌 Chính: %s\n", analysis.ScenarioMain))
+		b.WriteString(fmt.Sprintf("📌 %s\n", shortReason(analysis.ScenarioMain)))
 	}
 	if analysis.ScenarioBullish != "" {
-		b.WriteString(fmt.Sprintf("🐂 Bull: %s\n", analysis.ScenarioBullish))
+		b.WriteString(fmt.Sprintf("🐂 Mở khóa: %s\n", shortReason(analysis.ScenarioBullish)))
 	}
 	if analysis.ScenarioBearish != "" {
-		b.WriteString(fmt.Sprintf("🐻 Bear: %s\n", analysis.ScenarioBearish))
+		b.WriteString(fmt.Sprintf("🐻 Vô hiệu: %s\n", shortReason(analysis.ScenarioBearish)))
 	}
 	b.WriteString(separatorLine())
 
-	// ── V. Kế hoạch giao dịch (Agent 2) ──────────────────────────────────
-	b.WriteString("V. KẾ HOẠCH GIAO DỊCH\n")
-	b.WriteString(fmt.Sprintf("Permission: %s\n", ExplainPermission(analysis.ActionPermission)))
-	b.WriteString(fmt.Sprintf("Plan state: %s\n", humanPlanStateEmoji(plan.State)))
+	// ── III. Kế hoạch giao dịch (Agent 2) ──────────────────────────────────
+	b.WriteString("III. KẾ HOẠCH GIAO DỊCH\n")
+	b.WriteString(fmt.Sprintf("BTC gate: %s  |  Plan: %s\n", ExplainPermission(analysis.ActionPermission), humanPlanStateEmoji(plan.State)))
 
-	// Active assets with layers
 	activeAssets := []agent2.AssetPlan{}
 	for _, a := range plan.Assets {
 		if a.State == agent2.StateActiveLimit {
@@ -137,29 +115,26 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 		}
 	}
 	if len(activeAssets) > 0 {
-		b.WriteString("\n🟩 ACTIVE LIMIT — Đã có layer:\n")
+		b.WriteString("🟩 ACTIVE LIMIT — Bot tự đặt limit nếu safety gate sạch:\n")
 		for _, a := range activeAssets {
-			b.WriteString(fmt.Sprintf("  %s | RR=%.1f | rank #%d\n",
-				a.Symbol, a.RewardRisk, a.RotationRank))
+			b.WriteString(fmt.Sprintf("  %s | RR=%.1f | rank #%d | MM=%s %.0f | Liq=%s %.0f\n",
+				a.Symbol, a.RewardRisk, a.RotationRank,
+				emptyMMCaseText(a.MMCase), a.MMScore,
+				empty(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score))
 			for _, l := range a.Layers {
-				b.WriteString(fmt.Sprintf("    Layer %d: $%.2f × %.0f USDT\n",
-					l.Index, l.Price, l.Notional))
-			}
-			if a.Reason != "" {
-				b.WriteString(fmt.Sprintf("    → %s\n", shortReason(a.Reason)))
+				b.WriteString(fmt.Sprintf("    Layer %d: $%.2f × %.0f USDT\n", l.Index, l.Price, l.Notional))
 			}
 		}
 	}
 
-	// Watchlist
 	if len(plan.Watchlist.Candidates) > 0 {
-		b.WriteString("\n👀 WATCHLIST (sắp đủ điều kiện):\n")
+		b.WriteString("👀 Watchlist:\n")
 		for _, c := range firstCandidates(plan.Watchlist.Candidates, 3) {
-			bar := readinessBar(c.ReadinessScore)
-			b.WriteString(fmt.Sprintf("  %s %s %.0f%% | MM=%s %.0f/100 | Liq=%s %.0f/100", c.Symbol, bar, c.ReadinessScore*100, emptyMMCaseText(c.MMCase), c.MMScore, empty(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score))
-			if c.RewardRisk > 0 || c.DiscountGap != 0 {
-				b.WriteString(fmt.Sprintf(" | gap %.2f%% RR %.2f", c.DiscountGap*100, c.RewardRisk))
-			}
+			b.WriteString(fmt.Sprintf("  %s %.0f%% | MM=%s %.0f | Liq=%s %.0f | gap %.1f%% RR %.2f",
+				c.Symbol, c.ReadinessScore*100,
+				emptyMMCaseText(c.MMCase), c.MMScore,
+				empty(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score,
+				c.DiscountGap*100, c.RewardRisk))
 			if c.NextTrigger != "" {
 				b.WriteString(fmt.Sprintf(" | trigger: %s", c.NextTrigger))
 			}
@@ -168,32 +143,24 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 				b.WriteString(fmt.Sprintf("    Thiếu: %s\n", humanList(c.Missing, 2)))
 			} else if len(c.MMMissing) > 0 {
 				b.WriteString(fmt.Sprintf("    MM thiếu: %s\n", humanList(c.MMMissing, 2)))
-			} else if len(c.LiquidityQuality.Reasons) > 0 {
-				b.WriteString(fmt.Sprintf("    Liquidity: %s\n", humanList(c.LiquidityQuality.Reasons, 1)))
 			}
 		}
 	}
 
-	// Rotation ranking (non-active)
-	watchOrArmed := []agent2.AssetPlan{}
 	for _, a := range plan.Assets {
 		if a.State == agent2.StateWatch || a.State == agent2.StateArmed {
-			watchOrArmed = append(watchOrArmed, a)
-		}
-	}
-	if len(watchOrArmed) > 0 {
-		b.WriteString("\n⏳ THEO DÕI:\n")
-		for _, a := range watchOrArmed {
-			b.WriteString(fmt.Sprintf("  %s [%s] rank #%d score %.2f\n",
-				a.Symbol, a.State, a.RotationRank, a.RotationScore))
+			b.WriteString(fmt.Sprintf("  %s [%s] rank #%d | MM=%s %.0f | Liq=%s %.0f\n",
+				a.Symbol, a.State, a.RotationRank,
+				emptyMMCaseText(a.MMCase), a.MMScore,
+				empty(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score))
 		}
 	}
 	b.WriteString(separatorLine())
 
-	// ── VI. Kết luận hành động ───────────────────────────────────────────
-	b.WriteString("VI. HÀNH ĐỘNG\n")
+	// ── IV. Hành động & Safety ───────────────────────────────────────────
+	b.WriteString("IV. HÀNH ĐỘNG\n")
 	b.WriteString(humanActionConclusion(analysis.ActionPermission, plan.State, len(activeAssets)))
-	b.WriteString("\n⚠️ Spot limit BUY post-only. Không futures/leverage/market.\n")
+	b.WriteString("⚠️ Spot limit BUY post-only. Không futures/leverage/market.\n")
 
 	return trimTelegram(b.String())
 }
@@ -307,70 +274,61 @@ func humanActionConclusion(perm agent1.Permission, state agent2.State, activeCou
 func LiveReadinessHumanText(r LiveReadinessView) string {
 	var b strings.Builder
 	b.WriteString("🤖 BTC Agent — Live readiness\n\n")
-	ready := r.Proof.Status == liveguard.ReadyForManualLiveProofOrder
-	if ready {
-		b.WriteString("Kết luận: CÓ proof hợp lệ cho manual canary.\n")
+
+	autoBlockers := len(r.AutoLiveBlockers)
+	if autoBlockers == 0 {
+		b.WriteString("✅ Auto live: KHÔNG blocker. Bot có thể đặt lệnh khi plan đạt ACTIVE_LIMIT.\n")
 	} else {
-		b.WriteString("Kết luận: CHƯA SẴN SÀNG ĐẶT LỆNH.\n")
+		b.WriteString(fmt.Sprintf("🚫 Auto live: %d blocker đang chặn.\n", autoBlockers))
 	}
-	b.WriteString("Lệnh thật: KHÔNG đặt lệnh từ kiểm tra này.\n")
-	b.WriteString(fmt.Sprintf("Lý do chính: %s\n\n", ExplainProofStatus(r.Proof.Status)))
+	b.WriteString(fmt.Sprintf("Plan: %s  |  Open orders: %d  |  Positions: %d\n\n",
+		r.PlanState, r.OpenLiveOrders, r.LivePositions))
 
-	b.WriteString("1) Trạng thái bot\n")
-	b.WriteString(fmt.Sprintf("- Mode: %s.\n", empty(r.Mode, "chưa đặt")))
-	b.WriteString(fmt.Sprintf("- Plan hiện tại: %s — %s\n", r.PlanState, ExplainPlanState(r.PlanState)))
-	b.WriteString(fmt.Sprintf("- Open live orders: %d. Live positions: %d.\n", r.OpenLiveOrders, r.LivePositions))
-	if r.DataHealth.Status != "" {
-		b.WriteString(fmt.Sprintf("- Data health: %s — %s\n", r.DataHealth.Status, r.DataHealth.Summary))
-	}
-	if r.ReconcileSafety.Status != "" {
-		b.WriteString(fmt.Sprintf("- Reconcile safety: %s — %s\n", r.ReconcileSafety.Status, r.ReconcileSafety.Summary))
-	}
-	if r.RiskGovernor.Status != "" {
-		b.WriteString(fmt.Sprintf("- Risk governor: %s — %s\n", r.RiskGovernor.Status, r.RiskGovernor.Summary))
-	}
-
-	b.WriteString("\n2) Tài khoản & kết nối\n")
-	b.WriteString(fmt.Sprintf("- OKX env: %s.\n", credentialSummary(r.CredentialEnvPresent)))
+	b.WriteString("1) Tài khoản & kết nối\n")
+	b.WriteString(fmt.Sprintf("- OKX env: %s\n", credentialSummary(r.CredentialEnvPresent)))
 	if r.Proof.Account.Enabled {
-		b.WriteString(fmt.Sprintf("- USDT free: %.2f / yêu cầu tối thiểu %.2f. Auth: %s. Balance: %s.\n", r.Proof.Account.FreeUSDT, r.Proof.Account.MinRequiredUSDT, yesNo(r.Proof.Account.AuthOK), yesNo(r.Proof.Account.BalanceOK)))
+		b.WriteString(fmt.Sprintf("- USDT free: %.2f  |  Min: %.2f  |  Auth: %s  |  Balance: %s\n",
+			r.Proof.Account.FreeUSDT, r.Proof.Account.MinRequiredUSDT,
+			yesNo(r.Proof.Account.AuthOK), yesNo(r.Proof.Account.BalanceOK)))
 		if r.Proof.Account.Error != "" {
-			b.WriteString(fmt.Sprintf("- Lỗi account: %s\n", r.Proof.Account.Error))
+			b.WriteString(fmt.Sprintf("- Lỗi: %s\n", r.Proof.Account.Error))
 		}
 	}
 
-	b.WriteString("\n3) Khóa an toàn\n")
-	b.WriteString(fmt.Sprintf("- Operator halt: %s.\n", haltText(r.OperatorHalted)))
-	b.WriteString(fmt.Sprintf("- Auto live env: %s. Auto execute config: %v.\n", enabledText(r.AutoLiveEnv), r.AutoExecute))
-	b.WriteString(fmt.Sprintf("- Canary: %v, max %.2f USDT. Manual confirm: %v.\n", r.CanaryMode, r.CanaryMaxNotional, r.RequireManualConfirm))
-	b.WriteString(fmt.Sprintf("- Legacy auto ladder: enabled=%v, tối đa %d layer/chu kỳ, open orders legacy tối đa %d, notional tối đa %.2f USDT.\n", r.AutoLadderEnabled, r.MaxAutoLayers, r.MaxOpenLiveOrders, r.AutoLadderMaxNotional))
-	b.WriteString(fmt.Sprintf("- Managed order engine: enabled=%v, tối đa %d layer/coin, %d lệnh/coin, %d lệnh tổng.\n", r.OrderManagementEnabled, r.MaxAutoLayersPerAsset, r.MaxOpenLiveOrdersPerAsset, r.MaxOpenLiveOrdersTotal))
-	b.WriteString(fmt.Sprintf("- Managed vốn: %.2f USDT/lệnh, %.2f USDT/coin, %.2f USDT tổng.\n", r.MaxLiveNotionalPerOrderUSDT, r.MaxLiveNotionalPerAssetUSDT, r.MaxLiveNotionalTotalUSDT))
-	b.WriteString(fmt.Sprintf("- Managed hủy/thay: hủy khi plan inactive=%v, giá vượt discount %.2f%%, drift %.2f%%, stale %d phút.\n", r.CancelIfPlanNotActive, r.CancelIfPriceAboveDiscountPct*100, r.ReplaceIfPriceDriftPct*100, r.CancelStaleAfterMinutes))
-	if r.CanaryMode && r.OrderManagementEnabled {
-		b.WriteString("- Logic mở lệnh: hard safety vẫn khóa nguy hiểm; tín hiệu trade dùng risk sizing.\n")
-		b.WriteString("- Opportunity allocation: vốn live đi theo setup score hiện tại, không chia cứng theo % portfolio.\n")
-		b.WriteString("- Quality multiplier: A/B full, C giảm size, NO_SAMPLE/missing chỉ probe nhỏ, D bị chặn.\n")
+	b.WriteString("\n2) Cấu hình live\n")
+	b.WriteString(fmt.Sprintf("- Mode: %s  |  Halt: %s\n", empty(r.Mode, "chưa đặt"), haltText(r.OperatorHalted)))
+	b.WriteString(fmt.Sprintf("- Auto live env: %s  |  Auto execute: %v  |  Manual confirm: %v\n",
+		enabledText(r.AutoLiveEnv), r.AutoExecute, r.RequireManualConfirm))
+	b.WriteString(fmt.Sprintf("- Canary: %v (%.2f USDT)  |  Proof only: %v\n",
+		r.CanaryMode, r.CanaryMaxNotional, r.ProofOnly))
+	b.WriteString(fmt.Sprintf("- Order engine: enabled=%v  |  %d layer/coin  |  %d lệnh/coin  |  %d lệnh tổng\n",
+		r.OrderManagementEnabled, r.MaxAutoLayersPerAsset, r.MaxOpenLiveOrdersPerAsset, r.MaxOpenLiveOrdersTotal))
+	b.WriteString(fmt.Sprintf("- Vốn: %.0f USDT/lệnh  |  %.0f USDT/coin  |  %.0f USDT tổng\n",
+		r.MaxLiveNotionalPerOrderUSDT, r.MaxLiveNotionalPerAssetUSDT, r.MaxLiveNotionalTotalUSDT))
+
+	if r.DataHealth.Status != "" {
+		b.WriteString(fmt.Sprintf("\n3) Health\n- Data: %s\n", r.DataHealth.Status))
+		if r.ReconcileSafety.Status != "" {
+			b.WriteString(fmt.Sprintf("- Reconcile: %s\n", r.ReconcileSafety.Status))
+		}
+		if r.RiskGovernor.Status != "" {
+			b.WriteString(fmt.Sprintf("- Risk governor: %s\n", r.RiskGovernor.Status))
+		}
 	}
-	if r.LadderProof.Status != "" {
-		b.WriteString(fmt.Sprintf("- Ladder proof: %s, candidates=%d, total=%.2f USDT.\n", ExplainProofStatus(r.LadderProof.Status), len(r.LadderProof.Candidates), r.LadderProof.TotalNotional))
-	}
+
 	if len(r.AutoLiveBlockers) > 0 {
-		b.WriteString("- Auto live đang bị chặn vì:\n")
+		b.WriteString("\n❌ Blockers:\n")
 		for _, reason := range r.AutoLiveBlockers {
 			b.WriteString("  • " + ExplainBlocker(reason) + "\n")
 		}
 	}
 
 	if r.Proof.Candidate.Symbol != "" {
-		b.WriteString("\n4) Candidate nếu proof hợp lệ\n")
-		b.WriteString(fmt.Sprintf("- %s %s limit %.8f, notional %.2f USDT, post-only=%v, canary=%v.\n", r.Proof.Candidate.Side, r.Proof.Candidate.Symbol, r.Proof.Candidate.Price, r.Proof.Candidate.Notional, r.Proof.Candidate.PostOnly, r.Proof.Candidate.Canary))
-		if r.Proof.Preflight.Enabled {
-			b.WriteString(fmt.Sprintf("- Preflight OKX: %s. Notional sau filter %.2f USDT.\n", yesNo(r.Proof.Preflight.Pass), r.Proof.Preflight.Notional))
-		}
+		b.WriteString(fmt.Sprintf("\n4) Candidate proof\n- %s %s limit %.8f  |  notional %.2f USDT\n",
+			r.Proof.Candidate.Side, r.Proof.Candidate.Symbol,
+			r.Proof.Candidate.Price, r.Proof.Candidate.Notional))
 	}
 
-	b.WriteString("\nHành động đề xuất: tiếp tục live-proof 24/7, chưa resume, chưa bật auto, chưa đặt lệnh.\n")
 	return trimTelegram(b.String())
 }
 
@@ -512,9 +470,8 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 	var b strings.Builder
 	b.WriteString("🤖 BTC Agent — Live supervisor\n\n")
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", result.Summary))
-	b.WriteString(fmt.Sprintf("Action: %s. Consecutive errors: %d. Auto-halt: %v.\n", result.Action, result.ConsecutiveErrors, result.AutoHalted))
 	if result.AutoHalted {
-		b.WriteString("Operator halt: ĐÃ BẬT tự động sau lỗi lặp lại. Bot không tự hủy lệnh; cần operator kiểm tra.\n")
+		b.WriteString("🚨 Operator halt: ĐÃ BẬT tự động sau lỗi lặp lại. Cần operator kiểm tra.\n")
 	}
 	if len(result.Reasons) > 0 {
 		b.WriteString("Lý do:\n")
@@ -524,20 +481,43 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 	}
 	if result.Managed != nil {
 		m := result.Managed
-		b.WriteString("\nManaged cycle:\n")
-		b.WriteString(fmt.Sprintf("- Status: %s\n", m.Status))
-		b.WriteString(fmt.Sprintf("- Desired: %d. Placed: %d. Canceled: %d. Replaced: %d. Blocked: %d.\n", len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
+		b.WriteString(fmt.Sprintf("\nCycle: %s  |  desired=%d đặt=%d hủy=%d thay=%d chặn=%d\n",
+			m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
 		if m.DataHealth.Status != "" {
-			b.WriteString(fmt.Sprintf("- Data health: %s\n", m.DataHealth.Status))
+			b.WriteString(fmt.Sprintf("Data: %s  |  Reconcile: %s  |  Risk: %s\n",
+				m.DataHealth.Status, m.ReconcileSafety.Status, m.RiskGovernor.Status))
 		}
-		if m.ReconcileSafety.Status != "" {
-			b.WriteString(fmt.Sprintf("- Reconcile safety: %s\n", m.ReconcileSafety.Status))
+		// Per-coin detail khi không đặt lệnh
+		if len(m.Desired) == 0 && len(m.PerCoin) > 0 {
+			b.WriteString("\nTại sao chưa đặt lệnh:\n")
+			for _, coin := range m.PerCoin {
+				b.WriteString(fmt.Sprintf("  %s [%s]", coin.Symbol, coin.State))
+				if len(coin.WhyNoOrder) > 0 {
+					b.WriteString(": " + explainReasons(coin.WhyNoOrder, 2))
+				} else if coin.DesiredLayers == 0 {
+					b.WriteString(": chưa có ACTIVE_LIMIT/layer")
+				}
+				if coin.NextTrigger != "" {
+					b.WriteString(" → " + coin.NextTrigger)
+				}
+				b.WriteString("\n")
+			}
 		}
-		if m.RiskGovernor.Status != "" {
-			b.WriteString(fmt.Sprintf("- Risk governor: %s\n", m.RiskGovernor.Status))
+		// Placed orders detail
+		if len(m.Placed) > 0 {
+			b.WriteString("\nĐã đặt:\n")
+			for _, item := range m.Placed {
+				b.WriteString("  ✅ " + managementDecisionText(item) + "\n")
+			}
+		}
+		if len(m.Canceled) > 0 {
+			b.WriteString("\nĐã hủy:\n")
+			for _, item := range m.Canceled {
+				b.WriteString("  ❌ " + managementDecisionText(item) + "\n")
+			}
 		}
 	}
-	b.WriteString("\nAn toàn: chỉ spot limit BUY post-only, không futures, không leverage, không market order.\n")
+	b.WriteString("\n⚠️ Chỉ spot limit BUY post-only, không futures, không leverage, không market order.\n")
 	return trimTelegram(b.String())
 }
 

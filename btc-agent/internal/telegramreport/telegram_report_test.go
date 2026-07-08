@@ -18,7 +18,7 @@ func TestDailyHumanTextIncludesMMLiquidityWatchlist(t *testing.T) {
 		DiscountGap:      0.12, RewardRisk: 2.2, Missing: []string{"MM case NO_EDGE chưa đủ footprint"}, NextTrigger: "Chờ reclaim.",
 	}}}}
 	got := DailyHumanText(agent1.MarketAnalysis{ActionPermission: agent1.Watch}, plan)
-	for _, want := range []string{"MM=NO_EDGE", "Liq=D", "gap 12.00%", "RR 2.20", "trigger: Chờ reclaim"} {
+	for _, want := range []string{"MM=NO_EDGE", "Liq=D", "gap 12.0%", "RR 2.20", "trigger: Chờ reclaim"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}
@@ -42,14 +42,18 @@ func TestLiveReadinessHumanTextExplainsNotReady(t *testing.T) {
 		AutoLiveBlockers: []string{"operator halt active"},
 	})
 	for _, want := range []string{
-		"CHƯA SẴN SÀNG ĐẶT LỆNH",
-		"KHÔNG đặt lệnh",
-		"Agent 2 chưa tạo layer ACTIVE_LIMIT",
+		"blocker đang chặn",
 		"Operator halt đang bật",
 		"OKX env: đủ",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text missing %q:\n%s", want, text)
+		}
+	}
+	// Must NOT contain old proof-only language
+	for _, stale := range []string{"CHƯA SẴN SÀNG ĐẶT LỆNH", "live-proof 24/7, chưa resume", "chưa bật auto"} {
+		if strings.Contains(text, stale) {
+			t.Fatalf("text contains stale proof-only phrase %q:\n%s", stale, text)
 		}
 	}
 	if strings.Contains(text, "apiKey") || strings.Contains(text, "secret") || strings.Contains(text, "passphrase value") {
@@ -104,7 +108,7 @@ func TestLiveSupervisorHumanText(t *testing.T) {
 	}
 	result.RefreshSummary()
 	got := LiveSupervisorHumanText(result)
-	for _, want := range []string{"Live supervisor", "SUPERVISOR_WARN", "managed_cycle", "Consecutive errors: 1", "Managed cycle", "Blocked: 1", "spot limit BUY post-only"} {
+	for _, want := range []string{"Live supervisor", "SUPERVISOR_WARN", "spot limit BUY post-only", "desired=1", "chặn=1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}

@@ -34,13 +34,27 @@ func BuildDeterministic(s RunNowSnapshot) string {
 
 	b.WriteString("I. KẾT LUẬN\n")
 	b.WriteString(actionConclusionVI(s.Analysis, s.Plan) + "\n")
-	b.WriteString("Blocker: " + dominantBlockerVI(s.Analysis, s.Plan) + "\n")
-	b.WriteString(fmt.Sprintf("BTC %.0f | trend %.1f | %s/%s | plan %s\n", s.Analysis.BTCPrice, s.Analysis.TrendScore, s.Analysis.MarketRegime, s.Analysis.ActionPermission, s.Plan.State))
+	b.WriteString(fmt.Sprintf("BTC $%.0f | trend %.1f | %s | perm=%s | plan=%s\n",
+		s.Analysis.BTCPrice, s.Analysis.TrendScore,
+		s.Analysis.MarketRegime, s.Analysis.ActionPermission, s.Plan.State))
+	// Dominant blocker only when not ACTIVE_LIMIT
+	if s.Plan.State != agent2.StateActiveLimit {
+		b.WriteString("Blocker: " + dominantBlockerVI(s.Analysis, s.Plan) + "\n")
+	}
 	b.WriteString("───────────────────\n")
 
 	b.WriteString("II. BTC & KỊCH BẢN\n")
-	b.WriteString(fmt.Sprintf("Bias W/D/4H: %s/%s/%s | Flow %s %.2f | risk %s\n", vietnameseBias(s.Analysis.WeeklyBias), vietnameseBias(s.Analysis.DailyBias), vietnameseBias(s.Analysis.FourHourBias), s.Analysis.Flow.Bias, s.Analysis.Flow.Score, vietnameseRisk(s.Analysis.RiskLevel)))
-	b.WriteString(fmt.Sprintf("Vùng: active %.0f–%.0f | support %.0f–%.0f | invalid %.0f–%.0f | resist %.0f–%.0f\n", s.Analysis.AccumulationZone.Low, s.Analysis.AccumulationZone.High, s.Analysis.PrimarySupportZone.Low, s.Analysis.PrimarySupportZone.High, s.Analysis.InvalidationZone.Low, s.Analysis.InvalidationZone.High, s.Analysis.ResistanceZone.Low, s.Analysis.ResistanceZone.High))
+	b.WriteString(fmt.Sprintf("Bias W/D/4H: %s/%s/%s | Flow %s %.2f | risk %s\n",
+		vietnameseBias(s.Analysis.WeeklyBias),
+		vietnameseBias(s.Analysis.DailyBias),
+		vietnameseBias(s.Analysis.FourHourBias),
+		s.Analysis.Flow.Bias, s.Analysis.Flow.Score,
+		vietnameseRisk(s.Analysis.RiskLevel)))
+	b.WriteString(fmt.Sprintf("Vùng: gom %.0f–%.0f | support %.0f–%.0f | invalid %.0f–%.0f | resist %.0f–%.0f\n",
+		s.Analysis.AccumulationZone.Low, s.Analysis.AccumulationZone.High,
+		s.Analysis.PrimarySupportZone.Low, s.Analysis.PrimarySupportZone.High,
+		s.Analysis.InvalidationZone.Low, s.Analysis.InvalidationZone.High,
+		s.Analysis.ResistanceZone.Low, s.Analysis.ResistanceZone.High))
 	b.WriteString(shortMarketScenarioVI(s.Analysis))
 	b.WriteString("Cần: " + strings.Join(btcTriggerChecklistVI(s.Analysis), " | ") + "\n")
 	b.WriteString("───────────────────\n")
@@ -69,20 +83,43 @@ func BuildDeterministic(s RunNowSnapshot) string {
 
 	b.WriteString("IV. BOT & SAFETY\n")
 	if s.Plan.State == agent2.StateActiveLimit {
+		b.WriteString("🟩 ACTIVE LIMIT — Bot tự đặt spot limit BUY post-only nếu safety gate sạch:\n")
 		for _, asset := range activeAssetsVI(s.Plan) {
 			b.WriteString(shortAssetPlanLineVI(asset) + "\n")
 		}
 	} else {
-		b.WriteString("Không ACTIVE_LIMIT: không đặt lệnh, không chase. WATCH không tạo probe; ARMED mới probe nhỏ; ALLOWED mới ladder.\n")
+		b.WriteString("Không ACTIVE_LIMIT: không đặt lệnh, không chase. Chờ điều kiện mở khóa.\n")
 	}
-	if s.ShadowProbe.Profile != "" {
-		b.WriteString(fmt.Sprintf("Shadow: production=%s research=%s would_probe=%v — shadow only, không đặt lệnh thật.\n", s.ShadowProbe.ProductionPermission, s.ShadowProbe.ResearchPermission, len(s.ShadowProbe.Candidates) > 0))
-	}
+
+	// Supervisor managed cycle detail
 	if s.SupervisorSet && s.Supervisor.Managed != nil {
 		m := s.Supervisor.Managed
-		b.WriteString(fmt.Sprintf("Runtime: %s desired=%d đặt=%d hủy=%d thay=%d chặn=%d | data=%s reconcile=%s risk=%s\n", m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked), m.DataHealth.Status, m.ReconcileSafety.Status, m.RiskGovernor.Status))
+		b.WriteString(fmt.Sprintf("Runtime: %s | desired=%d đặt=%d hủy=%d thay=%d chặn=%d | data=%s risk=%s\n",
+			m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked),
+			m.DataHealth.Status, m.RiskGovernor.Status))
+		// Per-coin why-no-order when nothing was placed
+		if len(m.Desired) == 0 && len(m.PerCoin) > 0 {
+			for _, coin := range m.PerCoin {
+				why := ""
+				if len(coin.WhyNoOrder) > 0 {
+					why = coin.WhyNoOrder[0]
+				} else if coin.NextTrigger != "" {
+					why = "trigger: " + coin.NextTrigger
+				}
+				if why != "" {
+					b.WriteString(fmt.Sprintf("  %s [%s]: %s\n", coin.Symbol, coin.State, why))
+				}
+			}
+		}
 	} else {
-		b.WriteString(fmt.Sprintf("Daily=%s | Reconcile=%s | Supervisor=%s\n", okWarnVI(s.DailyOK), okWarnVI(s.ReconcileOK), s.Supervisor.Status))
+		b.WriteString(fmt.Sprintf("Daily=%s | Reconcile=%s | Supervisor=%s\n",
+			okWarnVI(s.DailyOK), okWarnVI(s.ReconcileOK), s.Supervisor.Status))
+	}
+
+	if s.ShadowProbe.Profile != "" {
+		b.WriteString(fmt.Sprintf("Shadow: prod=%s research=%s probe=%v (shadow only)\n",
+			s.ShadowProbe.ProductionPermission, s.ShadowProbe.ResearchPermission,
+			len(s.ShadowProbe.Candidates) > 0))
 	}
 	if summary := researchSummaryVI(s.ResearchSummary); summary != "" {
 		b.WriteString("Research: " + summary + " (context only).\n")
@@ -90,7 +127,7 @@ func BuildDeterministic(s RunNowSnapshot) string {
 	if len(s.Notes) > 0 {
 		b.WriteString("Note: " + strings.Join(s.Notes, "; ") + "\n")
 	}
-	b.WriteString("An toàn: không futures, không leverage, không market order. Chỉ spot limit BUY post-only only khi ACTIVE_LIMIT và safety gate sạch.\n")
+	b.WriteString("⚠️ Không futures, không leverage, không market order. Chỉ spot limit BUY post-only khi ACTIVE_LIMIT + safety gate sạch.\n")
 	return strings.TrimSpace(b.String()) + "\n"
 }
 

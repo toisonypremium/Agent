@@ -273,3 +273,25 @@ func TestCancelOrderSignsBody(t *testing.T) {
 		t.Fatalf("bad cancel: %+v", got)
 	}
 }
+
+func TestSanitizeClientOrderID(t *testing.T) {
+	cases := []struct {
+		in   string
+		want string
+	}{
+		{"btcagentethusdt1a2b3c", "btcagentethusdt1a2b3c"},
+		{"canary-test-1783489330", "canarytest1783489330"},
+		{"has spaces and-dashes", "hasspacesanddashes"},
+		{"abc!@#$%^&*()", "abc"},
+		{"", ""},
+		{"a_b_c", "a_b_c"},
+		// 35 chars → truncate to 32
+		{"abcdefghijklmnopqrstuvwxyz123456789", "abcdefghijklmnopqrstuvwxyz123456"},
+	}
+	for _, c := range cases {
+		got := sanitizeClientOrderID(c.in)
+		if got != c.want {
+			t.Errorf("sanitizeClientOrderID(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}

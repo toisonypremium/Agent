@@ -18,6 +18,7 @@ import (
 	"btc-agent/internal/aiagent"
 	"btc-agent/internal/aieval"
 	"btc-agent/internal/backtest"
+	"btc-agent/internal/canarydrill"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/exchange/live"
@@ -143,6 +144,12 @@ func run(ctx context.Context, args []string) error {
 		return err
 	case "maintenance":
 		return runMaintenance(cfg, db)
+	case "canary-drill":
+		cycles, err := intArgValue(args, "--cycles")
+		if err != nil {
+			return err
+		}
+		return runCanaryDrill(cfg, cycles)
 	case "scheduler":
 		return runScheduler(ctx, cfg, db, hasFlag(args, "--run-now"), hasFlag(args, "--dry-run"))
 	default:
@@ -151,7 +158,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|canary-drill|status|scheduler> --config config.yaml [--run-now|--dry-run|--cycles <n>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -2724,5 +2731,35 @@ func runOperatorStatus(db *storage.DB) error {
 		status = "ACTIVE (trading halted)"
 	}
 	fmt.Printf("Operator halt: %s\n", status)
+	return nil
+}
+
+func runCanaryDrill(cfg config.Config, cycles int) error {
+	report, err := canarydrill.Run(cfg, cycles)
+	if err != nil {
+		return fmt.Errorf("canary drill: %w", err)
+	}
+	const dir = "reports"
+	if err := reportio.WriteJSON(dir, "canary_drill_latest.json", report); err != nil {
+		return fmt.Errorf("canary drill write json: %w", err)
+	}
+	md := canarydrill.RenderMarkdown(report)
+	if err := reportio.WriteMarkdown(dir, "canary_drill_latest.md", md); err != nil {
+		return fmt.Errorf("canary drill write md: %w", err)
+	}
+	drillStatus := "PASS_SIMULATION_ONLY"
+	if !report.Passed {
+		drillStatus = "FAIL_SIMULATION_ONLY"
+	}
+	fmt.Printf("CANARY DRILL REPORT\nStatus: %s\nCycles: %d\nNo real order was placed.\nReport: %s\n",
+		drillStatus, report.Cycles, filepath.Join(dir, "canary_drill_latest.md"))
+	if !report.Passed {
+		for _, c := range report.Checks {
+			if !c.Passed {
+				fmt.Printf("  FAIL [%s]: %s\n", c.Name, c.Detail)
+			}
+		}
+		return fmt.Errorf("canary drill failed")
+	}
 	return nil
 }

@@ -22,6 +22,20 @@ fail() {
   exit 1
 }
 
+# rotate_log FILE MAX_BYTES
+# If FILE exceeds MAX_BYTES, move it to FILE.1 (overwriting any prior .1),
+# then start a fresh FILE. Keeps exactly one backup.
+rotate_log() {
+  local f="$1" max="$2"
+  [ -f "$f" ] || return 0
+  local size
+  size=$(wc -c < "$f" 2>/dev/null || echo 0)
+  if [ "$size" -gt "$max" ]; then
+    mv -f "$f" "${f}.1"
+    : > "$f"
+  fi
+}
+
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
@@ -53,6 +67,8 @@ log "scheduler wrapper start mode=$MODE config=$CONFIG_PATH pid=$$"
 case "$MODE" in
   paper|live-proof)
     log "starting scheduler dry-run mode=$MODE"
+    rotate_log "$LOG_DIR/scheduler.log" 5242880
+    rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
     exec ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now --dry-run >> "$LOG_DIR/scheduler.log" 2>&1
     ;;
   live-canary-auto)
@@ -64,6 +80,8 @@ case "$MODE" in
         fail "live doctor blocked runtime; see reports/live_doctor_latest.md"
       fi
       log "live doctor passed or warned; starting real scheduler"
+      rotate_log "$LOG_DIR/scheduler.log" 5242880
+      rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
       exec ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now >> "$LOG_DIR/scheduler.log" 2>&1
     fi
     fail "live doctor command failed; see $LOG_DIR/live-doctor.log"

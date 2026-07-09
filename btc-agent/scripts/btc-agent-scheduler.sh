@@ -36,6 +36,17 @@ rotate_log() {
   fi
 }
 
+run_with_rotating_log() {
+  local log_file="$1"
+  shift
+  "$@" 2>&1 | while IFS= read -r line; do
+    rotate_log "$log_file" 5242880
+    printf '%s\n' "$line" >> "$log_file"
+  done
+  local status=${PIPESTATUS[0]}
+  return "$status"
+}
+
 if [ -f "$ENV_FILE" ]; then
   # shellcheck disable=SC1090
   . "$ENV_FILE"
@@ -69,7 +80,7 @@ case "$MODE" in
     log "starting scheduler dry-run mode=$MODE"
     rotate_log "$LOG_DIR/scheduler.log" 5242880
     rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
-    exec ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now --dry-run >> "$LOG_DIR/scheduler.log" 2>&1
+    run_with_rotating_log "$LOG_DIR/scheduler.log" ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now --dry-run
     ;;
   live-canary-auto)
     if [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" != "true" ]; then
@@ -82,7 +93,7 @@ case "$MODE" in
       log "live doctor passed or warned; starting real scheduler"
       rotate_log "$LOG_DIR/scheduler.log" 5242880
       rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
-      exec ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now >> "$LOG_DIR/scheduler.log" 2>&1
+      run_with_rotating_log "$LOG_DIR/scheduler.log" ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now
     fi
     fail "live doctor command failed; see $LOG_DIR/live-doctor.log"
     ;;

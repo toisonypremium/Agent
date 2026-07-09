@@ -166,6 +166,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextSupervisor time.Time
 	var latestDoctor *liveguard.RuntimeDoctorResult
 	liveSupervisor := liveSupervisorState{}
+	consecutiveDoctorBlocks := 0
 	if cfg.Live.SupervisorEnabled {
 		doctor, err := runLiveDoctor(shutdownCtx, cfg, db)
 		if err != nil {
@@ -286,6 +287,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 					}
 				}
 			}
+			if latestDoctor != nil {
+				consecutiveDoctorBlocks = updateDoctorBlockWatchdog(shutdownCtx, cfg, db, *latestDoctor, consecutiveDoctorBlocks)
+			}
 			if _, err := runLiveSupervisorCycleWithDoctor(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor); err != nil {
 				log.Printf("[Scheduler] Live supervisor error: %v", err)
 			}
@@ -333,6 +337,40 @@ func shouldRefreshMarketDataForDoctor(doctor liveguard.RuntimeDoctorResult) bool
 		}
 	}
 	return false
+}
+
+func updateDoctorBlockWatchdog(ctx context.Context, cfg config.Config, db *storage.DB, doctor liveguard.RuntimeDoctorResult, consecutive int) int {
+	if doctor.Status != liveguard.DoctorBlock {
+		if consecutive > 0 {
+			log.Printf("[Scheduler] Live doctor block watchdog reset after status=%s", doctor.Status)
+		}
+		return 0
+	}
+	consecutive++
+	threshold := cfg.Live.AutoHaltAfterErrors
+	log.Printf("[Scheduler] Live doctor block watchdog: consecutive=%d threshold=%d summary=%s", consecutive, threshold, doctor.Summary)
+	if threshold <= 0 || consecutive < threshold {
+		return consecutive
+	}
+	halted, err := db.IsHalted()
+	if err != nil {
+		log.Printf("[Scheduler] Live doctor block watchdog halt check error: %v", err)
+		return consecutive
+	}
+	if halted {
+		log.Printf("[Scheduler] Live doctor block watchdog threshold reached; operator halt already active")
+		return consecutive
+	}
+	if err := db.SetHaltStatus(true); err != nil {
+		log.Printf("[Scheduler] Live doctor block watchdog set halt error: %v", err)
+		return consecutive
+	}
+	text := fmt.Sprintf("Operator halt: ACTIVE (auto-halt after %d consecutive live-doctor blocks). Last doctor: %s", consecutive, doctor.Summary)
+	log.Printf("[Scheduler] %s", text)
+	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		sendTelegram(ctx, cfg, "operator-halt", text)
+	}
+	return consecutive
 }
 
 func schedulerRunNowTelegram(ctx context.Context, cfg config.Config, db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {

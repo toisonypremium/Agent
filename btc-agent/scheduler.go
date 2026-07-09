@@ -19,6 +19,12 @@ import (
 	"btc-agent/internal/textsafe"
 )
 
+const (
+	schedulerResearchTimeout   = 90 * time.Second
+	schedulerAIWatchTimeout    = 120 * time.Second
+	schedulerAITelegramTimeout = 90 * time.Second
+)
+
 func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow bool, dryRun bool) error {
 	tz := cfg.App.Timezone
 	if tz == "" {
@@ -108,16 +114,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	// For --run-now, suppress individual Telegram sends and send one combined summary.
 	if runNow && cfg.Research.Enabled {
 		log.Println("[Scheduler] Executing initial research doctor/brief (--run-now)...")
-		if _, err := runResearchDoctor(shutdownCtx, cfg); err != nil {
+		researchCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
+		if _, err := runResearchDoctor(researchCtx, cfg); err != nil {
 			log.Printf("[Scheduler] Initial research doctor error: %v", err)
 			runNowNotes = append(runNowNotes, "research doctor: "+err.Error())
 		}
-		if brief, err := runResearchBrief(shutdownCtx, cfg, false); err != nil {
+		if brief, err := runResearchBrief(researchCtx, cfg, false); err != nil {
 			log.Printf("[Scheduler] Initial research brief error: %v", err)
 			runNowNotes = append(runNowNotes, "research brief: "+err.Error())
 		} else {
 			runNowResearchSummary = brief.Summary
 		}
+		cancel()
 	}
 
 	if runNow {
@@ -131,10 +139,12 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		// AI watch runs after daily so it has fresh analysis/plan.
 		if cfg.AI.Enabled {
 			log.Println("[Scheduler] Executing initial AI watch (--run-now)...")
-			if err := runAIWatch(shutdownCtx, cfg, db); err != nil {
+			aiCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAIWatchTimeout)
+			if err := runAIWatch(aiCtx, cfg, db); err != nil {
 				log.Printf("[Scheduler] Initial AI watch error: %v", err)
 				runNowNotes = append(runNowNotes, "ai-watch: "+err.Error())
 			}
+			cancel()
 		}
 	}
 
@@ -237,9 +247,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			// Run AI watch after daily analysis so it has fresh data.
 			if cfg.AI.Enabled {
 				log.Println("[Scheduler] Triggering scheduled AI watch (after daily run)...")
-				if err := runAIWatch(shutdownCtx, cfg, db); err != nil {
+				aiCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAIWatchTimeout)
+				if err := runAIWatch(aiCtx, cfg, db); err != nil {
 					log.Printf("[Scheduler] AI watch error: %v", err)
 				}
+				cancel()
 			}
 			now = time.Now().In(loc)
 			nextDaily, err = getNextRunTime(dailyTime, loc, now)
@@ -260,9 +272,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 
 		if researchScheduled && !time.Now().Before(nextResearch) {
 			log.Println("[Scheduler] Triggering scheduled research brief...")
-			if _, err := runResearchBrief(shutdownCtx, cfg, true); err != nil {
+			researchCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
+			if _, err := runResearchBrief(researchCtx, cfg, true); err != nil {
 				log.Printf("[Scheduler] Research brief error: %v", err)
 			}
+			cancel()
 			nextResearch = time.Now().Add(researchInterval)
 			log.Printf("[Scheduler] Next research brief: %s", nextResearch.Format("2006-01-02 15:04:05 MST"))
 		}
@@ -378,7 +392,9 @@ func schedulerRunNowTelegram(ctx context.Context, cfg config.Config, db *storage
 	if !cfg.AI.Enabled {
 		return fallback
 	}
-	text, err := schedulerRunNowTelegramAI(ctx, cfg, db, researchSummary, dailyOK, reconcileOK, supervisor, supervisorSet, notes)
+	aiCtx, cancel := context.WithTimeout(ctx, schedulerAITelegramTimeout)
+	defer cancel()
+	text, err := schedulerRunNowTelegramAI(aiCtx, cfg, db, researchSummary, dailyOK, reconcileOK, supervisor, supervisorSet, notes)
 	if err != nil {
 		log.Printf("scheduler AI Telegram fallback: %v", err)
 		return fallback

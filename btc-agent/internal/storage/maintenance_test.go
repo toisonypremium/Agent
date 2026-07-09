@@ -105,6 +105,72 @@ func TestPruneMaintenanceCapsCandlesAnalysesAndPlans(t *testing.T) {
 	}
 }
 
+func TestCloseStaleOpenLiveOrders(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Unix(1700000000, 0)
+
+	// Case 1: has expires_at in the past — should be closed.
+	mustExec(t, db, `INSERT INTO live_orders(client_order_id,order_id,inst_id,symbol,side,type,price,quantity,notional,status,submitted_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"c1", "o1", "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.01, 1, "LIVE_OPEN", now.Add(-10*24*time.Hour).Unix(), now.Unix(), now.Add(-1*time.Hour).Unix())
+
+	// Case 2: no expires_at and submitted_at is older than staledays — should be closed.
+	mustExec(t, db, `INSERT INTO live_orders(client_order_id,order_id,inst_id,symbol,side,type,price,quantity,notional,status,submitted_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"c2", "o2", "SOL-USDT", "SOLUSDT", "BUY", "limit", 20, 0.5, 10, "SUBMITTED", now.Add(-10*24*time.Hour).Unix(), now.Unix(), 0)
+
+	// Case 3: recent order with no expires_at — should NOT be closed.
+	mustExec(t, db, `INSERT INTO live_orders(client_order_id,order_id,inst_id,symbol,side,type,price,quantity,notional,status,submitted_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"c3", "o3", "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.01, 1, "LIVE_OPEN", now.Add(-1*24*time.Hour).Unix(), now.Unix(), 0)
+
+	// Case 4: future expires_at — should NOT be closed.
+	mustExec(t, db, `INSERT INTO live_orders(client_order_id,order_id,inst_id,symbol,side,type,price,quantity,notional,status,submitted_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"c4", "o4", "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.01, 1, "LIVE_OPEN", now.Add(-2*24*time.Hour).Unix(), now.Unix(), now.Add(24*time.Hour).Unix())
+
+	result, err := db.PruneMaintenance(MaintenanceConfig{
+		StaleOpenLiveOrderDays: 7,
+	}, now)
+	if err != nil {
+		t.Fatalf("PruneMaintenance: %v", err)
+	}
+	if result.StaleOpenLiveOrdersClosed != 2 {
+		t.Fatalf("stale_closed=%d want 2", result.StaleOpenLiveOrdersClosed)
+	}
+	// c3 and c4 remain open.
+	if got := countRowsWhere(t, db, "live_orders", "status IN ('LIVE_OPEN','SUBMITTED','PLANNED','PARTIAL_FILL')"); got != 2 {
+		t.Fatalf("remaining_open=%d want 2", got)
+	}
+	if got := countRowsWhere(t, db, "live_orders", "status='EXPIRED'"); got != 2 {
+		t.Fatalf("expired=%d want 2", got)
+	}
+	if got := countRowsWhere(t, db, "live_orders", "last_management_action='maintenance_stale_expire'"); got != 2 {
+		t.Fatalf("action_tagged=%d want 2", got)
+	}
+}
+
+func TestCloseStaleOpenLiveOrdersDisabledWhenZero(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	now := time.Unix(1700000000, 0)
+	mustExec(t, db, `INSERT INTO live_orders(client_order_id,order_id,inst_id,symbol,side,type,price,quantity,notional,status,submitted_at,updated_at,expires_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		"c1", "o1", "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.01, 1, "LIVE_OPEN", now.Add(-30*24*time.Hour).Unix(), now.Unix(), 0)
+
+	result, err := db.PruneMaintenance(MaintenanceConfig{StaleOpenLiveOrderDays: -1}, now)
+	if err != nil {
+		t.Fatalf("PruneMaintenance: %v", err)
+	}
+	if result.StaleOpenLiveOrdersClosed != 0 {
+		t.Fatalf("stale_closed=%d want 0 (disabled)", result.StaleOpenLiveOrdersClosed)
+	}
+}
+
 func mustExec(t *testing.T, db *DB, query string, args ...any) {
 	t.Helper()
 	if _, err := db.Exec(query, args...); err != nil {

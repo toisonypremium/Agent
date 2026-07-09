@@ -14,6 +14,7 @@ const (
 	DefaultMaxCandlesPerSymbolInterval = 1000
 	DefaultMaxAnalysisRows             = 500
 	DefaultMaxPlanRows                 = 500
+	DefaultStaleOpenLiveOrderDays      = 7
 )
 
 type MaintenanceConfig struct {
@@ -25,6 +26,9 @@ type MaintenanceConfig struct {
 	MaxAnalysisRows             int  `json:"max_analysis_rows"`
 	MaxPlanRows                 int  `json:"max_plan_rows"`
 	WALCheckpoint               bool `json:"wal_checkpoint_on_maintenance"`
+	// StaleOpenLiveOrderDays: expire LIVE_OPEN/SUBMITTED orders older than N days
+	// that have no expires_at. 0 disables. Default 7.
+	StaleOpenLiveOrderDays int `json:"stale_open_live_order_days"`
 }
 
 type MaintenanceResult struct {
@@ -40,6 +44,7 @@ type MaintenanceResult struct {
 	PlansDeleted              int64             `json:"plans_deleted"`
 	WALCheckpointed           bool              `json:"wal_checkpointed"`
 	ReportFilesDeleted        int               `json:"report_files_deleted"`
+	StaleOpenLiveOrdersClosed int64             `json:"stale_open_live_orders_closed"`
 	Summary                   string            `json:"summary"`
 }
 
@@ -64,6 +69,9 @@ func NormalizeMaintenanceConfig(cfg MaintenanceConfig) MaintenanceConfig {
 	}
 	if cfg.MaxPlanRows == 0 {
 		cfg.MaxPlanRows = DefaultMaxPlanRows
+	}
+	if cfg.StaleOpenLiveOrderDays == 0 {
+		cfg.StaleOpenLiveOrderDays = DefaultStaleOpenLiveOrderDays
 	}
 	return cfg
 }
@@ -115,6 +123,12 @@ func (d *DB) PruneMaintenance(cfg MaintenanceConfig, now time.Time) (Maintenance
 		return result, fmt.Errorf("prune plans: %w", err)
 	}
 	result.PlansDeleted = plansDeleted
+
+	staleClosed, err := closeStaleOpenLiveOrders(d.DB, cfg.StaleOpenLiveOrderDays, now)
+	if err != nil {
+		return result, fmt.Errorf("close stale open live orders: %w", err)
+	}
+	result.StaleOpenLiveOrdersClosed = staleClosed
 
 	if cfg.WALCheckpoint {
 		if _, err := d.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
@@ -183,7 +197,33 @@ func maintenanceSummary(r MaintenanceResult) string {
 	if !r.Enabled {
 		return "Maintenance disabled"
 	}
-	return fmt.Sprintf("Maintenance deleted reports=%d live_order_events=%d live_position_events=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d", r.ReportsDeleted, r.LiveOrderEventsDeleted, r.LivePositionEventsDeleted, r.ClosedPaperOrdersDeleted, r.CandlesDeleted, r.AnalysesDeleted, r.PlansDeleted, r.ReportFilesDeleted)
+	return fmt.Sprintf("Maintenance deleted reports=%d live_order_events=%d live_position_events=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d stale_live_orders_closed=%d", r.ReportsDeleted, r.LiveOrderEventsDeleted, r.LivePositionEventsDeleted, r.ClosedPaperOrdersDeleted, r.CandlesDeleted, r.AnalysesDeleted, r.PlansDeleted, r.ReportFilesDeleted, r.StaleOpenLiveOrdersClosed)
+}
+
+// closeStaleOpenLiveOrders marks LIVE_OPEN/SUBMITTED/PLANNED/PARTIAL_FILL orders as
+// EXPIRED if they were submitted more than staledays ago and have no expires_at, or
+// if their expires_at is before now. Safe to call every maintenance cycle.
+// Only runs when staledays > 0.
+func closeStaleOpenLiveOrders(db *sql.DB, staledays int, now time.Time) (int64, error) {
+	if staledays <= 0 {
+		return 0, nil
+	}
+	staleCutoff := now.AddDate(0, 0, -staledays).Unix()
+	nowUnix := now.Unix()
+	// Two conditions:
+	// 1. Has expires_at > 0 and expires_at < now (order expired per its own timer).
+	// 2. Has no expires_at (or expires_at=0) and submitted_at < stale cutoff (very old orphan).
+	return execRows(db,
+		`UPDATE live_orders
+		 SET status='EXPIRED', updated_at=?, last_management_action='maintenance_stale_expire'
+		 WHERE status IN ('PLANNED','SUBMITTED','PARTIAL_FILL','LIVE_OPEN','PARTIALLY_FILLED')
+		 AND (
+		   (expires_at IS NOT NULL AND expires_at > 0 AND expires_at < ?)
+		   OR
+		   ((expires_at IS NULL OR expires_at = 0) AND submitted_at IS NOT NULL AND submitted_at > 0 AND submitted_at < ?)
+		 )`,
+		nowUnix, nowUnix, staleCutoff,
+	)
 }
 
 func (r *MaintenanceResult) RefreshSummary() {

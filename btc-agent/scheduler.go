@@ -128,6 +128,14 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		} else {
 			runNowDailyOK = true
 		}
+		// AI watch runs after daily so it has fresh analysis/plan.
+		if cfg.AI.Enabled {
+			log.Println("[Scheduler] Executing initial AI watch (--run-now)...")
+			if err := runAIWatch(shutdownCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Initial AI watch error: %v", err)
+				runNowNotes = append(runNowNotes, "ai-watch: "+err.Error())
+			}
+		}
 	}
 
 	var nextResearch time.Time
@@ -225,6 +233,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			if err := runDaily(shutdownCtx, cfg, db); err != nil {
 				log.Printf("[Scheduler] Daily run error: %v", err)
 			}
+			// Run AI watch after daily analysis so it has fresh data.
+			if cfg.AI.Enabled {
+				log.Println("[Scheduler] Triggering scheduled AI watch (after daily run)...")
+				if err := runAIWatch(shutdownCtx, cfg, db); err != nil {
+					log.Printf("[Scheduler] AI watch error: %v", err)
+				}
+			}
 			now = time.Now().In(loc)
 			nextDaily, err = getNextRunTime(dailyTime, loc, now)
 			if err != nil {
@@ -271,6 +286,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			log.Println("[Scheduler] Triggering scheduled maintenance...")
 			if err := runMaintenance(cfg, db); err != nil {
 				log.Printf("[Scheduler] Maintenance error: %v", err)
+			}
+			// Run learning recommendations after maintenance so analysis rows are pruned first.
+			log.Println("[Scheduler] Triggering scheduled learning (after maintenance)...")
+			if err := runLearning(cfg, db); err != nil {
+				log.Printf("[Scheduler] Learning error: %v", err)
 			}
 			now = time.Now().In(loc)
 			nextMaintenance, err = getNextRunTime(maintenanceTime, loc, now)

@@ -152,8 +152,16 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextResearch time.Time
 	var nextReconcile time.Time
 	var nextSupervisor time.Time
+	var nextAlivePing time.Time
 	var latestDoctor *liveguard.RuntimeDoctorResult
 	consecutiveDoctorBlocks := 0
+
+	alivePingInterval := time.Duration(cfg.Live.HeartbeatIntervalMinutes) * time.Minute
+	alivePingEnabled := cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && alivePingInterval > 0
+	if alivePingEnabled {
+		nextAlivePing = time.Now().Add(alivePingInterval)
+		log.Printf("[Scheduler] Alive ping interval: %v next=%s", alivePingInterval, nextAlivePing.Format("2006-01-02 15:04:05 MST"))
+	}
 
 	heartbeat := SchedulerHeartbeat{
 		PID:                   os.Getpid(),
@@ -335,6 +343,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if maintenanceEnabled && nextMaintenance.Before(waitUntil) {
 			waitUntil = nextMaintenance
 		}
+		if alivePingEnabled && nextAlivePing.Before(waitUntil) {
+			waitUntil = nextAlivePing
+		}
 		wait := time.Until(waitUntil)
 		if wait < 0 {
 			wait = 0
@@ -435,6 +446,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextSupervisor = time.Now().Add(managementInterval)
 			log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live supervisor completed")
+		}
+
+		if alivePingEnabled && !time.Now().Before(nextAlivePing) {
+			log.Println("[Scheduler] Sending alive ping to Telegram...")
+			sendTelegram(shutdownCtx, cfg, "scheduler-alive", buildAlivePingText(heartbeat))
+			nextAlivePing = time.Now().Add(alivePingInterval)
+			writeHeartbeat("alive ping sent")
 		}
 
 		if maintenanceEnabled && !time.Now().Before(nextMaintenance) {
@@ -709,6 +727,35 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	text = textsafe.StripURLs(text)
 	text = textsafe.TrimAtBoundary(text, 3400)
 	return text, nil
+}
+
+func buildAlivePingText(h SchedulerHeartbeat) string {
+	var b strings.Builder
+	b.WriteString("🟢 BTC Agent — Bot Alive\n")
+	b.WriteString(fmt.Sprintf("PID: %d | Mode: %s | DryRun: %v\n", h.PID, emptyDefaultSched(h.Mode, "unset"), h.DryRun))
+	b.WriteString(fmt.Sprintf("Status: %s | Doctor: %s\n", h.Status, emptyDefaultSched(h.DoctorStatus, "unknown")))
+	if h.ConsecutiveDoctorBlocks > 0 {
+		b.WriteString(fmt.Sprintf("⚠️ Consecutive doctor blocks: %d\n", h.ConsecutiveDoctorBlocks))
+	}
+	b.WriteString(fmt.Sprintf("Last event: %s @ %s\n", emptyDefaultSched(h.LastEvent, "—"), emptyDefaultSched(h.LastEventAt, "—")))
+	if h.NextDailyRun != "" {
+		b.WriteString(fmt.Sprintf("Next daily: %s\n", h.NextDailyRun))
+	}
+	if h.NextLiveSupervisorCycle != "" {
+		b.WriteString(fmt.Sprintf("Next supervisor: %s\n", h.NextLiveSupervisorCycle))
+	}
+	if h.DoctorSummary != "" {
+		b.WriteString(fmt.Sprintf("Doctor: %s\n", h.DoctorSummary))
+	}
+	b.WriteString("An toàn: spot limit BUY post-only; không futures, không leverage, không market order.\n")
+	return b.String()
+}
+
+func emptyDefaultSched(v, fallback string) string {
+	if v == "" {
+		return fallback
+	}
+	return v
 }
 
 func parseClockTime(value string) (int, int, error) {

@@ -18,7 +18,7 @@ func TestDailyHumanTextIncludesMMLiquidityWatchlist(t *testing.T) {
 		DiscountGap:      0.12, RewardRisk: 2.2, Missing: []string{"MM case NO_EDGE chưa đủ footprint"}, NextTrigger: "Chờ reclaim.",
 	}}}}
 	got := DailyHumanText(agent1.MarketAnalysis{ActionPermission: agent1.Watch}, plan)
-	for _, want := range []string{"MM=NO_EDGE", "Liq=D", "gap 12.0%", "RR 2.20", "trigger: Chờ reclaim"} {
+	for _, want := range []string{"MM=NO_EDGE", "Liq=D", "gap 12.0%", "RR 2.20", "điều kiện kích hoạt: Chờ reclaim"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}
@@ -42,9 +42,9 @@ func TestLiveReadinessHumanTextExplainsNotReady(t *testing.T) {
 		AutoLiveBlockers: []string{"operator halt active"},
 	})
 	for _, want := range []string{
-		"blocker đang chặn",
-		"Operator halt đang bật",
-		"OKX env: đủ",
+		"lý do đang chặn",
+		"Khóa vận hành đang bật",
+		"Biến môi trường OKX: đủ",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text missing %q:\n%s", want, text)
@@ -63,7 +63,7 @@ func TestLiveReadinessHumanTextExplainsNotReady(t *testing.T) {
 
 func TestExplainBlockerMapsAutoEnv(t *testing.T) {
 	got := ExplainBlocker("BTC_AGENT_ALLOW_AUTO_LIVE=true required for auto live execution")
-	if !strings.Contains(got, "Auto live chưa bật") || !strings.Contains(got, "khóa an toàn") {
+	if !strings.Contains(got, "Tự động giao dịch thật chưa bật") || !strings.Contains(got, "khóa an toàn") {
 		t.Fatalf("unexpected blocker explanation: %s", got)
 	}
 }
@@ -85,7 +85,7 @@ func TestLiveLadderOrderHumanText(t *testing.T) {
 		Candidates:    []liveguard.CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Price: 100, Notional: 2, PostOnly: true, Canary: true}},
 		TotalNotional: 2,
 	})
-	for _, want := range []string{"Auto ladder", "ĐÃ gửi", "ETHUSDT", "2.00 USDT"} {
+	for _, want := range []string{"Rải lệnh tự động", "ĐÃ gửi", "ETHUSDT", "2.00 USDT"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("missing %q:\n%s", want, text)
 		}
@@ -108,7 +108,7 @@ func TestLiveSupervisorHumanText(t *testing.T) {
 	}
 	result.RefreshSummary()
 	got := LiveSupervisorHumanText(result)
-	for _, want := range []string{"Live supervisor", "SUPERVISOR_WARN", "spot limit BUY post-only", "desired=1", "chặn=1"} {
+	for _, want := range []string{"Giám sát giao dịch thật", "SUPERVISOR_WARN", "mua giao ngay bằng lệnh giới hạn tạo thanh khoản", "mong muốn=1", "chặn=1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}
@@ -126,7 +126,7 @@ func TestResearchBriefHumanText(t *testing.T) {
 		Summary: "ok",
 		Items:   []research.ResearchItem{{Source: "Test RSS", Title: "BTC exchange outage", URL: "https://example.com/news", Risk: research.RiskWarn, Tags: []string{"BTC", "OKX"}}},
 	})
-	for _, want := range []string{"Research Strategy Brief", "Research-only", "BTC exchange outage", "BTC", "KẾ HOẠCH BOT"} {
+	for _, want := range []string{"Tóm tắt tin tức chiến lược", "Tin tức chỉ để tham khảo", "BTC exchange outage", "BTC", "KẾ HOẠCH BOT"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}
@@ -157,7 +157,7 @@ func TestLiveOrderManagementHumanText(t *testing.T) {
 		},
 	}
 	got := LiveOrderManagementHumanText(result)
-	for _, want := range []string{"Quản lý live orders", "Đã hủy: 1", "Đã đặt mới: 1", "Theo từng coin", "ETHUSDT", "SOLUSDT", "RENDERUSDT", "Vì sao chưa đặt", "Trigger tiếp theo", "State: ACTIVE_LIMIT", "Pending: 2.00 USDT", "không futures"} {
+	for _, want := range []string{"Quản lý lệnh thật", "Đã hủy: 1", "Đã đặt mới: 1", "Theo từng coin", "ETHUSDT", "SOLUSDT", "RENDERUSDT", "Vì sao chưa đặt", "Điều kiện kích hoạt tiếp theo", "Trạng thái: ĐỦ ĐIỀU KIỆN ĐẶT LỆNH", "Vốn đang chờ: 2.00 USDT", "không hợp đồng tương lai"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}

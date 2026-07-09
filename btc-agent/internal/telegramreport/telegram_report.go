@@ -11,6 +11,7 @@ import (
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/research"
 	"btc-agent/internal/textsafe"
+	"btc-agent/internal/usertext"
 )
 
 type LiveReadinessView struct {
@@ -62,13 +63,13 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 
 	// ── I. BTC & Thị trường ───────────────────────────────────────────────
 	b.WriteString("I. BTC & THỊ TRƯỜNG\n")
-	b.WriteString(fmt.Sprintf("Giá: $%.0f  |  Regime: %s\n", analysis.BTCPrice, humanRegime(analysis.MarketRegime)))
-	b.WriteString(fmt.Sprintf("Trend: %.1f/100  |  F&G: %s (%d)  |  Rủi ro: %s\n",
+	b.WriteString(fmt.Sprintf("Giá: $%.0f  |  Chế độ thị trường: %s\n", analysis.BTCPrice, humanRegime(analysis.MarketRegime)))
+	b.WriteString(fmt.Sprintf("Điểm xu hướng: %.1f/100  |  Tham lam/sợ hãi: %s (%d)  |  Rủi ro: %s\n",
 		analysis.TrendScore,
 		analysis.FearGreed.Classification,
 		analysis.FearGreed.Value,
 		humanRiskEmoji(analysis.RiskLevel)))
-	b.WriteString(fmt.Sprintf("Bias W/D/4H: %s/%s/%s  |  Flow: %s %.2f\n",
+	b.WriteString(fmt.Sprintf("Thiên hướng tuần/ngày/4H: %s/%s/%s  |  Dòng tiền: %s %.2f\n",
 		shortBias(analysis.WeeklyBias),
 		shortBias(analysis.DailyBias),
 		shortBias(analysis.FourHourBias),
@@ -81,12 +82,12 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 		b.WriteString(fmt.Sprintf("🟢 Gom: $%.0f–%.0f  |", analysis.AccumulationZone.Low, analysis.AccumulationZone.High))
 	}
 	if analysis.PrimarySupportZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("  🔵 Support: $%.0f–%.0f\n", analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High))
+		b.WriteString(fmt.Sprintf("  🔵 Hỗ trợ: $%.0f–%.0f\n", analysis.PrimarySupportZone.Low, analysis.PrimarySupportZone.High))
 	} else {
 		b.WriteString("\n")
 	}
 	if analysis.InvalidationZone.Low > 0 {
-		b.WriteString(fmt.Sprintf("❌ Invalidation: $%.0f–%.0f  |", analysis.InvalidationZone.Low, analysis.InvalidationZone.High))
+		b.WriteString(fmt.Sprintf("❌ Vô hiệu: $%.0f–%.0f  |", analysis.InvalidationZone.Low, analysis.InvalidationZone.High))
 	}
 	if analysis.ResistanceZone.Low > 0 {
 		b.WriteString(fmt.Sprintf("  🔴 Kháng cự: $%.0f–%.0f\n", analysis.ResistanceZone.Low, analysis.ResistanceZone.High))
@@ -106,7 +107,7 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 
 	// ── III. Kế hoạch giao dịch (Agent 2) ──────────────────────────────────
 	b.WriteString("III. KẾ HOẠCH GIAO DỊCH\n")
-	b.WriteString(fmt.Sprintf("BTC gate: %s  |  Plan: %s\n", ExplainPermission(analysis.ActionPermission), humanPlanStateEmoji(plan.State)))
+	b.WriteString(fmt.Sprintf("Cổng BTC: %s  |  Kế hoạch: %s\n", ExplainPermission(analysis.ActionPermission), humanPlanStateEmoji(plan.State)))
 
 	activeAssets := []agent2.AssetPlan{}
 	for _, a := range plan.Assets {
@@ -115,20 +116,20 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 		}
 	}
 	if len(activeAssets) > 0 {
-		b.WriteString("🟩 ACTIVE LIMIT — Bot tự đặt limit nếu safety gate sạch:\n")
+		b.WriteString("🟩 ĐỦ ĐIỀU KIỆN ĐẶT LỆNH — Bot tự đặt lệnh giới hạn nếu các khóa an toàn đều đạt:\n")
 		for _, a := range activeAssets {
 			b.WriteString(fmt.Sprintf("  %s | RR=%.1f | rank #%d | MM=%s %.0f | Liq=%s %.0f\n",
 				a.Symbol, a.RewardRisk, a.RotationRank,
 				emptyMMCaseText(a.MMCase), a.MMScore,
 				empty(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score))
 			for _, l := range a.Layers {
-				b.WriteString(fmt.Sprintf("    Layer %d: $%.2f × %.0f USDT\n", l.Index, l.Price, l.Notional))
+				b.WriteString(fmt.Sprintf("    Tầng %d: $%.2f × %.0f USDT\n", l.Index, l.Price, l.Notional))
 			}
 		}
 	}
 
 	if len(plan.Watchlist.Candidates) > 0 {
-		b.WriteString("👀 Watchlist:\n")
+		b.WriteString("👀 Danh sách theo dõi:\n")
 		for _, c := range firstCandidates(plan.Watchlist.Candidates, 3) {
 			b.WriteString(fmt.Sprintf("  %s %.0f%% | MM=%s %.0f | Liq=%s %.0f | gap %.1f%% RR %.2f",
 				c.Symbol, c.ReadinessScore*100,
@@ -136,13 +137,13 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 				empty(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score,
 				c.DiscountGap*100, c.RewardRisk))
 			if c.NextTrigger != "" {
-				b.WriteString(fmt.Sprintf(" | trigger: %s", c.NextTrigger))
+				b.WriteString(fmt.Sprintf(" | điều kiện kích hoạt: %s", c.NextTrigger))
 			}
 			b.WriteString("\n")
 			if len(c.Missing) > 0 {
 				b.WriteString(fmt.Sprintf("    Thiếu: %s\n", humanList(c.Missing, 2)))
 			} else if len(c.MMMissing) > 0 {
-				b.WriteString(fmt.Sprintf("    MM thiếu: %s\n", humanList(c.MMMissing, 2)))
+				b.WriteString(fmt.Sprintf("    Dấu vết tạo lập thiếu: %s\n", humanList(c.MMMissing, 2)))
 			}
 		}
 	}
@@ -160,7 +161,7 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 	// ── IV. Hành động & Safety ───────────────────────────────────────────
 	b.WriteString("IV. HÀNH ĐỘNG\n")
 	b.WriteString(humanActionConclusion(analysis.ActionPermission, plan.State, len(activeAssets)))
-	b.WriteString("⚠️ Spot limit BUY post-only. Không futures/leverage/market.\n")
+	b.WriteString("⚠️ Chỉ mua giao ngay bằng lệnh giới hạn tạo thanh khoản. Không hợp đồng tương lai, không đòn bẩy, không lệnh thị trường.\n")
 
 	return trimTelegram(b.String())
 }
@@ -226,13 +227,13 @@ func humanRiskEmoji(r agent1.Risk) string {
 func humanPlanStateEmoji(state agent2.State) string {
 	switch state {
 	case agent2.StateActiveLimit:
-		return "🟩 ACTIVE_LIMIT — Đã có layer limit hợp lệ"
+		return "🟩 ĐỦ ĐIỀU KIỆN ĐẶT LỆNH — đã có tầng lệnh giới hạn hợp lệ"
 	case agent2.StateArmed:
-		return "🟡 ARMED — Gần đủ điều kiện, chờ trigger"
+		return "🟡 CHUẨN BỊ — gần đủ điều kiện, chờ kích hoạt"
 	case agent2.StateWatch:
-		return "👀 WATCH — Theo dõi, chưa đặt lệnh"
+		return "👀 THEO DÕI — chưa đặt lệnh"
 	case agent2.StateNoTrade:
-		return "🚫 NO_TRADE — Không giao dịch"
+		return "🚫 KHÔNG GIAO DỊCH"
 	default:
 		return string(state)
 	}
@@ -259,13 +260,13 @@ func humanActionConclusion(perm agent1.Permission, state agent2.State, activeCou
 	case perm == agent1.NoTrade:
 		return "🚫 KHÔNG giao dịch. BTC chưa cho phép. Giữ USDT.\n"
 	case perm == agent1.Watch && state == agent2.StateWatch:
-		return "👀 QUAN SÁT. Chưa có setup. Theo dõi vùng support, chờ flow xác nhận.\n"
+		return "👀 QUAN SÁT. Chưa có thế vào lệnh. Theo dõi vùng hỗ trợ, chờ dòng tiền xác nhận.\n"
 	case perm == agent1.Armed:
-		return "🟡 CHUẨN BỊ. BTC gần đủ điều kiện. Theo dõi chặt trigger để chuyển ACTIVE_LIMIT.\n"
+		return "🟡 CHUẨN BỊ. BTC gần đủ điều kiện. Theo dõi chặt điều kiện kích hoạt để chuyển sang trạng thái được phép đặt lệnh.\n"
 	case perm == agent1.Allowed && activeCount > 0:
-		return fmt.Sprintf("✅ CÓ %d COIN ĐỦ ĐIỀU KIỆN. Bot tự đặt limit nếu proof sạch và không có blocker.\n", activeCount)
+		return fmt.Sprintf("✅ CÓ %d COIN ĐỦ ĐIỀU KIỆN. Bot tự đặt lệnh giới hạn nếu kiểm tra an toàn sạch và không có lý do chặn.\n", activeCount)
 	case perm == agent1.Allowed && activeCount == 0:
-		return "🟢 BTC ALLOWED nhưng chưa coin nào đủ setup. Theo dõi watchlist.\n"
+		return "🟢 BTC đã cho phép tìm cơ hội, nhưng chưa coin nào đủ thế vào lệnh. Theo dõi danh sách.\n"
 	default:
 		return "👀 Tiếp tục theo dõi. Không đặt lệnh thủ công.\n"
 	}
@@ -273,21 +274,21 @@ func humanActionConclusion(perm agent1.Permission, state agent2.State, activeCou
 
 func LiveReadinessHumanText(r LiveReadinessView) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Live readiness\n\n")
+	b.WriteString("🤖 BTC Agent — Kiểm tra sẵn sàng giao dịch thật\n\n")
 
 	autoBlockers := len(r.AutoLiveBlockers)
 	if autoBlockers == 0 {
-		b.WriteString("✅ Auto live: KHÔNG blocker. Bot có thể đặt lệnh khi plan đạt ACTIVE_LIMIT.\n")
+		b.WriteString("✅ Tự động giao dịch thật: KHÔNG có lý do chặn. Bot có thể đặt lệnh khi kế hoạch đạt trạng thái được phép đặt lệnh.\n")
 	} else {
-		b.WriteString(fmt.Sprintf("🚫 Auto live: %d blocker đang chặn.\n", autoBlockers))
+		b.WriteString(fmt.Sprintf("🚫 Tự động giao dịch thật: %d lý do đang chặn.\n", autoBlockers))
 	}
-	b.WriteString(fmt.Sprintf("Plan: %s  |  Open orders: %d  |  Positions: %d\n\n",
+	b.WriteString(fmt.Sprintf("Kế hoạch: %s  |  Lệnh đang mở: %d  |  Vị thế: %d\n\n",
 		r.PlanState, r.OpenLiveOrders, r.LivePositions))
 
 	b.WriteString("1) Tài khoản & kết nối\n")
-	b.WriteString(fmt.Sprintf("- OKX env: %s\n", credentialSummary(r.CredentialEnvPresent)))
+	b.WriteString(fmt.Sprintf("- Biến môi trường OKX: %s\n", credentialSummary(r.CredentialEnvPresent)))
 	if r.Proof.Account.Enabled {
-		b.WriteString(fmt.Sprintf("- USDT free: %.2f  |  Min: %.2f  |  Auth: %s  |  Balance: %s\n",
+		b.WriteString(fmt.Sprintf("- USDT khả dụng: %.2f  |  Tối thiểu: %.2f  |  Xác thực: %s  |  Số dư: %s\n",
 			r.Proof.Account.FreeUSDT, r.Proof.Account.MinRequiredUSDT,
 			yesNo(r.Proof.Account.AuthOK), yesNo(r.Proof.Account.BalanceOK)))
 		if r.Proof.Account.Error != "" {
@@ -295,36 +296,36 @@ func LiveReadinessHumanText(r LiveReadinessView) string {
 		}
 	}
 
-	b.WriteString("\n2) Cấu hình live\n")
-	b.WriteString(fmt.Sprintf("- Mode: %s  |  Halt: %s\n", empty(r.Mode, "chưa đặt"), haltText(r.OperatorHalted)))
-	b.WriteString(fmt.Sprintf("- Auto live env: %s  |  Auto execute: %v  |  Manual confirm: %v\n",
+	b.WriteString("\n2) Cấu hình giao dịch thật\n")
+	b.WriteString(fmt.Sprintf("- Chế độ: %s  |  Khóa vận hành: %s\n", empty(r.Mode, "chưa đặt"), haltText(r.OperatorHalted)))
+	b.WriteString(fmt.Sprintf("- Biến cho phép tự động: %s  |  Tự động đặt lệnh: %v  |  Yêu cầu xác nhận tay: %v\n",
 		enabledText(r.AutoLiveEnv), r.AutoExecute, r.RequireManualConfirm))
-	b.WriteString(fmt.Sprintf("- Canary: %v (%.2f USDT)  |  Proof only: %v\n",
+	b.WriteString(fmt.Sprintf("- Chạy thử vốn nhỏ: %v (%.2f USDT)  |  Chỉ kiểm tra, không đặt lệnh: %v\n",
 		r.CanaryMode, r.CanaryMaxNotional, r.ProofOnly))
-	b.WriteString(fmt.Sprintf("- Order engine: enabled=%v  |  %d layer/coin  |  %d lệnh/coin  |  %d lệnh tổng\n",
+	b.WriteString(fmt.Sprintf("- Bộ quản lý lệnh: bật=%v  |  %d tầng/coin  |  %d lệnh/coin  |  %d lệnh tổng\n",
 		r.OrderManagementEnabled, r.MaxAutoLayersPerAsset, r.MaxOpenLiveOrdersPerAsset, r.MaxOpenLiveOrdersTotal))
 	b.WriteString(fmt.Sprintf("- Vốn: %.0f USDT/lệnh  |  %.0f USDT/coin  |  %.0f USDT tổng\n",
 		r.MaxLiveNotionalPerOrderUSDT, r.MaxLiveNotionalPerAssetUSDT, r.MaxLiveNotionalTotalUSDT))
 
 	if r.DataHealth.Status != "" {
-		b.WriteString(fmt.Sprintf("\n3) Health\n- Data: %s\n", r.DataHealth.Status))
+		b.WriteString(fmt.Sprintf("\n3) Sức khỏe hệ thống\n- Dữ liệu: %s\n", r.DataHealth.Status))
 		if r.ReconcileSafety.Status != "" {
-			b.WriteString(fmt.Sprintf("- Reconcile: %s\n", r.ReconcileSafety.Status))
+			b.WriteString(fmt.Sprintf("- Đối soát lệnh: %s\n", r.ReconcileSafety.Status))
 		}
 		if r.RiskGovernor.Status != "" {
-			b.WriteString(fmt.Sprintf("- Risk governor: %s\n", r.RiskGovernor.Status))
+			b.WriteString(fmt.Sprintf("- Bộ kiểm soát rủi ro: %s\n", r.RiskGovernor.Status))
 		}
 	}
 
 	if len(r.AutoLiveBlockers) > 0 {
-		b.WriteString("\n❌ Blockers:\n")
+		b.WriteString("\n❌ Lý do chặn:\n")
 		for _, reason := range r.AutoLiveBlockers {
 			b.WriteString("  • " + ExplainBlocker(reason) + "\n")
 		}
 	}
 
 	if r.Proof.Candidate.Symbol != "" {
-		b.WriteString(fmt.Sprintf("\n4) Candidate proof\n- %s %s limit %.8f  |  notional %.2f USDT\n",
+		b.WriteString(fmt.Sprintf("\n4) Lệnh dự kiến qua kiểm tra\n- %s %s giá giới hạn %.8f  |  giá trị %.2f USDT\n",
 			r.Proof.Candidate.Side, r.Proof.Candidate.Symbol,
 			r.Proof.Candidate.Price, r.Proof.Candidate.Notional))
 	}
@@ -334,14 +335,14 @@ func LiveReadinessHumanText(r LiveReadinessView) string {
 
 func LiveProofHumanText(proof liveguard.Proof) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Live proof\n\n")
+	b.WriteString("🤖 BTC Agent — Kiểm tra an toàn lệnh thật\n\n")
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", ExplainProofStatus(proof.Status)))
-	b.WriteString("Lệnh thật: KHÔNG đặt lệnh từ proof này.\n")
+	b.WriteString("Lệnh thật: KHÔNG đặt lệnh từ lần kiểm tra này.\n")
 	if proof.Account.Enabled {
-		b.WriteString(fmt.Sprintf("OKX account: auth=%s, balance=%s, USDT free=%.2f, tối thiểu=%.2f.\n", yesNo(proof.Account.AuthOK), yesNo(proof.Account.BalanceOK), proof.Account.FreeUSDT, proof.Account.MinRequiredUSDT))
+		b.WriteString(fmt.Sprintf("Tài khoản OKX: xác thực=%s, số dư=%s, USDT khả dụng=%.2f, tối thiểu=%.2f.\n", yesNo(proof.Account.AuthOK), yesNo(proof.Account.BalanceOK), proof.Account.FreeUSDT, proof.Account.MinRequiredUSDT))
 	}
 	if proof.Candidate.Symbol != "" {
-		b.WriteString(fmt.Sprintf("Candidate: %s %s limit %.8f, notional %.2f USDT, canary=%v.\n", proof.Candidate.Side, proof.Candidate.Symbol, proof.Candidate.Price, proof.Candidate.Notional, proof.Candidate.Canary))
+		b.WriteString(fmt.Sprintf("Lệnh dự kiến: %s %s giá giới hạn %.8f, giá trị %.2f USDT, chạy thử vốn nhỏ=%v.\n", proof.Candidate.Side, proof.Candidate.Symbol, proof.Candidate.Price, proof.Candidate.Notional, proof.Candidate.Canary))
 	}
 	if len(proof.Reasons) > 0 {
 		b.WriteString("Lý do/điều kiện còn thiếu:\n")
@@ -349,26 +350,26 @@ func LiveProofHumanText(proof liveguard.Proof) string {
 			b.WriteString("- " + ExplainBlocker(reason) + "\n")
 		}
 	}
-	b.WriteString("Hành động: chỉ theo dõi cho tới khi proof READY và operator chủ động xác nhận.\n")
+	b.WriteString("Hành động: chỉ theo dõi cho tới khi kiểm tra báo sẵn sàng và người vận hành chủ động xác nhận.\n")
 	return trimTelegram(b.String())
 }
 
 func LiveOrderHumanText(result liveguard.ExecutionResult, auto bool) string {
 	var b strings.Builder
 	if auto {
-		b.WriteString("🤖 BTC Agent — Auto live order\n\n")
+		b.WriteString("🤖 BTC Agent — Lệnh thật tự động\n\n")
 	} else {
-		b.WriteString("🤖 BTC Agent — Manual live order\n\n")
+		b.WriteString("🤖 BTC Agent — Lệnh thật đặt tay\n\n")
 	}
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", ExplainOrderStatus(result.Status)))
 	if result.Order.Submitted {
-		b.WriteString("Lệnh thật: ĐÃ gửi lệnh lên OKX. Cần reconcile để theo dõi trạng thái/fill.\n")
-		b.WriteString(fmt.Sprintf("Order: %s, client id %s.\n", result.Order.OrderID, result.Order.ClientOrderID))
+		b.WriteString("Lệnh thật: ĐÃ gửi lệnh lên OKX. Cần đối soát để theo dõi trạng thái/khớp lệnh.\n")
+		b.WriteString(fmt.Sprintf("Mã lệnh: %s, mã phía bot %s.\n", result.Order.OrderID, result.Order.ClientOrderID))
 	} else {
 		b.WriteString("Lệnh thật: KHÔNG đặt lệnh.\n")
 	}
 	if result.Candidate.Symbol != "" {
-		b.WriteString(fmt.Sprintf("Candidate: %s %s limit %.8f, notional %.2f USDT, canary=%v.\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Notional, result.Candidate.Canary))
+		b.WriteString(fmt.Sprintf("Lệnh dự kiến: %s %s giá giới hạn %.8f, giá trị %.2f USDT, chạy thử vốn nhỏ=%v.\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Notional, result.Candidate.Canary))
 	}
 	if len(result.Reasons) > 0 {
 		b.WriteString("Lý do:\n")
@@ -381,18 +382,18 @@ func LiveOrderHumanText(result liveguard.ExecutionResult, auto bool) string {
 
 func LiveLadderOrderHumanText(result liveguard.LadderExecutionResult) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Auto ladder\n\n")
+	b.WriteString("🤖 BTC Agent — Rải lệnh tự động\n\n")
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", ExplainOrderStatus(result.Status)))
 	if result.Status == liveguard.LiveOrderSubmitted {
-		b.WriteString(fmt.Sprintf("Lệnh thật: ĐÃ gửi %d lệnh limit lên OKX.\n", len(result.Orders)))
+		b.WriteString(fmt.Sprintf("Lệnh thật: ĐÃ gửi %d lệnh giới hạn lên OKX.\n", len(result.Orders)))
 	} else {
 		b.WriteString("Lệnh thật: KHÔNG đặt lệnh hoặc chỉ đặt một phần trước khi bị chặn/lỗi.\n")
 	}
-	b.WriteString(fmt.Sprintf("Tổng notional dự kiến: %.2f USDT.\n", result.TotalNotional))
+	b.WriteString(fmt.Sprintf("Tổng giá trị dự kiến: %.2f USDT.\n", result.TotalNotional))
 	if len(result.Candidates) > 0 {
-		b.WriteString("Danh sách layer:\n")
+		b.WriteString("Danh sách tầng lệnh:\n")
 		for i, c := range result.Candidates {
-			b.WriteString(fmt.Sprintf("%d) %s %s limit %.8f, notional %.2f USDT, post-only=%v, canary=%v.\n", i+1, c.Side, c.Symbol, c.Price, c.Notional, c.PostOnly, c.Canary))
+			b.WriteString(fmt.Sprintf("%d) %s %s giá giới hạn %.8f, giá trị %.2f USDT, chỉ tạo thanh khoản=%v, chạy thử vốn nhỏ=%v.\n", i+1, c.Side, c.Symbol, c.Price, c.Notional, c.PostOnly, c.Canary))
 		}
 	}
 	if len(result.Reasons) > 0 {
@@ -401,21 +402,21 @@ func LiveLadderOrderHumanText(result liveguard.LadderExecutionResult) string {
 			b.WriteString("- " + ExplainBlocker(reason) + "\n")
 		}
 	}
-	b.WriteString("Việc cần theo dõi: reconcile order, kiểm tra fill, giữ không futures/no leverage/no market order.\n")
+	b.WriteString("Việc cần theo dõi: đối soát lệnh, kiểm tra khớp lệnh, không hợp đồng tương lai, không đòn bẩy, không lệnh thị trường.\n")
 	return trimTelegram(b.String())
 }
 
 func LiveOrderManagementHumanText(result liveguard.ManagedCycleResult) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Quản lý live orders\n\n")
+	b.WriteString("🤖 BTC Agent — Quản lý lệnh thật\n\n")
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", result.Summary))
 	if result.DryRun {
-		b.WriteString("Chế độ: DRY-RUN — chỉ mô phỏng, không gửi/hủy lệnh OKX.\n")
+		b.WriteString("Chế độ: CHẠY THỬ — chỉ mô phỏng, không gửi/hủy lệnh OKX.\n")
 	}
-	b.WriteString(fmt.Sprintf("Plan: %s — %s\n", result.PlanState, ExplainPlanState(result.PlanState)))
+	b.WriteString(fmt.Sprintf("Kế hoạch: %s — %s\n", result.PlanState, ExplainPlanState(result.PlanState)))
 	b.WriteString(fmt.Sprintf("Đã giữ: %d. Đã hủy: %d. Đã thay thế: %d. Đã đặt mới: %d. Bị chặn: %d.\n", len(result.Kept), len(result.Canceled), len(result.Replaced), len(result.Placed), len(result.Blocked)))
 	if len(result.Desired) == 0 {
-		b.WriteString("Không có layer ACTIVE_LIMIT hợp lệ ở chu kỳ này.\n")
+		b.WriteString("Không có tầng lệnh đủ điều kiện ở chu kỳ này.\n")
 	}
 	writeDecisions := func(title string, items []liveguard.ManagedOrderDecision) {
 		if len(items) == 0 {
@@ -435,14 +436,14 @@ func LiveOrderManagementHumanText(result liveguard.ManagedCycleResult) string {
 		b.WriteString("\nTheo từng coin:\n")
 		for _, coin := range result.PerCoin {
 			b.WriteString(fmt.Sprintf("\n%s\n", coin.Symbol))
-			b.WriteString(fmt.Sprintf("- State: %s — %s\n", coin.State, ExplainPlanState(coin.State)))
-			b.WriteString(fmt.Sprintf("- Open orders: %d\n", coin.OpenOrders))
-			b.WriteString(fmt.Sprintf("- Desired layers: %d\n", coin.DesiredLayers))
-			b.WriteString(fmt.Sprintf("- Pending: %.2f USDT\n", coin.PendingNotional))
+			b.WriteString(fmt.Sprintf("- Trạng thái: %s — %s\n", coin.State, ExplainPlanState(coin.State)))
+			b.WriteString(fmt.Sprintf("- Lệnh đang mở: %d\n", coin.OpenOrders))
+			b.WriteString(fmt.Sprintf("- Tầng lệnh mong muốn: %d\n", coin.DesiredLayers))
+			b.WriteString(fmt.Sprintf("- Vốn đang chờ: %.2f USDT\n", coin.PendingNotional))
 			if len(coin.Actions) == 0 {
-				b.WriteString("- Action: không làm gì\n")
+				b.WriteString("- Hành động: không làm gì\n")
 			} else {
-				b.WriteString("- Action: " + coinActionSummary(coin.Actions) + "\n")
+				b.WriteString("- Hành động: " + coinActionSummary(coin.Actions) + "\n")
 			}
 			if len(coin.Reasons) > 0 {
 				b.WriteString("- Lý do: " + explainReasons(coin.Reasons, 3) + "\n")
@@ -452,7 +453,7 @@ func LiveOrderManagementHumanText(result liveguard.ManagedCycleResult) string {
 				b.WriteString("- Lý do: chưa có ACTIVE_LIMIT/layer hợp lệ cho coin này.\n")
 			}
 			if coin.NextTrigger != "" {
-				b.WriteString("- Trigger tiếp theo: " + coin.NextTrigger + "\n")
+				b.WriteString("- Điều kiện kích hoạt tiếp theo: " + coin.NextTrigger + "\n")
 			}
 		}
 	}
@@ -462,16 +463,16 @@ func LiveOrderManagementHumanText(result liveguard.ManagedCycleResult) string {
 			b.WriteString("- " + ExplainBlocker(reason) + "\n")
 		}
 	}
-	b.WriteString("\nAn toàn: chỉ spot limit BUY post-only, không futures, không leverage, không market order.\n")
+	b.WriteString("\nAn toàn: chỉ mua giao ngay bằng lệnh giới hạn tạo thanh khoản; không hợp đồng tương lai, không đòn bẩy, không lệnh thị trường.\n")
 	return trimTelegram(b.String())
 }
 
 func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Live supervisor\n\n")
+	b.WriteString("🤖 BTC Agent — Giám sát giao dịch thật\n\n")
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", result.Summary))
 	if result.AutoHalted {
-		b.WriteString("🚨 Operator halt: ĐÃ BẬT tự động sau lỗi lặp lại. Cần operator kiểm tra.\n")
+		b.WriteString("🚨 Khóa vận hành: ĐÃ BẬT tự động sau lỗi lặp lại. Cần người vận hành kiểm tra.\n")
 	}
 	if len(result.Reasons) > 0 {
 		b.WriteString("Lý do:\n")
@@ -481,10 +482,10 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 	}
 	if result.Managed != nil {
 		m := result.Managed
-		b.WriteString(fmt.Sprintf("\nCycle: %s  |  desired=%d đặt=%d hủy=%d thay=%d chặn=%d\n",
+		b.WriteString(fmt.Sprintf("\nChu kỳ: %s  |  mong muốn=%d đặt=%d hủy=%d thay=%d chặn=%d\n",
 			m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
 		if m.DataHealth.Status != "" {
-			b.WriteString(fmt.Sprintf("Data: %s  |  Reconcile: %s  |  Risk: %s\n",
+			b.WriteString(fmt.Sprintf("Dữ liệu: %s  |  Đối soát: %s  |  Rủi ro: %s\n",
 				m.DataHealth.Status, m.ReconcileSafety.Status, m.RiskGovernor.Status))
 		}
 		// Per-coin detail khi không đặt lệnh
@@ -495,7 +496,7 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 				if len(coin.WhyNoOrder) > 0 {
 					b.WriteString(": " + explainReasons(coin.WhyNoOrder, 2))
 				} else if coin.DesiredLayers == 0 {
-					b.WriteString(": chưa có ACTIVE_LIMIT/layer")
+					b.WriteString(": chưa có trạng thái được phép đặt lệnh/tầng lệnh")
 				}
 				if coin.NextTrigger != "" {
 					b.WriteString(" → " + coin.NextTrigger)
@@ -517,13 +518,13 @@ func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 			}
 		}
 	}
-	b.WriteString("\n⚠️ Chỉ spot limit BUY post-only, không futures, không leverage, không market order.\n")
+	b.WriteString("\n⚠️ Chỉ mua giao ngay bằng lệnh giới hạn tạo thanh khoản; không hợp đồng tương lai, không đòn bẩy, không lệnh thị trường.\n")
 	return trimTelegram(b.String())
 }
 
 func ResearchBriefHumanText(result research.BriefResult) string {
 	var b strings.Builder
-	b.WriteString("🔍 BTC Agent — Research Strategy Brief\n")
+	b.WriteString("🔍 BTC Agent — Tóm tắt tin tức chiến lược\n")
 	b.WriteString(fmt.Sprintf("🕐 %s\n", result.GeneratedAt.Format("02/01 15:04 UTC")))
 	b.WriteString(separatorLine())
 
@@ -531,9 +532,9 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 	if result.Status == research.BriefWarn && len(result.Warnings) > 0 {
 		for _, w := range result.Warnings {
 			if w == "research disabled" {
-				b.WriteString("⚫ Research đang tắt (research.enabled=false trong config).\n")
-				b.WriteString("Không có tin tức được thu thập. Bật research.enabled=true để nhận brief.\n")
-				b.WriteString("Research-only: không đặt lệnh, không override Agent 1/2.\n")
+				b.WriteString("⚫ Thu thập tin tức đang tắt (research.enabled=false trong cấu hình).\n")
+				b.WriteString("Không có tin tức được thu thập. Bật research.enabled=true để nhận bản tóm tắt.\n")
+				b.WriteString("Tin tức chỉ để tham khảo: không đặt lệnh, không ghi đè Agent 1/2.\n")
 				return trimTelegram(b.String())
 			}
 		}
@@ -560,8 +561,8 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 	}
 
 	b.WriteString("I. KẾT LUẬN\n")
-	b.WriteString(fmt.Sprintf("Stance: %s. Tin tức là context, không đổi quyền giao dịch.\n", stance))
-	b.WriteString("Bot vẫn bám Agent 1/2: chỉ vào lệnh nếu có ACTIVE_LIMIT + safety gate sạch.\n")
+	b.WriteString(fmt.Sprintf("Lập trường: %s. Tin tức là bối cảnh, không đổi quyền giao dịch.\n", stance))
+	b.WriteString("Bot vẫn bám Agent 1/2: chỉ vào lệnh nếu có trạng thái được phép đặt lệnh và các khóa an toàn đều sạch.\n")
 	b.WriteString(separatorLine())
 
 	b.WriteString("II. LUẬN ĐIỂM\n")
@@ -578,7 +579,7 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 
 	b.WriteString("III. RỦI RO\n")
 	if len(warnItems) == 0 {
-		b.WriteString("Chưa có cảnh báo lớn từ news layer; vẫn cần tránh FOMO và chờ vùng discount.\n")
+		b.WriteString("Chưa có cảnh báo lớn từ lớp tin tức; vẫn cần tránh mua vội và chờ vùng chiết khấu.\n")
 	} else {
 		for _, item := range firstResearchItems(warnItems, 3) {
 			b.WriteString("- " + compactNewsTitle(item) + "\n")
@@ -588,7 +589,7 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 
 	b.WriteString("IV. CƠ HỘI\n")
 	if len(infoItems) == 0 {
-		b.WriteString("Chưa có catalyst rõ. Giữ watchlist, chờ giá và flow xác nhận.\n")
+		b.WriteString("Chưa có chất xúc tác rõ. Giữ danh sách theo dõi, chờ giá và dòng tiền xác nhận.\n")
 	} else {
 		for _, item := range firstResearchItems(infoItems, 3) {
 			b.WriteString("- " + compactNewsTitle(item) + "\n")
@@ -597,13 +598,13 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 	b.WriteString(separatorLine())
 
 	b.WriteString("V. KẾ HOẠCH BOT\n")
-	b.WriteString("Action bias: WATCH / HOLD CASH. Không chase theo tin.\n")
-	b.WriteString("Chỉ cân nhắc spot limit BUY post-only nếu Agent 2 tạo ACTIVE_LIMIT và risk gate OK.\n")
+	b.WriteString("Hành động ưu tiên: THEO DÕI / GIỮ TIỀN. Không mua đuổi theo tin.\n")
+	b.WriteString("Chỉ cân nhắc mua giao ngay bằng lệnh giới hạn tạo thanh khoản nếu Agent 2 tạo trạng thái được phép đặt lệnh và bộ kiểm soát rủi ro đạt.\n")
 	b.WriteString(fmt.Sprintf("Nguồn xử lý: %d tin / %d nguồn. Link URL không gửi vào Telegram.\n", len(result.Items), result.SourcesChecked))
 	if len(result.Warnings) > 0 {
 		b.WriteString("Cảnh báo thu thập: " + result.Warnings[0] + "\n")
 	}
-	b.WriteString("Research-only: không đặt lệnh, không override Agent 1/2.\n")
+	b.WriteString("Tin tức chỉ để tham khảo: không đặt lệnh, không ghi đè Agent 1/2.\n")
 
 	return trimTelegram(b.String())
 }
@@ -646,7 +647,7 @@ func uniqueTiny(in []string) []string {
 func managementDecisionText(item liveguard.ManagedOrderDecision) string {
 	symbol := firstNonEmptyString(item.Symbol, item.Desired.Symbol, item.Order.Symbol, live.InternalSymbol(item.Order.InstID))
 	layer := firstNonZeroInt(item.LayerIndex, item.Desired.LayerIndex, item.Order.LayerIndex)
-	out := fmt.Sprintf("%s layer %d: %s", symbol, layer, ExplainBlocker(item.Reason))
+	out := fmt.Sprintf("%s tầng %d: %s", symbol, layer, ExplainBlocker(item.Reason))
 	price := item.Desired.Price
 	notional := item.Desired.Notional
 	if price <= 0 {
@@ -656,16 +657,16 @@ func managementDecisionText(item liveguard.ManagedOrderDecision) string {
 		notional = item.Order.Notional
 	}
 	if price > 0 {
-		out += fmt.Sprintf(" | limit %.8f", price)
+		out += fmt.Sprintf(" | giá giới hạn %.8f", price)
 	}
 	if notional > 0 {
 		out += fmt.Sprintf(", %.2f USDT", notional)
 	}
 	if item.Desired.AllocationTier != "" {
-		out += fmt.Sprintf(" | tier=%s score=%.1f", item.Desired.AllocationTier, item.Desired.AllocationScore)
+		out += fmt.Sprintf(" | hạng=%s điểm=%.1f", item.Desired.AllocationTier, item.Desired.AllocationScore)
 	}
 	if item.Desired.AllocationReason != "" {
-		out += " | allocation: " + item.Desired.AllocationReason
+		out += " | phân bổ: " + item.Desired.AllocationReason
 	}
 	if item.Error != "" {
 		out += " | lỗi: " + item.Error
@@ -677,7 +678,7 @@ func coinActionSummary(actions []liveguard.ManagedOrderDecision) string {
 	parts := []string{}
 	for _, item := range actions {
 		layer := firstNonZeroInt(item.LayerIndex, item.Desired.LayerIndex, item.Order.LayerIndex)
-		parts = append(parts, fmt.Sprintf("%s layer %d", humanManagementAction(item.Action), layer))
+		parts = append(parts, fmt.Sprintf("%s tầng %d", humanManagementAction(item.Action), layer))
 		if len(parts) >= 4 {
 			break
 		}
@@ -739,14 +740,14 @@ func firstNonZeroInt(values ...int) int {
 
 func ReconcileHumanText(result liveguard.ReconcileResult, ledger liveguard.LiveLedgerReport) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Reconcile live orders\n\n")
+	b.WriteString("🤖 BTC Agent — Đối soát lệnh thật\n\n")
 	b.WriteString("Lệnh mới: KHÔNG đặt lệnh. Đây chỉ là kiểm tra trạng thái lệnh đã có.\n")
 	b.WriteString(fmt.Sprintf("Đã kiểm tra %d lệnh: cập nhật %d, cần kiểm tra tay %d.\n", result.Checked, result.Updated, result.Unknown))
 	if len(result.Orders) == 0 {
-		b.WriteString("Không có live order mở trong DB.\n")
+		b.WriteString("Không có lệnh thật đang mở trong dữ liệu nội bộ.\n")
 	}
 	for _, o := range result.Orders {
-		b.WriteString(fmt.Sprintf("- %s: trạng thái %s, filled %.8f, avg %.8f.\n", o.InstID, ExplainExchangeStatus(o.Status), o.FilledQuantity, o.AvgPrice))
+		b.WriteString(fmt.Sprintf("- %s: trạng thái %s, đã khớp %.8f, giá trung bình %.8f.\n", o.InstID, ExplainExchangeStatus(o.Status), o.FilledQuantity, o.AvgPrice))
 	}
 	b.WriteString(positionSummary(ledger))
 	return trimTelegram(b.String())
@@ -754,8 +755,8 @@ func ReconcileHumanText(result liveguard.ReconcileResult, ledger liveguard.LiveL
 
 func PositionHumanText(report liveguard.LiveLedgerReport) string {
 	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Live positions\n\n")
-	b.WriteString("Lệnh mới: KHÔNG đặt lệnh. Đây chỉ là đọc ledger nội bộ.\n")
+	b.WriteString("🤖 BTC Agent — Vị thế giao dịch thật\n\n")
+	b.WriteString("Lệnh mới: KHÔNG đặt lệnh. Đây chỉ là đọc sổ theo dõi nội bộ.\n")
 	b.WriteString(positionSummary(report))
 	return trimTelegram(b.String())
 }
@@ -767,9 +768,9 @@ func ExplainPlanState(state agent2.State) string {
 	case agent2.StateWatch:
 		return "Chỉ theo dõi, chưa được phép tạo lệnh."
 	case agent2.StateArmed:
-		return "Gần đủ điều kiện, chờ trigger rõ hơn."
+		return "Gần đủ điều kiện, chờ điều kiện kích hoạt rõ hơn."
 	case agent2.StateActiveLimit:
-		return "Đã có lệnh limit hợp lệ từ engine deterministic."
+		return "Đã có lệnh giới hạn hợp lệ từ bộ quyết định cố định."
 	default:
 		return "Trạng thái chưa rõ; giữ an toàn và không đặt lệnh."
 	}
@@ -778,18 +779,18 @@ func ExplainPlanState(state agent2.State) string {
 func ExplainProofStatus(status string) string {
 	switch status {
 	case liveguard.ReadyForManualLiveProofOrder:
-		return "Proof đã sẵn sàng cho manual canary, nhưng vẫn cần operator xác nhận và khóa an toàn phù hợp."
+		return "Kiểm tra đã sẵn sàng cho lệnh thật vốn nhỏ, nhưng vẫn cần người vận hành xác nhận và khóa an toàn phù hợp."
 	case liveguard.NotReadyNoDeterministicOrder:
-		return "Chưa có lệnh hợp lệ vì Agent 2 chưa tạo layer ACTIVE_LIMIT."
+		return "Chưa có lệnh hợp lệ vì Agent 2 chưa tạo tầng lệnh ở trạng thái được phép đặt."
 	case liveguard.NotReadyBalance:
 		return "Chưa sẵn sàng vì kiểm tra số dư OKX chưa đạt."
 	case liveguard.NotReadyFilters:
 		return "Chưa sẵn sàng vì preflight OKX/tick size/lot size chưa đạt."
 	case liveguard.NotReadyConfig:
-		return "Chưa sẵn sàng vì cấu hình hoặc env live chưa đủ."
+		return "Chưa sẵn sàng vì cấu hình hoặc biến môi trường giao dịch thật chưa đủ."
 	default:
 		if status == "" {
-			return "Chưa có proof."
+			return "Chưa có kết quả kiểm tra an toàn."
 		}
 		return status
 	}
@@ -798,13 +799,13 @@ func ExplainProofStatus(status string) string {
 func ExplainPermission(p agent1.Permission) string {
 	switch p {
 	case agent1.Allowed:
-		return "ALLOWED — BTC đủ điều kiện để Agent 2 tìm setup."
+		return "ĐƯỢC PHÉP — BTC đủ điều kiện để Agent 2 tìm thế vào lệnh."
 	case agent1.Armed:
-		return "ARMED — gần đủ điều kiện, chưa nên đặt lệnh."
+		return "CHUẨN BỊ — gần đủ điều kiện, chưa nên đặt lệnh."
 	case agent1.Watch:
-		return "WATCH — chỉ theo dõi, chưa được phép đặt lệnh."
+		return "THEO DÕI — chưa được phép đặt lệnh."
 	case agent1.NoTrade:
-		return "NO_TRADE — không giao dịch."
+		return "KHÔNG GIAO DỊCH."
 	default:
 		return string(p)
 	}
@@ -813,11 +814,11 @@ func ExplainPermission(p agent1.Permission) string {
 func ExplainRisk(level agent1.Risk) string {
 	switch level {
 	case agent1.Low:
-		return "LOW — rủi ro thấp"
+		return "THẤP — rủi ro thấp"
 	case agent1.Medium:
-		return "MEDIUM — rủi ro vừa, cần chờ xác nhận"
+		return "VỪA — rủi ro vừa, cần chờ xác nhận"
 	case agent1.High:
-		return "HIGH — rủi ro cao, ưu tiên bảo toàn vốn"
+		return "CAO — rủi ro cao, ưu tiên bảo toàn vốn"
 	default:
 		return string(level)
 	}
@@ -859,43 +860,43 @@ func ExplainBlocker(reason string) string {
 	s := strings.TrimSpace(reason)
 	switch {
 	case s == "BTC_AGENT_ALLOW_AUTO_LIVE=true required for auto live execution":
-		return "Auto live chưa bật bằng biến môi trường; đây là khóa an toàn."
+		return "Tự động giao dịch thật chưa bật bằng biến môi trường; đây là khóa an toàn."
 	case s == "operator halt active":
-		return "Operator halt đang bật; bot bị khóa đặt lệnh thật."
+		return "Khóa vận hành đang bật; bot bị khóa đặt lệnh thật."
 	case s == "open live order exists" || strings.Contains(s, "open live order exists"):
-		return "Đang có live order mở; phải reconcile/fill/hủy trước khi đặt lệnh mới."
+		return "Đang có lệnh thật mở; phải đối soát/khớp/hủy trước khi đặt lệnh mới."
 	case s == "confirm phrase required":
 		return "Thiếu câu xác nhận manual bắt buộc."
 	case s == "live.auto_execute=false":
-		return "Auto execute trong config đang tắt."
+		return "Tự động đặt lệnh trong cấu hình đang tắt."
 	case s == "live.require_manual_confirm=true":
 		return "Config đang yêu cầu xác nhận tay, nên auto không chạy."
 	case s == "live.require_manual_confirm=false":
 		return "Config không yêu cầu xác nhận tay; manual live bị chặn."
 	case s == "live.enabled=false":
-		return "Live mode trong config đang tắt."
+		return "Giao dịch thật trong cấu hình đang tắt."
 	case s == "live.proof_only=true":
-		return "Config chỉ cho proof, không cho đặt lệnh thật."
+		return "Cấu hình chỉ cho kiểm tra an toàn, không cho đặt lệnh thật."
 	case s == "execution.real_trading_enabled=false":
 		return "Real trading trong config đang tắt."
 	case s == "account check not pass":
 		return "Kiểm tra tài khoản OKX hoặc số dư chưa đạt."
 	case strings.HasPrefix(s, "proof not ready:"):
-		return "Proof chưa sẵn sàng: " + ExplainProofStatus(strings.TrimSpace(strings.TrimPrefix(s, "proof not ready:")))
+		return "Kiểm tra an toàn chưa sẵn sàng: " + ExplainProofStatus(strings.TrimSpace(strings.TrimPrefix(s, "proof not ready:")))
 	case s == "ladder total notional must be positive":
-		return "Chưa có tổng notional ladder vì chưa có layer hợp lệ."
+		return "Chưa có tổng giá trị rải lệnh vì chưa có tầng lệnh hợp lệ."
 	case s == "ladder total notional above max":
-		return "Tổng notional ladder vượt giới hạn an toàn."
+		return "Tổng giá trị rải lệnh vượt giới hạn an toàn."
 	case s == "no ladder candidates":
-		return "Chưa có layer limit hợp lệ để rải lệnh."
+		return "Chưa có tầng lệnh giới hạn hợp lệ để rải lệnh."
 	case s == "open live order limit reached":
-		return "Số live order đang mở đã đạt giới hạn an toàn."
+		return "Số lệnh thật đang mở đã đạt giới hạn an toàn."
 	case s == "order still matches active accumulation layer":
-		return "Lệnh vẫn khớp vùng gom/layer hiện tại, tiếp tục giữ."
+		return "Lệnh vẫn khớp vùng gom/tầng hiện tại, tiếp tục giữ."
 	case s == "missing active accumulation layer order":
-		return "Layer vùng gom đang thiếu lệnh live nên bot đặt mới."
+		return "Tầng vùng gom đang thiếu lệnh thật nên bot đặt mới."
 	case s == "order no longer matches active asset/layer":
-		return "Lệnh không còn khớp coin/layer ACTIVE_LIMIT hiện tại nên bot hủy."
+		return "Lệnh không còn khớp coin/tầng đang được phép đặt nên bot hủy."
 	case s == "order no longer matches current desired layer":
 		return "Lệnh không còn khớp giá/vùng mua mới nên bot hủy hoặc thay thế."
 	case s == "plan no longer ACTIVE_LIMIT":
@@ -905,19 +906,19 @@ func ExplainBlocker(reason string) string {
 	case s == "total open order limit reached":
 		return "Tổng số lệnh mở đã đạt giới hạn an toàn."
 	case s == "per-asset live notional cap reached":
-		return "Coin này đã đạt giới hạn vốn live."
+		return "Coin này đã đạt giới hạn vốn giao dịch thật."
 	case s == "total live notional cap reached":
-		return "Tổng vốn live đã đạt giới hạn an toàn."
+		return "Tổng vốn giao dịch thật đã đạt giới hạn an toàn."
 	case s == "operator halt active":
-		return "Operator halt đang bật; bot bị khóa quản lý lệnh thật."
+		return "Khóa vận hành đang bật; bot bị khóa quản lý lệnh thật."
 	case s == "order placer/canceler unavailable":
 		return "Không tạo được OKX client để đặt/hủy lệnh."
 	case s == "preflight not pass":
-		return "Preflight OKX chưa đạt tick size/lot size/min notional."
+		return "Kiểm tra trước khi gửi lên OKX chưa đạt bước giá/khối lượng tối thiểu/giá trị tối thiểu."
 	case s == "order placer unavailable":
 		return "Không tạo được OKX client để gửi lệnh."
 	case s == "no deterministic ACTIVE_LIMIT layer available":
-		return "Agent 2 chưa tạo layer ACTIVE_LIMIT nên không có lệnh hợp lệ."
+		return "Agent 2 chưa tạo tầng lệnh được phép đặt nên không có lệnh hợp lệ."
 	case s == "BTC permission chưa ALLOWED":
 		return "BTC chưa đủ điều kiện thị trường để gom altcoin."
 	case strings.Contains(s, "required live credential env is not set"):
@@ -952,7 +953,7 @@ func humanFlow(bias any) string {
 	s := fmt.Sprint(bias)
 	switch s {
 	case "ACCUMULATION":
-		return "có dấu hiệu tích lũy, nhưng vẫn cần các gate khác xác nhận."
+		return "có dấu hiệu tích lũy, nhưng vẫn cần các khóa khác xác nhận."
 	case "BEAR_TRAP":
 		return "có dấu hiệu bear trap/reclaim."
 	case "DISTRIBUTION", "BULL_TRAP":
@@ -983,9 +984,9 @@ func credentialSummary(m map[string]bool) string {
 func positionSummary(report liveguard.LiveLedgerReport) string {
 	var b strings.Builder
 	if len(report.Positions) == 0 {
-		b.WriteString("Không có live position trong ledger.\n")
+		b.WriteString("Không có vị thế giao dịch thật trong sổ nội bộ.\n")
 	} else {
-		b.WriteString("Live positions:\n")
+		b.WriteString("Vị thế giao dịch thật:\n")
 		for _, p := range report.Positions {
 			b.WriteString(fmt.Sprintf("- %s: qty %.8f, entry %.8f, cost %.2f USDT.\n", p.Symbol, p.Quantity, p.AvgEntryPrice, p.CostBasis))
 		}
@@ -1017,7 +1018,7 @@ func haltText(v bool) string {
 	if v {
 		return "ĐANG BẬT — bot bị khóa đặt lệnh thật"
 	}
-	return "đang tắt — live có thể chạy nếu các gate khác cũng đạt"
+	return "đang tắt — giao dịch thật có thể chạy nếu các khóa khác cũng đạt"
 }
 
 func empty(value, fallback string) string {
@@ -1035,5 +1036,5 @@ func emptyMMCaseText(c agent2.MMCase) string {
 }
 
 func trimTelegram(s string) string {
-	return textsafe.TrimTelegram(s, 3500)
+	return textsafe.TrimTelegram(usertext.TelegramVietnamese(s), 3500)
 }

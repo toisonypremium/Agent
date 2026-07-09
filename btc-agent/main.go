@@ -32,6 +32,7 @@ import (
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/telegramreport"
+	"btc-agent/internal/usertext"
 )
 
 var telegramManager = notify.NewTelegramManager("reports", nil)
@@ -2301,6 +2302,7 @@ func firstNonEmpty(values ...string) string {
 func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
 	token := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
+	text = usertext.TelegramVietnamese(text)
 	result, err := telegramManager.Send(ctx, token, chatID, label, text)
 	if err != nil {
 		if errors.Is(err, notify.ErrTelegramConfig) {

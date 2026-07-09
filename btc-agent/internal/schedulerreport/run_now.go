@@ -8,6 +8,7 @@ import (
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/usertext"
 )
 
 type RunNowSnapshot struct {
@@ -128,7 +129,7 @@ func BuildDeterministic(s RunNowSnapshot) string {
 		b.WriteString("Note: " + strings.Join(s.Notes, "; ") + "\n")
 	}
 	b.WriteString("⚠️ Không futures, không leverage, không market order. Chỉ spot limit BUY post-only khi ACTIVE_LIMIT + safety gate sạch.\n")
-	return strings.TrimSpace(b.String()) + "\n"
+	return usertext.TelegramVietnamese(strings.TrimSpace(b.String())) + "\n"
 }
 
 func BuildMissingData() string {
@@ -138,7 +139,7 @@ func BuildMissingData() string {
 	b.WriteString("───────────────────\n")
 	b.WriteString("Không đủ dữ liệu phân tích mới. Giữ nguyên trạng thái an toàn, không đặt lệnh.\n")
 	b.WriteString("Research-only / system-only: không override Agent 1/2.\n")
-	return strings.TrimSpace(b.String()) + "\n"
+	return usertext.TelegramVietnamese(strings.TrimSpace(b.String())) + "\n"
 }
 
 func CompactPlan(plan agent2.Plan) map[string]any {

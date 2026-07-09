@@ -16,6 +16,7 @@ import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/llm"
+	"btc-agent/internal/reportio"
 	"btc-agent/internal/schedulerreport"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/textsafe"
@@ -26,6 +27,43 @@ const (
 	schedulerAIWatchTimeout    = 120 * time.Second
 	schedulerAITelegramTimeout = 90 * time.Second
 )
+
+type SchedulerHeartbeat struct {
+	GeneratedAt             string `json:"generated_at"`
+	PID                     int    `json:"pid"`
+	Status                  string `json:"status"`
+	Timezone                string `json:"timezone"`
+	Mode                    string `json:"mode"`
+	DryRun                  bool   `json:"dry_run"`
+	LiveEnabled             bool   `json:"live_enabled"`
+	LiveSupervisorEnabled   bool   `json:"live_supervisor_enabled"`
+	ResearchEnabled         bool   `json:"research_enabled"`
+	MaintenanceEnabled      bool   `json:"maintenance_enabled"`
+	NextDailyRun            string `json:"next_daily_run,omitempty"`
+	NextMaintenanceRun      string `json:"next_maintenance_run,omitempty"`
+	NextResearchBrief       string `json:"next_research_brief,omitempty"`
+	NextReconcile           string `json:"next_reconcile,omitempty"`
+	NextLiveSupervisorCycle string `json:"next_live_supervisor_cycle,omitempty"`
+	LastEvent               string `json:"last_event,omitempty"`
+	LastEventAt             string `json:"last_event_at,omitempty"`
+	DoctorStatus            string `json:"doctor_status,omitempty"`
+	DoctorSummary           string `json:"doctor_summary,omitempty"`
+	ConsecutiveDoctorBlocks int    `json:"consecutive_doctor_blocks"`
+}
+
+func writeSchedulerHeartbeat(h SchedulerHeartbeat) error {
+	if h.GeneratedAt == "" {
+		h.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+	}
+	return reportio.WriteJSON("reports", "scheduler_heartbeat_latest.json", h)
+}
+
+func schedulerHeartbeatTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format(time.RFC3339)
+}
 
 func acquireSchedulerProcessLock() (func(), error) {
 	path := os.Getenv("BTC_AGENT_SCHEDULER_LOCK_FILE")
@@ -109,14 +147,57 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	researchScheduled := cfg.Research.Enabled && researchInterval > 0
 	log.Printf("[Scheduler] Research brief interval: %v scheduled=%v (enabled: %v)", researchInterval, researchScheduled, cfg.Research.Enabled)
 
+	var nextDaily time.Time
+	var nextMaintenance time.Time
+	var nextResearch time.Time
+	var nextReconcile time.Time
+	var nextSupervisor time.Time
+	var latestDoctor *liveguard.RuntimeDoctorResult
+	consecutiveDoctorBlocks := 0
+
+	heartbeat := SchedulerHeartbeat{
+		PID:                   os.Getpid(),
+		Status:                "starting",
+		Timezone:              tz,
+		Mode:                  os.Getenv("BTC_AGENT_MODE"),
+		DryRun:                dryRun,
+		LiveEnabled:           cfg.Live.Enabled,
+		LiveSupervisorEnabled: cfg.Live.SupervisorEnabled,
+		ResearchEnabled:       cfg.Research.Enabled,
+		MaintenanceEnabled:    maintenanceEnabled,
+		LastEvent:             "scheduler starting",
+		LastEventAt:           time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := writeSchedulerHeartbeat(heartbeat); err != nil {
+		log.Printf("[Scheduler] Heartbeat write warning: %v", err)
+	}
+	writeHeartbeat := func(event string) {
+		heartbeat.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+		heartbeat.Status = "running"
+		heartbeat.LastEvent = event
+		heartbeat.LastEventAt = heartbeat.GeneratedAt
+		heartbeat.NextDailyRun = schedulerHeartbeatTime(nextDaily)
+		heartbeat.NextMaintenanceRun = schedulerHeartbeatTime(nextMaintenance)
+		heartbeat.NextResearchBrief = schedulerHeartbeatTime(nextResearch)
+		heartbeat.NextReconcile = schedulerHeartbeatTime(nextReconcile)
+		heartbeat.NextLiveSupervisorCycle = schedulerHeartbeatTime(nextSupervisor)
+		if latestDoctor != nil {
+			heartbeat.DoctorStatus = string(latestDoctor.Status)
+			heartbeat.DoctorSummary = latestDoctor.Summary
+		}
+		heartbeat.ConsecutiveDoctorBlocks = consecutiveDoctorBlocks
+		if err := writeSchedulerHeartbeat(heartbeat); err != nil {
+			log.Printf("[Scheduler] Heartbeat write warning: %v", err)
+		}
+	}
+
 	// Calculate initial next daily run time
-	nextDaily, err := getNextRunTime(dailyTime, loc, time.Now().In(loc))
+	nextDaily, err = getNextRunTime(dailyTime, loc, time.Now().In(loc))
 	if err != nil {
 		return err
 	}
 	log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
 
-	var nextMaintenance time.Time
 	if maintenanceEnabled {
 		nextMaintenance, err = getNextRunTime(maintenanceTime, loc, time.Now().In(loc))
 		if err != nil {
@@ -186,7 +267,6 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 	}
 
-	var nextResearch time.Time
 	if researchScheduled {
 		nextResearch = time.Now().Add(researchInterval)
 		log.Printf("[Scheduler] Next research brief: %s", nextResearch.Format("2006-01-02 15:04:05 MST"))
@@ -196,7 +276,6 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	// Run reconciliation once on start if live is enabled, then schedule future ticks.
-	var nextReconcile time.Time
 	if cfg.Live.Enabled {
 		log.Println("[Scheduler] Executing initial live order reconciliation...")
 		notifyReconcile := !runNow
@@ -211,10 +290,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		nextReconcile = time.Now().Add(reconcileInterval)
 	}
 
-	var nextSupervisor time.Time
-	var latestDoctor *liveguard.RuntimeDoctorResult
 	liveSupervisor := liveSupervisorState{}
-	consecutiveDoctorBlocks := 0
 	if cfg.Live.SupervisorEnabled {
 		doctor, err := runLiveDoctor(shutdownCtx, cfg, db)
 		if err != nil {
@@ -243,6 +319,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
 		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
+	writeHeartbeat("scheduler ready")
 
 	for {
 		waitUntil := nextDaily
@@ -271,6 +348,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				default:
 				}
 			}
+			heartbeat.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
+			heartbeat.Status = "stopped"
+			heartbeat.LastEvent = "scheduler stopped"
+			heartbeat.LastEventAt = heartbeat.GeneratedAt
+			if err := writeSchedulerHeartbeat(heartbeat); err != nil {
+				log.Printf("[Scheduler] Heartbeat write warning: %v", err)
+			}
 			log.Println("[Scheduler] Stopped.")
 			return nil
 		case <-timer.C:
@@ -298,6 +382,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				nextDaily = now.Add(24 * time.Hour)
 			}
 			log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("daily run completed")
 		}
 
 		if cfg.Live.Enabled && !time.Now().Before(nextReconcile) {
@@ -306,6 +391,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				log.Printf("[Scheduler] Reconciliation error: %v", err)
 			}
 			nextReconcile = time.Now().Add(reconcileInterval)
+			writeHeartbeat("live reconciliation completed")
 		}
 
 		if researchScheduled && !time.Now().Before(nextResearch) {
@@ -317,6 +403,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			cancel()
 			nextResearch = time.Now().Add(researchInterval)
 			log.Printf("[Scheduler] Next research brief: %s", nextResearch.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("research brief completed")
 		}
 
 		if cfg.Live.SupervisorEnabled && !time.Now().Before(nextSupervisor) {
@@ -347,6 +434,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			}
 			nextSupervisor = time.Now().Add(managementInterval)
 			log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("live supervisor completed")
 		}
 
 		if maintenanceEnabled && !time.Now().Before(nextMaintenance) {
@@ -366,6 +454,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				nextMaintenance = now.Add(24 * time.Hour)
 			}
 			log.Printf("[Scheduler] Next scheduled maintenance run: %s", nextMaintenance.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("maintenance completed")
 		}
 	}
 }

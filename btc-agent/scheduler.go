@@ -274,6 +274,17 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			} else {
 				latestDoctor = &doctor
 				log.Printf("[Scheduler] Live doctor status: %s", doctor.Summary)
+				if shouldRefreshMarketDataForDoctor(doctor) {
+					log.Println("[Scheduler] Live doctor found stale market data; refreshing analysis/plan before supervisor...")
+					if err := runDailyWithNotify(shutdownCtx, cfg, db, false); err != nil {
+						log.Printf("[Scheduler] Stale-data refresh error: %v", err)
+					} else if refreshed, err := runLiveDoctor(shutdownCtx, cfg, db); err != nil {
+						log.Printf("[Scheduler] Live doctor after stale-data refresh error: %v", err)
+					} else {
+						latestDoctor = &refreshed
+						log.Printf("[Scheduler] Live doctor after stale-data refresh: %s", refreshed.Summary)
+					}
+				}
 			}
 			if _, err := runLiveSupervisorCycleWithDoctor(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor); err != nil {
 				log.Printf("[Scheduler] Live supervisor error: %v", err)
@@ -301,6 +312,27 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			log.Printf("[Scheduler] Next scheduled maintenance run: %s", nextMaintenance.Format("2006-01-02 15:04:05 MST"))
 		}
 	}
+}
+
+func shouldRefreshMarketDataForDoctor(doctor liveguard.RuntimeDoctorResult) bool {
+	if doctor.Status != liveguard.DoctorBlock {
+		return false
+	}
+	for _, blocker := range doctor.Blockers {
+		b := strings.ToLower(blocker)
+		if strings.Contains(b, "analysis stale") || strings.Contains(b, "plan stale") || strings.Contains(b, "1d candle") {
+			return true
+		}
+	}
+	if doctor.DataHealth.Status == liveguard.DataHealthBlock {
+		for _, blocker := range doctor.DataHealth.Blockers {
+			b := strings.ToLower(blocker)
+			if strings.Contains(b, "analysis stale") || strings.Contains(b, "plan stale") || strings.Contains(b, "1d candle") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func schedulerRunNowTelegram(ctx context.Context, cfg config.Config, db *storage.DB, researchSummary string, dailyOK bool, reconcileOK bool, supervisor liveguard.SupervisorResult, supervisorSet bool, notes []string) string {

@@ -67,6 +67,7 @@ if [ -f "$LOCK_FILE" ]; then
 fi
 
 echo "$$" > "$LOCK_FILE"
+export BTC_AGENT_SCHEDULER_LOCK_HELD=true
 trap 'rm -f "$LOCK_FILE"' EXIT INT TERM
 
 if [ ! -x ./bin/btc-agent ]; then

@@ -234,8 +234,8 @@ func probeNotional(cfg config.Config) float64 {
 	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
 		return cfg.Live.MaxLiveNotionalPerOrderUSDT
 	}
-	if cfg.Live.CanaryMaxNotionalUSDT > 0 {
-		return cfg.Live.CanaryMaxNotionalUSDT
+	if config.LiveAutoMaxNotionalUSDT(cfg) > 0 {
+		return config.LiveAutoMaxNotionalUSDT(cfg)
 	}
 	if cfg.Live.MaxOrderNotionalUSDT > 0 {
 		return cfg.Live.MaxOrderNotionalUSDT
@@ -423,8 +423,8 @@ func desiredLiquidityNotional(cfg config.Config, sym string) float64 {
 	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
 		return cfg.Live.MaxLiveNotionalPerOrderUSDT
 	}
-	if cfg.Live.CanaryMaxNotionalUSDT > 0 {
-		return cfg.Live.CanaryMaxNotionalUSDT
+	if config.LiveAutoMaxNotionalUSDT(cfg) > 0 {
+		return config.LiveAutoMaxNotionalUSDT(cfg)
 	}
 	if cfg.Live.MaxOrderNotionalUSDT > 0 {
 		return cfg.Live.MaxOrderNotionalUSDT

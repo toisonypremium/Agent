@@ -129,13 +129,13 @@ func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent
 		maxLayers = qMaxLayers
 	}
 	decision := AllocationDecision{Symbol: symbol, Tier: opportunityTier(score), Score: finiteFloat(score), BTCMultiplier: btcMult, QualityMultiplier: qMult, QualityGrade: grade, MaxLayers: maxLayers, Reason: qReason}
-	if asset.State != agent2.StateActiveLimit && asset.State != agent2.StateArmed {
+	if asset.State != agent2.StateActiveLimit {
 		decision.Tier = OpportunityWatch
 		decision.MaxLayers = 0
-		decision.Reason = appendAllocationReason(decision.Reason, "asset not ACTIVE_LIMIT/ARMED")
+		decision.Reason = appendAllocationReason(decision.Reason, "asset not ACTIVE_LIMIT")
 		return decision
 	}
-	if asset.State == agent2.StateArmed || (plan.State != agent2.StateActiveLimit && btcMult < 1) {
+	if plan.State != agent2.StateActiveLimit && btcMult < 1 {
 		decision.Tier = OpportunityProbe
 		decision.MaxLayers = minInt(maxLayers, 1)
 		decision.Reason = appendAllocationReason(decision.Reason, "BTC permission reduced to probe risk budget")
@@ -225,7 +225,7 @@ func qualityMultiplier(grade string) (float64, int, string) {
 }
 
 func opportunityScore(asset agent2.AssetPlan, quality historyQualityScore) float64 {
-	if asset.State != agent2.StateActiveLimit && asset.State != agent2.StateArmed {
+	if asset.State != agent2.StateActiveLimit {
 		return 0
 	}
 	score := 50.0

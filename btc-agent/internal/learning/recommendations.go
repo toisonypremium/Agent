@@ -56,6 +56,7 @@ func BuildRecommendations(result backtest.Result) RecommendationResult {
 	out.Recommendations = append(out.Recommendations, watchlistRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, checklistRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, opportunityRecommendations(result)...)
+	out.Recommendations = append(out.Recommendations, filterValueRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, strategyIntelligenceRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, layerRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, exitRecommendations(result)...)
@@ -205,6 +206,33 @@ func opportunityRecommendations(result backtest.Result) []Recommendation {
 				{Metric: "near_miss", Value: fmt.Sprint(row.NearMissCount)},
 				{Metric: "top_missing", Value: row.TopMissingGate},
 				{Metric: "verdict", Value: row.ResearchOnlyVerdict},
+			},
+		}}
+	}
+	return nil
+}
+
+func filterValueRecommendations(result backtest.Result) []Recommendation {
+	if !result.FilterValueAudit.Enabled {
+		return nil
+	}
+	for _, row := range result.FilterValueAudit.Rows {
+		if row.Verdict != backtest.FilterValueTuneReview || row.Samples < 20 {
+			continue
+		}
+		return []Recommendation{{
+			Area:           AreaChecklist,
+			Title:          "Review possible false-negative filter " + row.Filter,
+			Recommendation: "Filter value audit found blocked samples with acceptable forward returns. Review this filter manually before any rule/config change.",
+			ManualAction:   "Compare blocked vs passed rows across more candles; no live config changed; do not bypass ACTIVE_LIMIT; WATCH/SCOUT/ARMED must not create normal live orders.",
+			Confidence:     confidenceByCount(row.Samples),
+			Severity:       SeverityActionable,
+			Evidence: []Evidence{
+				{Metric: "filter", Value: row.Filter},
+				{Metric: "samples", Value: fmt.Sprint(row.Samples)},
+				{Metric: "blocked", Value: fmt.Sprint(row.Blocked)},
+				{Metric: "false_negative_rate", Value: pct(row.FalseNegativeRate)},
+				{Metric: "verdict", Value: row.Verdict},
 			},
 		}}
 	}

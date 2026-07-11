@@ -33,18 +33,25 @@ type ShadowProbeJournal struct {
 }
 
 type ShadowProbeCandidate struct {
-	Symbol       string       `json:"symbol"`
-	Layer        int          `json:"layer"`
-	Entry        float64      `json:"entry"`
-	Invalidation float64      `json:"invalidation"`
-	Target       float64      `json:"target"`
-	RewardRisk   float64      `json:"reward_risk"`
-	Notional     float64      `json:"notional"`
-	Quantity     float64      `json:"quantity"`
-	State        agent2.State `json:"state"`
-	Reason       string       `json:"reason"`
-	NextTrigger  string       `json:"next_trigger,omitempty"`
-	WouldPlace   bool         `json:"would_place"`
+	Symbol         string       `json:"symbol"`
+	Layer          int          `json:"layer"`
+	Entry          float64      `json:"entry"`
+	Invalidation   float64      `json:"invalidation"`
+	Target         float64      `json:"target"`
+	RewardRisk     float64      `json:"reward_risk"`
+	Notional       float64      `json:"notional"`
+	Quantity       float64      `json:"quantity"`
+	State          agent2.State `json:"state"`
+	Reason         string       `json:"reason"`
+	NextTrigger    string       `json:"next_trigger,omitempty"`
+	WouldPlace     bool         `json:"would_place"`
+	SetupScore     float64      `json:"setup_score,omitempty"`
+	TopBlockerKey  string       `json:"top_blocker_key,omitempty"`
+	TopBlocker     string       `json:"top_blocker,omitempty"`
+	FailedGates    []string     `json:"failed_gates,omitempty"`
+	DiscountGapPct float64      `json:"discount_gap_pct,omitempty"`
+	RewardRiskGap  float64      `json:"reward_risk_gap,omitempty"`
+	HorizonDays    []int        `json:"horizon_days,omitempty"`
 }
 
 func BuildShadowProbeJournal(cfg config.Config, production agent1.MarketAnalysis, productionPlan agent2.Plan, assets map[string][]market.Candle, benchmarks map[string][]market.Candle, dataSanity DataSanityResult, now time.Time) ShadowProbeJournal {
@@ -81,7 +88,8 @@ func BuildShadowProbeJournal(cfg config.Config, production agent1.MarketAnalysis
 			continue
 		}
 		layer := asset.Layers[0]
-		j.Candidates = append(j.Candidates, ShadowProbeCandidate{Symbol: asset.Symbol, Layer: layer.Index, Entry: layer.Price, Invalidation: firstShadowFloat(layer.Invalidation, asset.Invalidation), Target: layer.Target, RewardRisk: firstShadowFloat(layer.RewardRisk, asset.RewardRisk), Notional: layer.Notional, Quantity: layer.Quantity, State: asset.State, Reason: asset.Reason, NextTrigger: asset.NextTrigger, WouldPlace: true})
+		attr := agent2.BuildFilterAttribution(asset)
+		j.Candidates = append(j.Candidates, ShadowProbeCandidate{Symbol: asset.Symbol, Layer: layer.Index, Entry: layer.Price, Invalidation: firstShadowFloat(layer.Invalidation, asset.Invalidation), Target: layer.Target, RewardRisk: firstShadowFloat(layer.RewardRisk, asset.RewardRisk), Notional: layer.Notional, Quantity: layer.Quantity, State: asset.State, Reason: asset.Reason, NextTrigger: asset.NextTrigger, WouldPlace: true, SetupScore: asset.SetupScore, TopBlockerKey: attr.TopBlockerKey, TopBlocker: attr.TopBlocker, FailedGates: failedShadowGates(attr), DiscountGapPct: asset.DiscountGapPct, RewardRiskGap: shadowRewardRiskGap(cfg, asset), HorizonDays: []int{1, 3, 7, 14}})
 	}
 	if len(j.Candidates) == 0 {
 		for _, c := range shadowPlan.Watchlist.Candidates {
@@ -191,6 +199,23 @@ func shadowCandidateBlockers(c agent2.WatchCandidate) []string {
 		out = append(out, c.Symbol+": "+c.BlockReason)
 	}
 	return out
+}
+
+func failedShadowGates(attr agent2.FilterAttribution) []string {
+	out := []string{}
+	for _, gate := range attr.GateRows {
+		if !gate.Pass {
+			out = append(out, gate.Name)
+		}
+	}
+	return out
+}
+
+func shadowRewardRiskGap(cfg config.Config, asset agent2.AssetPlan) float64 {
+	if asset.RewardRisk <= 0 || cfg.Risk.MinRewardRisk <= asset.RewardRisk {
+		return 0
+	}
+	return cfg.Risk.MinRewardRisk - asset.RewardRisk
 }
 
 func firstShadowFloat(values ...float64) float64 {

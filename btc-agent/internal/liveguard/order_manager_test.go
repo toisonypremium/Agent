@@ -20,6 +20,8 @@ type fakeManagedExchange struct {
 	placed   []live.LimitOrderRequest
 	canceled []live.CancelOrderRequest
 	placeErr error
+	book     liquidity.OrderBookSnapshot
+	bookErr  error
 }
 
 func (f *fakeManagedExchange) PlaceSpotLimitOrder(ctx context.Context, req live.LimitOrderRequest) (live.OrderResult, error) {
@@ -33,6 +35,16 @@ func (f *fakeManagedExchange) PlaceSpotLimitOrder(ctx context.Context, req live.
 func (f *fakeManagedExchange) CancelOrder(ctx context.Context, req live.CancelOrderRequest) (live.CancelOrderResult, error) {
 	f.canceled = append(f.canceled, req)
 	return live.CancelOrderResult{InstID: req.InstID, OrderID: req.OrderID, ClientOrderID: req.ClientOrderID, Canceled: true, Code: "0"}, nil
+}
+
+func (f *fakeManagedExchange) OrderBook(ctx context.Context, instID string) (liquidity.OrderBookSnapshot, error) {
+	if f.bookErr != nil {
+		return liquidity.OrderBookSnapshot{}, f.bookErr
+	}
+	if f.book.BestBid == 0 && f.book.BestAsk == 0 {
+		return liquidity.OrderBookSnapshot{BestBid: 99.9, BestAsk: 100, BidDepth1PctUSDT: 1000, AskDepth1PctUSDT: 1000}, nil
+	}
+	return f.book, nil
 }
 
 type fakeManagedRecorder struct {
@@ -99,14 +111,25 @@ func TestManageLiveOrdersKeepsMatchingOrder(t *testing.T) {
 	}
 }
 
+func TestManageLiveOrdersCancelsWhenPlanArmed(t *testing.T) {
+	cfg := managedConfig()
+	plan := agent2.Plan{State: agent2.StateArmed, ActionPermission: agent1.Armed, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateArmed, DiscountZone: market.Zone{Low: 90, High: 100}, Invalidation: 88, Reason: "armed", Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}}}}}
+	ex := &fakeManagedExchange{}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1}}
+	got := ManageLiveOrders(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if len(got.Desired) != 0 || len(got.Placed) != 0 || len(got.Kept) != 0 || len(got.Canceled) != 1 || len(ex.canceled) != 1 {
+		t.Fatalf("ARMED should cancel stale live order and not keep/place: %+v", got)
+	}
+}
+
 func managedConfig() config.Config {
 	var cfg config.Config
 	cfg.Live.Enabled = true
 	cfg.Live.AutoExecute = true
 	cfg.Live.AutoLadderEnabled = true
 	cfg.Live.OrderManagementEnabled = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	cfg.Live.MaxOrderNotionalUSDT = 10
 	cfg.Live.RequirePostOnly = true
 	cfg.Live.MaxAutoLayersPerAsset = 2
@@ -230,6 +253,44 @@ func TestManageLiveOrdersPerCoinAssignsCancelAndReplace(t *testing.T) {
 	}
 }
 
+func TestManageLiveOrdersMMGateBlocksBeforeReserveAndSubmit(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.LiquidityGateEnabled = true
+	cfg.Live.RequireOrderBookLiquidity = true
+	cfg.Live.MaxSpreadBps = 15
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{book: liquidity.OrderBookSnapshot{BestBid: 99, BestAsk: 101, BidDepth1PctUSDT: 1000, AskDepth1PctUSDT: 1000}}
+	rec := &fakeManagedRecorder{}
+	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	if len(got.Placed) != 0 || len(ex.placed) != 0 || len(rec.reserved) != 0 || len(got.Blocked) == 0 {
+		t.Fatalf("MM gate should block before reserve/submit: placed=%d exch=%d reserved=%d result=%+v", len(got.Placed), len(ex.placed), len(rec.reserved), got)
+	}
+	found := false
+	for _, b := range got.Blocked {
+		if strings.Contains(b.Reason, "MM execution gate blocked") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing MM gate block: %+v", got.Blocked)
+	}
+}
+
+func TestManageLiveOrdersMMGateHealthyBookAllowsSubmit(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.LiquidityGateEnabled = true
+	cfg.Live.RequireOrderBookLiquidity = true
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{book: liquidity.OrderBookSnapshot{BestBid: 99.9, BestAsk: 100, BidDepth1PctUSDT: 1000, AskDepth1PctUSDT: 1000}}
+	rec := &fakeManagedRecorder{}
+	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	if len(got.Placed) == 0 || len(ex.placed) == 0 || len(rec.reserved) == 0 {
+		t.Fatalf("healthy MM gate should allow submit: placed=%d exch=%d reserved=%d result=%+v", len(got.Placed), len(ex.placed), len(rec.reserved), got)
+	}
+}
+
 func TestBuildManagedDesiredOrdersBlocksLiquidityFail(t *testing.T) {
 	cfg := managedConfig()
 	cfg.Live.LiquidityGateEnabled = true
@@ -266,19 +327,19 @@ func TestBuildManagedDesiredOrdersSortsByHistoryQuality(t *testing.T) {
 	}
 }
 
-func TestBuildManagedDesiredOrdersSkipsDGradeInCanary(t *testing.T) {
+func TestBuildManagedDesiredOrdersSkipsDGradeInLiveAuto(t *testing.T) {
 	cfg := managedConfig()
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 57, Grade: "B"}, "SOLUSDT": {Score: 0, Grade: "D"}})
 	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
 	for _, d := range desired {
 		if d.Symbol == "SOLUSDT" {
-			t.Fatalf("D-grade SOL should be skipped in canary: %+v", desired)
+			t.Fatalf("D-grade SOL should be skipped in live auto: %+v", desired)
 		}
 	}
 	foundBlock := false
 	for _, b := range blocked {
-		if b.Symbol == "SOLUSDT" && b.Reason == "canary quality filter blocked D-grade coin" {
+		if b.Symbol == "SOLUSDT" && b.Reason == "live quality filter blocked D-grade coin" {
 			foundBlock = true
 		}
 	}
@@ -305,7 +366,7 @@ func TestAllocateLiveCapitalQualityMultipliers(t *testing.T) {
 	}
 }
 
-func TestBuildManagedDesiredOrdersAllowsNoSampleProbeInCanary(t *testing.T) {
+func TestBuildManagedDesiredOrdersAllowsNoSampleProbeInLiveAuto(t *testing.T) {
 	cfg := managedConfig()
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 57, Grade: "B"}, "SOLUSDT": {Score: 0, Grade: "NO_SAMPLE"}})
@@ -347,30 +408,34 @@ func TestBuildManagedDesiredOrdersUsesOpportunityAllocationNotStaticLayerNotiona
 	}
 }
 
-func TestBuildManagedDesiredOrdersAllowsArmedProbeAsset(t *testing.T) {
+func TestBuildManagedDesiredOrdersStatePermissionMatrix(t *testing.T) {
 	cfg := managedConfig()
-	plan := agent2.Plan{State: agent2.StateArmed, ActionPermission: agent1.Armed, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateArmed, DiscountZone: market.Zone{Low: 90, High: 100}, Invalidation: 88, RewardRisk: 3.5, Reason: "armed probe", Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}}}}}
-	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 0, Grade: "NO_SAMPLE"}})
-	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
-	if len(blocked) != 0 || len(desired) != 1 {
-		t.Fatalf("expected one ARMED probe desired, desired=%+v blocked=%+v", desired, blocked)
+	tests := []struct {
+		name       string
+		planState  agent2.State
+		permission agent1.Permission
+		assetState agent2.State
+		want       bool
+	}{
+		{name: "no trade blocks", planState: agent2.StateNoTrade, permission: agent1.NoTrade, assetState: agent2.StateNoTrade},
+		{name: "watch blocks", planState: agent2.StateWatch, permission: agent1.Watch, assetState: agent2.StateWatch},
+		{name: "scout blocks", planState: agent2.StateScout, permission: agent1.Watch, assetState: agent2.StateScout},
+		{name: "armed blocks", planState: agent2.StateArmed, permission: agent1.Armed, assetState: agent2.StateArmed},
+		{name: "active with watch permission blocks", planState: agent2.StateActiveLimit, permission: agent1.Watch, assetState: agent2.StateActiveLimit},
+		{name: "active with armed permission blocks", planState: agent2.StateActiveLimit, permission: agent1.Armed, assetState: agent2.StateActiveLimit},
+		{name: "active plan with armed asset blocks", planState: agent2.StateActiveLimit, permission: agent1.Allowed, assetState: agent2.StateArmed},
+		{name: "active limit allowed creates desired", planState: agent2.StateActiveLimit, permission: agent1.Allowed, assetState: agent2.StateActiveLimit, want: true},
 	}
-	if desired[0].AllocationTier != string(OpportunityProbe) || desired[0].Notional > cfg.Live.MaxLiveNotionalPerOrderUSDT {
-		t.Fatalf("bad ARMED probe sizing: %+v", desired[0])
-	}
-}
-
-func TestBuildManagedDesiredOrdersBlocksWatchPermission(t *testing.T) {
-	cfg := managedConfig()
-	plan := managedPlan()
-	plan.ActionPermission = agent1.Watch
-	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
-	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
-	if len(desired) != 0 {
-		t.Fatalf("WATCH permission must not create desired orders: %+v", desired)
-	}
-	if len(blocked) == 0 {
-		t.Fatalf("expected BTC budget block")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			plan := agent2.Plan{State: tt.planState, ActionPermission: tt.permission, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: tt.assetState, DiscountZone: market.Zone{Low: 90, High: 100}, Invalidation: 88, RewardRisk: 3.5, Reason: "matrix", Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}}}}}
+			writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}})
+			desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+			got := len(desired) > 0
+			if got != tt.want {
+				t.Fatalf("desired=%+v blocked=%+v wantDesired=%v", desired, blocked, tt.want)
+			}
+		})
 	}
 }
 

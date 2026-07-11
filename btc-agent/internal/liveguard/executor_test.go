@@ -267,8 +267,8 @@ func TestExecuteAutoLadderProofOrderSubmits(t *testing.T) {
 		Status:  ReadyForManualLiveProofOrder,
 		Account: AccountCheck{Enabled: true, AuthOK: true, BalanceOK: true, FreeUSDT: 20},
 		Candidates: []CandidateOrder{
-			{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true, Canary: true},
-			{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 90, Quantity: 0.02222222, Notional: 2, PostOnly: true, Canary: true},
+			{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true, LiveAuto: true},
+			{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 90, Quantity: 0.02222222, Notional: 2, PostOnly: true, LiveAuto: true},
 		},
 		Preflights:    []PreflightResult{{Enabled: true, Pass: true, Symbol: "ETHUSDT", InstID: "ETH-USDT"}, {Enabled: true, Pass: true, Symbol: "ETHUSDT", InstID: "ETH-USDT"}},
 		TotalNotional: 4,
@@ -317,7 +317,7 @@ func TestExecuteAutoLadderProofOrderReportsZeroNotionalClearly(t *testing.T) {
 func TestClientOrderIDUniqueAndWithinOKXLimit(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 100; i++ {
-		id := clientOrderID("RENDERUSDT", true)
+		id := clientOrderID("RENDERUSDT")
 		if seen[id] {
 			t.Fatalf("duplicate client order ID: %s", id)
 		}
@@ -325,8 +325,8 @@ func TestClientOrderIDUniqueAndWithinOKXLimit(t *testing.T) {
 		if len(id) > 32 {
 			t.Fatalf("client order ID too long: len=%d id=%s", len(id), id)
 		}
-		if !strings.HasPrefix(id, "btccanaryrenderusdt") {
-			t.Fatalf("bad canary prefix: %s", id)
+		if !strings.HasPrefix(id, "btcliverenderusdt") {
+			t.Fatalf("bad live auto prefix: %s", id)
 		}
 	}
 }
@@ -375,38 +375,38 @@ func TestExecuteAutoLadderProofOrderSanitizesExchangeError(t *testing.T) {
 	}
 }
 
-func TestExecuteManualProofOrderCanaryPrefix(t *testing.T) {
+func TestExecuteManualProofOrderLiveAutoPrefix(t *testing.T) {
 	cfg, proof := executableConfigAndProof()
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2.0
-	proof.Candidate.Canary = true
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2.0
+	proof.Candidate.LiveAuto = true
 	proof.Candidate.Notional = 2.0
-	proof.Preflight.Canary = true
+	proof.Preflight.LiveAuto = true
 	proof.Preflight.Notional = 2.0
 	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
 	got := ExecuteManualProofOrder(context.Background(), cfg, proof, ManualLiveConfirmPhrase, placer, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderSubmitted || !placer.called {
 		t.Fatalf("unexpected result: %+v", got)
 	}
-	if !strings.HasPrefix(placer.req.ClientOrderID, "btccanary") {
-		t.Fatalf("expected client order ID to start with btccanary, got: %s", placer.req.ClientOrderID)
+	if !strings.HasPrefix(placer.req.ClientOrderID, "btclive") {
+		t.Fatalf("expected client order ID to start with btclive, got: %s", placer.req.ClientOrderID)
 	}
 }
 
-func TestExecuteAutoProofOrderCanaryPrefix(t *testing.T) {
+func TestExecuteAutoProofOrderLiveAutoPrefix(t *testing.T) {
 	cfg, proof := autoExecutableConfigAndProof()
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2.0
-	proof.Candidate.Canary = true
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2.0
+	proof.Candidate.LiveAuto = true
 	proof.Candidate.Notional = 2.0
-	proof.Preflight.Canary = true
+	proof.Preflight.LiveAuto = true
 	proof.Preflight.Notional = 2.0
 	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
 	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
 	if got.Status != LiveOrderSubmitted || !placer.called {
 		t.Fatalf("unexpected result: %+v", got)
 	}
-	if !strings.HasPrefix(placer.req.ClientOrderID, "btccanary") {
-		t.Fatalf("expected client order ID to start with btccanary, got: %s", placer.req.ClientOrderID)
+	if !strings.HasPrefix(placer.req.ClientOrderID, "btclive") {
+		t.Fatalf("expected client order ID to start with btclive, got: %s", placer.req.ClientOrderID)
 	}
 }

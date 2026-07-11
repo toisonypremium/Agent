@@ -7,7 +7,7 @@ Rule-based BTC market analyst + ETH/SOL/RENDER accumulation planner for Termux/r
 - Default is paper trading/simulation.
 - No futures, no leverage.
 - Live execution code exists, but it is disabled/fail-closed by default.
-- Real spot-limit orders require explicit config, manual confirmation or gated auto runtime, proof mode off, canary/operator gates, and deterministic `ACTIVE_LIMIT`.
+- Real spot-limit orders require explicit config, manual confirmation or gated auto runtime, proof mode off, live auto/operator gates, and deterministic `ACTIVE_LIMIT`.
 - If edge is unclear, output is `NO_TRADE` or `WATCH`.
 
 ## Termux install
@@ -43,7 +43,6 @@ cp config.yaml.example config.yaml
 ./bin/btc-agent reconcile-live-orders --config config.yaml
 ./bin/btc-agent live-positions --config config.yaml
 ./bin/btc-agent maintenance --config config.yaml
-./bin/btc-agent canary-drill --config config.yaml --cycles 50
 ```
 
 ## Telegram/ntfy
@@ -259,7 +258,7 @@ Manual real execution is intentionally separate and requires the exact confirm p
 ./bin/btc-agent execute-live-proof-order --config config.yaml --confirm I_UNDERSTAND_THIS_PLACES_A_REAL_SPOT_LIMIT_ORDER
 ```
 
-Auto live execution is fail-closed. It requires `live.auto_execute=true`, `live.require_manual_confirm=false`, `live.canary_mode=true`, `BTC_AGENT_ALLOW_AUTO_LIVE=true`, operator halt inactive, passing proof/preflight, open live orders below the configured cap, and position budget room. First rollout should use canary max notional and ladder caps (for example `live.canary_max_notional_usdt: 2`, `live.auto_ladder_enabled: true`, `live.max_auto_layers_per_cycle: 1`, `live.max_open_live_orders: 1`, `live.auto_ladder_max_notional_usdt: 2`). Auto ladder still submits only spot post-only BUY limit orders and reconciles after submission.
+Auto live execution is fail-closed. It requires `live.auto_execute=true`, `live.require_manual_confirm=false`, `BTC_AGENT_ALLOW_AUTO_LIVE=true`, operator halt inactive, passing proof/preflight, open live orders below configured caps, and position budget room. Live auto may read full OKX free USDT as source capital, but deployment is still limited by `max_live_notional_per_order_usdt`, `max_live_notional_per_asset_usdt`, `max_live_notional_total_usdt`, BTC permission, `ACTIVE_LIMIT`, risk governor, and data/reconcile gates. It still submits only spot post-only BUY limit orders and reconciles after submission.
 
 `reconcile-live-orders` reads local open live orders, checks OKX order status with read-only signed REST calls, updates local order/event state, and writes:
 
@@ -273,18 +272,6 @@ reports/live_position_latest.json
 Reconciliation never places orders. Unknown exchange errors are marked for manual check. `live-positions` prints the local live position ledger without calling the exchange.
 
 ### 24/7 live rollout runbook
-
-`canary-drill` runs simulation-only order-path drills before any real canary:
-
-```bash
-./bin/btc-agent canary-drill --config config.yaml --cycles 50
-```
-
-- Uses `FakeOKX` only — no OKX credentials required.
-- Never places or cancels real orders (`real_exchange_calls=0` always).
-- Runs submit → partial-fill → full-fill → cancel cycles; verifies filter rejections and authority guard (only `ACTIVE_LIMIT` can pass order gate).
-- Writes `reports/canary_drill_latest.md` and `reports/canary_drill_latest.json`.
-- Passing the drill does **not** approve real canary; market state (`ACTIVE_LIMIT`), `live-readiness`, and operator gates are still required.
 
 1. Keep operator halt active by default:
 
@@ -302,7 +289,7 @@ Reconciliation never places orders. Unknown exchange errors are marked for manua
 ./bin/btc-agent live-positions --config config.yaml
 ```
 
-3. Manual one-order canary only after readiness is clean:
+3. Manual one-order live execution only after readiness is clean:
 
 ```bash
 ./bin/btc-agent operator-resume --config config.yaml
@@ -322,8 +309,8 @@ export BTC_AGENT_MODE=paper
 export BTC_AGENT_MODE=live-proof
 ./scripts/btc-agent-scheduler.sh
 
-# Canary auto only after manual live has proven safe.
-export BTC_AGENT_MODE=live-canary-auto
+# Live auto only after manual live has proven safe.
+export BTC_AGENT_MODE=live-auto
 export BTC_AGENT_ALLOW_AUTO_LIVE=true
 ./bin/btc-agent live-doctor --config config.yaml
 ./scripts/btc-agent-scheduler.sh

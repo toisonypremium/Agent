@@ -28,8 +28,8 @@ type LiveReadinessView struct {
 	LiveEnabled                   bool
 	RealTradingEnabled            bool
 	AutoExecute                   bool
-	CanaryMode                    bool
-	CanaryMaxNotional             float64
+	LiveAutoMode                  bool
+	LiveAutoMaxNotional           float64
 	RequireManualConfirm          bool
 	ProofOnly                     bool
 	AutoLadderEnabled             bool
@@ -51,6 +51,7 @@ type LiveReadinessView struct {
 	DataHealth                    liveguard.DataHealthResult
 	ReconcileSafety               liveguard.ReconcileSafetyResult
 	RiskGovernor                  liveguard.RiskGovernorResult
+	ManagedCoinSummaries          []liveguard.ManagedCoinSummary
 }
 
 func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
@@ -300,8 +301,8 @@ func LiveReadinessHumanText(r LiveReadinessView) string {
 	b.WriteString(fmt.Sprintf("- Chế độ: %s  |  Khóa vận hành: %s\n", empty(r.Mode, "chưa đặt"), haltText(r.OperatorHalted)))
 	b.WriteString(fmt.Sprintf("- Biến cho phép tự động: %s  |  Tự động đặt lệnh: %v  |  Yêu cầu xác nhận tay: %v\n",
 		enabledText(r.AutoLiveEnv), r.AutoExecute, r.RequireManualConfirm))
-	b.WriteString(fmt.Sprintf("- Chạy thử vốn nhỏ: %v (%.2f USDT)  |  Chỉ kiểm tra, không đặt lệnh: %v\n",
-		r.CanaryMode, r.CanaryMaxNotional, r.ProofOnly))
+	b.WriteString(fmt.Sprintf("- Giới hạn live-auto tùy chọn: %s (%.2f USDT)  |  Chỉ kiểm tra, không đặt lệnh: %v\n",
+		enabledText(r.LiveAutoMode), r.LiveAutoMaxNotional, r.ProofOnly))
 	b.WriteString(fmt.Sprintf("- Bộ quản lý lệnh: bật=%v  |  %d tầng/coin  |  %d lệnh/coin  |  %d lệnh tổng\n",
 		r.OrderManagementEnabled, r.MaxAutoLayersPerAsset, r.MaxOpenLiveOrdersPerAsset, r.MaxOpenLiveOrdersTotal))
 	b.WriteString(fmt.Sprintf("- Vốn: %.0f USDT/lệnh  |  %.0f USDT/coin  |  %.0f USDT tổng\n",
@@ -324,8 +325,28 @@ func LiveReadinessHumanText(r LiveReadinessView) string {
 		}
 	}
 
+	if len(r.ManagedCoinSummaries) > 0 && (r.Proof.Candidate.Symbol == "" || r.PlanState != agent2.StateActiveLimit) {
+		b.WriteString("\n4) Vì sao chưa tự đặt lệnh\n")
+		shown := 0
+		for _, coin := range r.ManagedCoinSummaries {
+			if shown >= 3 || coin.DesiredLayers > 0 || coin.Placed > 0 || coin.Kept > 0 {
+				continue
+			}
+			reasons := coin.WhyNoOrder
+			if len(reasons) > 0 {
+				b.WriteString(fmt.Sprintf("- %s: %s — %s\n", coin.Symbol, coin.State, explainReasons(reasons, 2)))
+			} else {
+				b.WriteString(fmt.Sprintf("- %s: %s — chưa có ACTIVE_LIMIT/layer hợp lệ.\n", coin.Symbol, coin.State))
+			}
+			if coin.NextTrigger != "" {
+				b.WriteString("  Điều kiện tiếp theo: " + coin.NextTrigger + "\n")
+			}
+			shown++
+		}
+	}
+
 	if r.Proof.Candidate.Symbol != "" {
-		b.WriteString(fmt.Sprintf("\n4) Lệnh dự kiến qua kiểm tra\n- %s %s giá giới hạn %.8f  |  giá trị %.2f USDT\n",
+		b.WriteString(fmt.Sprintf("\n5) Lệnh dự kiến qua kiểm tra\n- %s %s giá giới hạn %.8f  |  giá trị %.2f USDT\n",
 			r.Proof.Candidate.Side, r.Proof.Candidate.Symbol,
 			r.Proof.Candidate.Price, r.Proof.Candidate.Notional))
 	}
@@ -342,7 +363,7 @@ func LiveProofHumanText(proof liveguard.Proof) string {
 		b.WriteString(fmt.Sprintf("Tài khoản OKX: xác thực=%s, số dư=%s, USDT khả dụng=%.2f, tối thiểu=%.2f.\n", yesNo(proof.Account.AuthOK), yesNo(proof.Account.BalanceOK), proof.Account.FreeUSDT, proof.Account.MinRequiredUSDT))
 	}
 	if proof.Candidate.Symbol != "" {
-		b.WriteString(fmt.Sprintf("Lệnh dự kiến: %s %s giá giới hạn %.8f, giá trị %.2f USDT, chạy thử vốn nhỏ=%v.\n", proof.Candidate.Side, proof.Candidate.Symbol, proof.Candidate.Price, proof.Candidate.Notional, proof.Candidate.Canary))
+		b.WriteString(fmt.Sprintf("Lệnh dự kiến: %s %s giá giới hạn %.8f, giá trị %.2f USDT, live auto=%v.\n", proof.Candidate.Side, proof.Candidate.Symbol, proof.Candidate.Price, proof.Candidate.Notional, proof.Candidate.LiveAuto))
 	}
 	if len(proof.Reasons) > 0 {
 		b.WriteString("Lý do/điều kiện còn thiếu:\n")
@@ -369,7 +390,7 @@ func LiveOrderHumanText(result liveguard.ExecutionResult, auto bool) string {
 		b.WriteString("Lệnh thật: KHÔNG đặt lệnh.\n")
 	}
 	if result.Candidate.Symbol != "" {
-		b.WriteString(fmt.Sprintf("Lệnh dự kiến: %s %s giá giới hạn %.8f, giá trị %.2f USDT, chạy thử vốn nhỏ=%v.\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Notional, result.Candidate.Canary))
+		b.WriteString(fmt.Sprintf("Lệnh dự kiến: %s %s giá giới hạn %.8f, giá trị %.2f USDT, live auto=%v.\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Notional, result.Candidate.LiveAuto))
 	}
 	if len(result.Reasons) > 0 {
 		b.WriteString("Lý do:\n")
@@ -393,7 +414,7 @@ func LiveLadderOrderHumanText(result liveguard.LadderExecutionResult) string {
 	if len(result.Candidates) > 0 {
 		b.WriteString("Danh sách tầng lệnh:\n")
 		for i, c := range result.Candidates {
-			b.WriteString(fmt.Sprintf("%d) %s %s giá giới hạn %.8f, giá trị %.2f USDT, chỉ tạo thanh khoản=%v, chạy thử vốn nhỏ=%v.\n", i+1, c.Side, c.Symbol, c.Price, c.Notional, c.PostOnly, c.Canary))
+			b.WriteString(fmt.Sprintf("%d) %s %s giá giới hạn %.8f, giá trị %.2f USDT, chỉ tạo thanh khoản=%v, live auto=%v.\n", i+1, c.Side, c.Symbol, c.Price, c.Notional, c.PostOnly, c.LiveAuto))
 		}
 	}
 	if len(result.Reasons) > 0 {

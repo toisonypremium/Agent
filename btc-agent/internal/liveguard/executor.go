@@ -68,7 +68,7 @@ func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof
 		Price:         proof.Candidate.Price,
 		Quantity:      proof.Candidate.Quantity,
 		PostOnly:      proof.Candidate.PostOnly,
-		ClientOrderID: clientOrderID(proof.Candidate.Symbol, cfg.Live.CanaryMode),
+		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
 	}
 	order, err := placer.PlaceSpotLimitOrder(ctx, req)
 	result.Order = order
@@ -98,7 +98,7 @@ func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, 
 		Price:         proof.Candidate.Price,
 		Quantity:      proof.Candidate.Quantity,
 		PostOnly:      proof.Candidate.PostOnly,
-		ClientOrderID: clientOrderID(proof.Candidate.Symbol, cfg.Live.CanaryMode),
+		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
 	}
 	order, err := placer.PlaceSpotLimitOrder(ctx, req)
 	result.Order = order
@@ -133,7 +133,7 @@ func ExecuteAutoLadderProofOrder(ctx context.Context, cfg config.Config, proof L
 		if instID == "" {
 			instID = strings.ReplaceAll(candidate.Symbol, "USDT", "-USDT")
 		}
-		req := live.LimitOrderRequest{InstID: instID, Side: strings.ToLower(candidate.Side), Price: candidate.Price, Quantity: candidate.Quantity, PostOnly: candidate.PostOnly, ClientOrderID: clientOrderID(candidate.Symbol, cfg.Live.CanaryMode)}
+		req := live.LimitOrderRequest{InstID: instID, Side: strings.ToLower(candidate.Side), Price: candidate.Price, Quantity: candidate.Quantity, PostOnly: candidate.PostOnly, ClientOrderID: clientOrderID(candidate.Symbol)}
 		order, err := placer.PlaceSpotLimitOrder(ctx, req)
 		result.Orders = append(result.Orders, order)
 		if err != nil {
@@ -213,13 +213,9 @@ func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer 
 	return uniqueStrings(reasons)
 }
 
-func clientOrderID(symbol string, canary bool) string {
+func clientOrderID(symbol string) string {
 	s := strings.ToLower(strings.ReplaceAll(symbol, "-", ""))
-	prefix := "btcagent"
-	if canary {
-		prefix = "btccanary"
-	}
-	return fmt.Sprintf("%s%s%s", prefix, s, nextClientOrderIDSuffix())
+	return fmt.Sprintf("btclive%s%s", s, nextClientOrderIDSuffix())
 }
 
 func sanitizeExchangeError(cfg config.Config, err error) string {
@@ -446,5 +442,5 @@ func normalizedAutoLadderMaxNotionalExec(cfg config.Config) float64 {
 	if cfg.Live.AutoLadderMaxNotionalUSDT > 0 {
 		return cfg.Live.AutoLadderMaxNotionalUSDT
 	}
-	return cfg.Live.CanaryMaxNotionalUSDT
+	return config.LiveAutoMaxNotionalUSDT(cfg)
 }

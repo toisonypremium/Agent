@@ -14,11 +14,22 @@ const (
 	DoctorBlock = "DOCTOR_BLOCK"
 )
 
+type EnvFileStatus struct {
+	Path                 string `json:"path"`
+	Exists               bool   `json:"exists"`
+	Mode                 string `json:"mode,omitempty"`
+	AutoLiveAllow        string `json:"auto_live_allow,omitempty"`
+	OKXKeyPresent        bool   `json:"okx_key_present"`
+	OKXSecretPresent     bool   `json:"okx_secret_present"`
+	OKXPassphrasePresent bool   `json:"okx_passphrase_present"`
+}
+
 type RuntimeDoctorResult struct {
 	GeneratedAt          time.Time             `json:"generated_at"`
 	Status               string                `json:"status"`
 	AutoLiveEnv          bool                  `json:"auto_live_env"`
 	CredentialEnvPresent map[string]bool       `json:"credential_env_present,omitempty"`
+	EnvFiles             []EnvFileStatus       `json:"env_files,omitempty"`
 	TelegramTokenPresent bool                  `json:"telegram_token_present"`
 	TelegramChatPresent  bool                  `json:"telegram_chat_present"`
 	OperatorHalted       bool                  `json:"operator_halted"`

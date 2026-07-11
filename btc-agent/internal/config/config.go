@@ -111,16 +111,19 @@ type Config struct {
 		} `yaml:"rss"`
 	} `yaml:"research"`
 	Live struct {
-		Enabled                           bool    `yaml:"enabled"`
-		Exchange                          string  `yaml:"exchange"`
-		APIKeyEnv                         string  `yaml:"api_key_env"`
-		APISecretEnv                      string  `yaml:"api_secret_env"`
-		APIPassphraseEnv                  string  `yaml:"api_passphrase_env"`
-		MaxOrderNotionalUSDT              float64 `yaml:"max_order_notional_usdt"`
-		MinAccountFreeUSDT                float64 `yaml:"min_account_free_usdt"`
-		RequirePostOnly                   bool    `yaml:"require_post_only"`
-		RequireManualConfirm              bool    `yaml:"require_manual_confirm"`
-		AutoExecute                       bool    `yaml:"auto_execute"`
+		Enabled                 bool    `yaml:"enabled"`
+		Exchange                string  `yaml:"exchange"`
+		APIKeyEnv               string  `yaml:"api_key_env"`
+		APISecretEnv            string  `yaml:"api_secret_env"`
+		APIPassphraseEnv        string  `yaml:"api_passphrase_env"`
+		MaxOrderNotionalUSDT    float64 `yaml:"max_order_notional_usdt"`
+		MinAccountFreeUSDT      float64 `yaml:"min_account_free_usdt"`
+		RequirePostOnly         bool    `yaml:"require_post_only"`
+		RequireManualConfirm    bool    `yaml:"require_manual_confirm"`
+		AutoExecute             bool    `yaml:"auto_execute"`
+		LiveAutoMode            bool    `yaml:"live_auto_mode"`
+		LiveAutoMaxNotionalUSDT float64 `yaml:"live_auto_max_notional_usdt"`
+		// Legacy canary fields are kept for older local configs; use LiveAuto* in code.
 		CanaryMode                        bool    `yaml:"canary_mode"`
 		CanaryMaxNotionalUSDT             float64 `yaml:"canary_max_notional_usdt"`
 		AutoLadderEnabled                 bool    `yaml:"auto_ladder_enabled"`
@@ -151,6 +154,8 @@ type Config struct {
 		MaxSlippageBps                    float64 `yaml:"max_slippage_bps"`
 		MinBidDepthToOrderRatio           float64 `yaml:"min_bid_depth_to_order_ratio"`
 		MaxOrderToAvg5mQuoteVolumePct     float64 `yaml:"max_order_to_avg_5m_quote_volume_pct"`
+		MMGateSamples                     int     `yaml:"mm_gate_samples"`
+		MMGateSampleDelayMs               int     `yaml:"mm_gate_sample_delay_ms"`
 	} `yaml:"live"`
 	Execution struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
@@ -173,6 +178,22 @@ func Load(path string) (Config, error) {
 		return c, err
 	}
 	return c, nil
+}
+
+// LiveAutoMode returns the preferred live-auto mode flag, accepting legacy canary_mode for older configs.
+func LiveAutoMode(c Config) bool {
+	return c.Live.LiveAutoMode || c.Live.CanaryMode
+}
+
+// LiveAutoMaxNotionalUSDT returns the preferred live-auto cap, accepting legacy canary_max_notional_usdt for older configs.
+func LiveAutoMaxNotionalUSDT(c Config) float64 {
+	if c.Live.LiveAutoMaxNotionalUSDT > 0 {
+		return c.Live.LiveAutoMaxNotionalUSDT
+	}
+	if c.Live.CanaryMode {
+		return c.Live.CanaryMaxNotionalUSDT
+	}
+	return 0
 }
 
 func validClockTime(value string) bool {
@@ -223,12 +244,12 @@ func (c Config) Validate() error {
 	if !c.Execution.PaperTrading && !c.Execution.RealTradingEnabled {
 		return errors.New("paper_trading or real_trading_enabled must be true")
 	}
-	if c.Live.CanaryMode && (c.Live.Enabled || c.Execution.RealTradingEnabled) {
-		if c.Live.CanaryMaxNotionalUSDT <= 0 {
-			return errors.New("live canary_max_notional_usdt must be positive when canary_mode is enabled")
+	if LiveAutoMode(c) && (c.Live.Enabled || c.Execution.RealTradingEnabled) {
+		if LiveAutoMaxNotionalUSDT(c) <= 0 {
+			return errors.New("live live_auto_max_notional_usdt must be positive when live_auto_mode is enabled")
 		}
-		if c.Live.CanaryMaxNotionalUSDT > c.Live.MaxOrderNotionalUSDT {
-			return fmt.Errorf("live canary_max_notional_usdt (%.2f) cannot exceed max_order_notional_usdt (%.2f)", c.Live.CanaryMaxNotionalUSDT, c.Live.MaxOrderNotionalUSDT)
+		if LiveAutoMaxNotionalUSDT(c) > c.Live.MaxOrderNotionalUSDT {
+			return fmt.Errorf("live live_auto_max_notional_usdt (%.2f) cannot exceed max_order_notional_usdt (%.2f)", LiveAutoMaxNotionalUSDT(c), c.Live.MaxOrderNotionalUSDT)
 		}
 	}
 	if c.Live.AutoLadderEnabled {
@@ -285,6 +306,12 @@ func (c Config) Validate() error {
 	}
 	if c.Live.MaxSpreadBps < 0 || c.Live.MaxSlippageBps < 0 || c.Live.MinBidDepthToOrderRatio < 0 || c.Live.MaxOrderToAvg5mQuoteVolumePct < 0 {
 		return errors.New("live liquidity gate values cannot be negative")
+	}
+	if c.Live.MMGateSamples < 0 || c.Live.MMGateSampleDelayMs < 0 {
+		return errors.New("live MM gate sample values cannot be negative")
+	}
+	if c.Live.MMGateSamples > 3 {
+		return errors.New("live.mm_gate_samples must be <=3")
 	}
 	if c.Live.AutoHaltAfterErrors < 0 {
 		return errors.New("live.auto_halt_after_errors cannot be negative")

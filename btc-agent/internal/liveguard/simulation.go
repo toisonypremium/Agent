@@ -38,20 +38,23 @@ func RunLiveManagerSimulation(cfg config.Config) LiveManagerSimulationResult {
 		simScenario("WATCH does nothing", "no desired orders and no actions", cfg, agent2.Plan{State: agent2.StateWatch, ActionPermission: agent1.Watch}, nil, func(r ManagedCycleResult) bool {
 			return len(r.Desired) == 0 && len(r.Placed) == 0 && len(r.Canceled) == 0
 		}),
+		simScenario("ARMED does not place normal live orders", "no desired orders and no place actions", cfg, agent2.Plan{State: agent2.StateArmed, ActionPermission: agent1.Armed, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateArmed, DiscountZone: market.Zone{Low: 90, High: 100}, Invalidation: 88, RewardRisk: 3.5, Reason: "simulation armed", Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}}}}}, nil, func(r ManagedCycleResult) bool {
+			return len(r.Desired) == 0 && len(r.Placed) == 0
+		}),
 		simScenario("ACTIVE_LIMIT single asset places layers", "would place ETH layers or block ETH only if D-grade", cfg, simPlan("ETHUSDT"), nil, func(r ManagedCycleResult) bool {
-			return (len(r.Placed) >= 1 || blockedSymbolReason(r, "ETHUSDT", "canary quality filter blocked D-grade coin")) && len(r.Canceled) == 0
+			return (len(r.Placed) >= 1 || blockedSymbolReason(r, "ETHUSDT", "live quality filter blocked D-grade coin")) && len(r.Canceled) == 0
 		}),
 		simScenario("ACTIVE_LIMIT multi asset places multiple coins", "would place/probe ETH/SOL or block D-grade coins", cfg, simPlan("ETHUSDT", "SOLUSDT"), nil, func(r ManagedCycleResult) bool {
-			return placedSymbol(r, "ETHUSDT") && (placedSymbol(r, "SOLUSDT") || blockedSymbolReason(r, "SOLUSDT", "canary quality filter blocked D-grade coin"))
+			return placedSymbol(r, "ETHUSDT") && (placedSymbol(r, "SOLUSDT") || blockedSymbolReason(r, "SOLUSDT", "live quality filter blocked D-grade coin"))
 		}),
 		simScenario("Matching open order is kept", "keeps matching ETH layer unless ETH is D-grade blocked", cfg, simPlan("ETHUSDT"), []live.OrderStatus{simOpen("ETHUSDT", 1, 100)}, func(r ManagedCycleResult) bool {
-			return (len(r.Kept) == 1 && len(r.Canceled) == 0) || (len(r.Canceled) == 1 && blockedSymbolReason(r, "ETHUSDT", "canary quality filter blocked D-grade coin"))
+			return (len(r.Kept) == 1 && len(r.Canceled) == 0) || (len(r.Canceled) == 1 && blockedSymbolReason(r, "ETHUSDT", "live quality filter blocked D-grade coin"))
 		}),
 		simScenario("Inactive plan cancels open order", "would cancel stale ETH order when plan WATCH", cfg, agent2.Plan{State: agent2.StateWatch, ActionPermission: agent1.Watch}, []live.OrderStatus{simOpen("ETHUSDT", 1, 100)}, func(r ManagedCycleResult) bool {
 			return len(r.Canceled) == 1
 		}),
 		simScenario("Price drift replaces order", "would replace ETH layer unless ETH is D-grade blocked", cfg, simPlan("ETHUSDT"), []live.OrderStatus{simOpen("ETHUSDT", 1, 80)}, func(r ManagedCycleResult) bool {
-			return len(r.Replaced) == 1 || (len(r.Canceled) == 1 && blockedSymbolReason(r, "ETHUSDT", "canary quality filter blocked D-grade coin"))
+			return len(r.Replaced) == 1 || (len(r.Canceled) == 1 && blockedSymbolReason(r, "ETHUSDT", "live quality filter blocked D-grade coin"))
 		}),
 		simScenario("Total open cap blocks excess", "blocks excess layers after dynamic opportunity allocation", capOneConfig(cfg), simPlan("ETHUSDT", "SOLUSDT"), nil, func(r ManagedCycleResult) bool {
 			return len(r.Placed) == 1 && len(r.Blocked) > 0
@@ -86,9 +89,9 @@ func simulationConfig(cfg config.Config) config.Config {
 	cfg.Live.Enabled = true
 	cfg.Live.AutoExecute = true
 	cfg.Live.OrderManagementEnabled = true
-	cfg.Live.CanaryMode = true
-	if cfg.Live.CanaryMaxNotionalUSDT <= 0 {
-		cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.LiveAutoMode = true
+	if config.LiveAutoMaxNotionalUSDT(cfg) <= 0 {
+		cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	}
 	if cfg.Live.MaxOrderNotionalUSDT <= 0 {
 		cfg.Live.MaxOrderNotionalUSDT = 10
@@ -163,12 +166,12 @@ func placedSymbol(r ManagedCycleResult, symbol string) bool {
 	return false
 }
 
-func placedOrBlockedByCanaryQuality(r ManagedCycleResult, symbol string) bool {
-	return placedSymbol(r, symbol) || blockedByCanaryQuality(r, symbol)
+func placedOrBlockedByLiveQuality(r ManagedCycleResult, symbol string) bool {
+	return placedSymbol(r, symbol) || blockedByLiveQuality(r, symbol)
 }
 
-func blockedByCanaryQuality(r ManagedCycleResult, symbol string) bool {
-	return blockedSymbolReason(r, symbol, "canary quality filter blocked D-grade coin") || blockedSymbolReason(r, symbol, "canary quality filter blocked NO_SAMPLE coin")
+func blockedByLiveQuality(r ManagedCycleResult, symbol string) bool {
+	return blockedSymbolReason(r, symbol, "live quality filter blocked D-grade coin") || blockedSymbolReason(r, symbol, "live quality filter blocked NO_SAMPLE coin")
 }
 
 func blockedSymbolReason(r ManagedCycleResult, symbol, reason string) bool {

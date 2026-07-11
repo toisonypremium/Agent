@@ -117,10 +117,10 @@ func (r *DataHealthResult) refreshSummary() {
 }
 
 func latestUsableCandleTime(c market.Candle, now time.Time) time.Time {
-	if !c.CloseTime.IsZero() && !c.CloseTime.After(now.Add(time.Hour)) {
+	if !c.CloseTime.IsZero() && !c.CloseTime.After(now) {
 		return c.CloseTime
 	}
-	if !c.OpenTime.IsZero() {
+	if !c.OpenTime.IsZero() && !c.OpenTime.After(now) {
 		return c.OpenTime
 	}
 	return c.CloseTime

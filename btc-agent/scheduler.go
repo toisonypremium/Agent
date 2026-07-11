@@ -153,8 +153,16 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextReconcile time.Time
 	var nextSupervisor time.Time
 	var nextAlivePing time.Time
+	var nextTelegramCommands time.Time
 	var latestDoctor *liveguard.RuntimeDoctorResult
 	consecutiveDoctorBlocks := 0
+
+	telegramCommandsInterval := 30 * time.Second
+	telegramCommandsEnabled := cfg.Notify.Enabled && cfg.Notify.Provider == "telegram"
+	if telegramCommandsEnabled {
+		nextTelegramCommands = time.Now().Add(telegramCommandsInterval)
+		log.Printf("[Scheduler] Telegram command polling interval: %v next=%s", telegramCommandsInterval, nextTelegramCommands.Format("2006-01-02 15:04:05 MST"))
+	}
 
 	alivePingInterval := time.Duration(cfg.Live.HeartbeatIntervalMinutes) * time.Minute
 	alivePingEnabled := cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && alivePingInterval > 0
@@ -346,6 +354,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if alivePingEnabled && nextAlivePing.Before(waitUntil) {
 			waitUntil = nextAlivePing
 		}
+		if telegramCommandsEnabled && nextTelegramCommands.Before(waitUntil) {
+			waitUntil = nextTelegramCommands
+		}
 		wait := time.Until(waitUntil)
 		if wait < 0 {
 			wait = 0
@@ -453,6 +464,14 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			sendTelegram(shutdownCtx, cfg, "scheduler-alive", buildAlivePingText(heartbeat))
 			nextAlivePing = time.Now().Add(alivePingInterval)
 			writeHeartbeat("alive ping sent")
+		}
+
+		if telegramCommandsEnabled && !time.Now().Before(nextTelegramCommands) {
+			if err := runTelegramCommands(shutdownCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Telegram commands warning: %v", err)
+			}
+			nextTelegramCommands = time.Now().Add(telegramCommandsInterval)
+			writeHeartbeat("telegram commands polled")
 		}
 
 		if maintenanceEnabled && !time.Now().Before(nextMaintenance) {

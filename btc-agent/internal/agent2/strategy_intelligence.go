@@ -203,8 +203,8 @@ func strategySummary(cfg config.Config, asset AssetPlan, intel StrategyIntellige
 
 func liveSizingCapContext(cfg config.Config) float64 {
 	caps := []float64{}
-	if cfg.Live.CanaryMode && cfg.Live.CanaryMaxNotionalUSDT > 0 {
-		caps = append(caps, cfg.Live.CanaryMaxNotionalUSDT)
+	if config.LiveAutoMode(cfg) && config.LiveAutoMaxNotionalUSDT(cfg) > 0 {
+		caps = append(caps, config.LiveAutoMaxNotionalUSDT(cfg))
 	}
 	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
 		caps = append(caps, cfg.Live.MaxLiveNotionalPerOrderUSDT)

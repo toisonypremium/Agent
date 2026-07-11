@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"btc-agent/internal/liquidity"
 )
 
 const defaultOKXBaseURL = "https://www.okx.com"
@@ -186,6 +188,80 @@ func (c *OKXClient) CancelOrder(ctx context.Context, cancel CancelOrderRequest) 
 		return result, err
 	}
 	return result, nil
+}
+
+func (c *OKXClient) OrderBook(ctx context.Context, instID string) (liquidity.OrderBookSnapshot, error) {
+	if instID == "" {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("instID required")
+	}
+	requestPath := "/api/v5/market/books?instId=" + url.QueryEscape(instID) + "&sz=20"
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+requestPath, nil)
+	if err != nil {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book request: %w", err)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book read failed: %w", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book http %d: %s", resp.StatusCode, redact(data, c.key, c.secret, c.passphrase))
+	}
+	return parseOrderBook(data)
+}
+
+func parseOrderBook(data []byte) (liquidity.OrderBookSnapshot, error) {
+	var raw struct {
+		Code string `json:"code"`
+		Msg  string `json:"msg"`
+		Data []struct {
+			Asks [][]string `json:"asks"`
+			Bids [][]string `json:"bids"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book decode failed: %w", err)
+	}
+	if raw.Code != "0" {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book code %s: %s", raw.Code, raw.Msg)
+	}
+	if len(raw.Data) == 0 || len(raw.Data[0].Bids) == 0 || len(raw.Data[0].Asks) == 0 {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book returned no bid/ask data")
+	}
+	bestBid := firstParseFloat(raw.Data[0].Bids[0]...)
+	bestAsk := firstParseFloat(raw.Data[0].Asks[0]...)
+	if bestBid <= 0 || bestAsk <= 0 || bestAsk < bestBid {
+		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book invalid best bid/ask")
+	}
+	mid := (bestBid + bestAsk) / 2
+	bidFloor := mid * 0.99
+	askCeil := mid * 1.01
+	book := liquidity.OrderBookSnapshot{BestBid: bestBid, BestAsk: bestAsk}
+	for _, bid := range raw.Data[0].Bids {
+		if len(bid) < 2 {
+			continue
+		}
+		price := firstParseFloat(bid[0])
+		size := firstParseFloat(bid[1])
+		if price >= bidFloor {
+			book.BidDepth1PctUSDT += price * size
+		}
+	}
+	for _, ask := range raw.Data[0].Asks {
+		if len(ask) < 2 {
+			continue
+		}
+		price := firstParseFloat(ask[0])
+		size := firstParseFloat(ask[1])
+		if price <= askCeil {
+			book.AskDepth1PctUSDT += price * size
+		}
+	}
+	return book, nil
 }
 
 func (c *OKXClient) AccountBalance(ctx context.Context) ([]Balance, error) {

@@ -26,11 +26,11 @@ type PreflightResult struct {
 	MinSize     float64  `json:"min_size"`
 	MinNotional float64  `json:"min_notional"`
 	Reasons     []string `json:"reasons,omitempty"`
-	Canary      bool     `json:"canary,omitempty"`
+	LiveAuto    bool     `json:"live_auto,omitempty"`
 }
 
 func RunPreflight(cfg config.Config, candidate CandidateOrder, filters []live.InstrumentFilter) (CandidateOrder, PreflightResult) {
-	result := PreflightResult{Enabled: true, Symbol: candidate.Symbol, Price: candidate.Price, Quantity: candidate.Quantity, Notional: candidate.Notional, Canary: candidate.Canary}
+	result := PreflightResult{Enabled: true, Symbol: candidate.Symbol, Price: candidate.Price, Quantity: candidate.Quantity, Notional: candidate.Notional, LiveAuto: candidate.LiveAuto}
 	reasons := []string{}
 	if candidate.Symbol == "" {
 		reasons = append(reasons, "symbol is empty")
@@ -61,10 +61,10 @@ func RunPreflight(cfg config.Config, candidate CandidateOrder, filters []live.In
 	if filter.TickSize > 0 {
 		candidate.Price = floorToStep(candidate.Price, filter.TickSize)
 	}
-	if cfg.Live.CanaryMode && cfg.Live.CanaryMaxNotionalUSDT > 0 {
-		if candidate.Price*candidate.Quantity > cfg.Live.CanaryMaxNotionalUSDT {
+	if config.LiveAutoMode(cfg) && config.LiveAutoMaxNotionalUSDT(cfg) > 0 {
+		if candidate.Price*candidate.Quantity > config.LiveAutoMaxNotionalUSDT(cfg) {
 			if candidate.Price > 0 {
-				candidate.Quantity = cfg.Live.CanaryMaxNotionalUSDT / candidate.Price
+				candidate.Quantity = config.LiveAutoMaxNotionalUSDT(cfg) / candidate.Price
 			}
 		}
 	}
@@ -87,8 +87,8 @@ func RunPreflight(cfg config.Config, candidate CandidateOrder, filters []live.In
 	if cfg.Live.MaxOrderNotionalUSDT > 0 && candidate.Notional > cfg.Live.MaxOrderNotionalUSDT+1e-9 {
 		reasons = append(reasons, "notional above live max")
 	}
-	if cfg.Live.CanaryMode && cfg.Live.CanaryMaxNotionalUSDT > 0 && candidate.Notional > cfg.Live.CanaryMaxNotionalUSDT+1e-9 {
-		reasons = append(reasons, "notional above canary max")
+	if config.LiveAutoMode(cfg) && config.LiveAutoMaxNotionalUSDT(cfg) > 0 && candidate.Notional > config.LiveAutoMaxNotionalUSDT(cfg)+1e-9 {
+		reasons = append(reasons, "notional above live auto max")
 	}
 	result.Reasons = uniqueStrings(reasons)
 	result.Pass = len(result.Reasons) == 0

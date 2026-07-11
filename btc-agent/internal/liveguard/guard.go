@@ -33,7 +33,7 @@ type CandidateOrder struct {
 	Notional float64 `json:"notional"`
 	PostOnly bool    `json:"post_only"`
 	Source   string  `json:"source"`
-	Canary   bool    `json:"canary,omitempty"`
+	LiveAuto bool    `json:"live_auto,omitempty"`
 }
 
 type AccountCheck struct {
@@ -96,9 +96,6 @@ func BuildLadderProofWithChecks(ctx context.Context, cfg config.Config, plan age
 	}
 	if !cfg.Live.AutoLadderEnabled {
 		return ladderNotReady(p, NotReadyConfig, "live.auto_ladder_enabled=false")
-	}
-	if !cfg.Live.CanaryMode {
-		return ladderNotReady(p, NotReadyConfig, "live.canary_mode=true required for auto ladder")
 	}
 	if cfg.Live.Exchange == "" || strings.ToLower(cfg.Live.Exchange) != "okx" {
 		return ladderNotReady(p, NotReadyConfig, "only okx live proof is planned")
@@ -224,8 +221,8 @@ func firstCandidate(cfg config.Config, plan agent2.Plan) (CandidateOrder, bool) 
 		if cap := cfg.Live.MaxOrderNotionalUSDT; cap > 0 && notional > cap {
 			notional = cap
 		}
-		if cfg.Live.CanaryMode && cfg.Live.CanaryMaxNotionalUSDT > 0 && notional > cfg.Live.CanaryMaxNotionalUSDT {
-			notional = cfg.Live.CanaryMaxNotionalUSDT
+		if config.LiveAutoMode(cfg) && config.LiveAutoMaxNotionalUSDT(cfg) > 0 && notional > config.LiveAutoMaxNotionalUSDT(cfg) {
+			notional = config.LiveAutoMaxNotionalUSDT(cfg)
 		}
 		candidate, ok := candidateFromLayer(cfg, asset.Symbol, layer, notional)
 		return candidate, ok
@@ -279,7 +276,7 @@ func candidateFromLayer(cfg config.Config, symbol string, layer agent2.Layer, no
 	if layer.Price <= 0 || qty <= 0 || notional <= 0 {
 		return CandidateOrder{}, false
 	}
-	return CandidateOrder{Symbol: symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: fmt.Sprintf("deterministic_agent2_layer_%d", layer.Index), Canary: cfg.Live.CanaryMode}, true
+	return CandidateOrder{Symbol: symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: fmt.Sprintf("deterministic_agent2_layer_%d", layer.Index), LiveAuto: cfg.Live.AutoExecute}, true
 }
 
 func normalizedMaxAutoLayers(cfg config.Config) int {
@@ -306,8 +303,8 @@ func normalizedAutoLadderMaxNotional(cfg config.Config) float64 {
 	if cfg.Live.AutoLadderMaxNotionalUSDT > 0 {
 		return cfg.Live.AutoLadderMaxNotionalUSDT
 	}
-	if cfg.Live.CanaryMaxNotionalUSDT > 0 {
-		return cfg.Live.CanaryMaxNotionalUSDT
+	if config.LiveAutoMaxNotionalUSDT(cfg) > 0 {
+		return config.LiveAutoMaxNotionalUSDT(cfg)
 	}
 	return cfg.Live.MaxOrderNotionalUSDT
 }

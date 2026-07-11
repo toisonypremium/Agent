@@ -19,6 +19,8 @@
 - [x] Remove stale canary/auto-ladder production logic from new live-auto scenario.
 - [x] Add real-data survey report path for learning evidence without changing live authority.
 - [x] Add OHLCV BTC accumulation phase detector and false-positive/forward-return audit without changing live authority.
+- [x] Add auto-live market-watch monitoring and operations-plan report without changing live authority.
+- [x] Split overloaded command/scheduler code and add read-only runtime ops event queue without changing live authority.
 
 ## Verification commands
 

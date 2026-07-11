@@ -111,6 +111,15 @@ type Config struct {
 			Feeds   []string `yaml:"feeds"`
 		} `yaml:"rss"`
 	} `yaml:"research"`
+	Monitoring struct {
+		Enabled                       bool `yaml:"enabled"`
+		MarketScanIntervalMinutes     int  `yaml:"market_scan_interval_minutes"`
+		TelegramDigestIntervalMinutes int  `yaml:"telegram_digest_interval_minutes"`
+		NotifyOnStateChange           bool `yaml:"notify_on_state_change"`
+		NotifyOnCritical              bool `yaml:"notify_on_critical"`
+		CriticalRepeatMinutes         int  `yaml:"critical_repeat_minutes"`
+		MaxConsecutiveScanErrors      int  `yaml:"max_consecutive_scan_errors"`
+	} `yaml:"monitoring"`
 	Live struct {
 		Enabled                           bool    `yaml:"enabled"`
 		Exchange                          string  `yaml:"exchange"`
@@ -432,6 +441,23 @@ func (c Config) Validate() error {
 		}
 		if c.Research.RSS.Enabled && len(c.Research.RSS.Feeds) == 0 {
 			return errors.New("research.rss.feeds required when research RSS is enabled")
+		}
+	}
+	if c.Monitoring.MarketScanIntervalMinutes < 0 || c.Monitoring.TelegramDigestIntervalMinutes < 0 || c.Monitoring.CriticalRepeatMinutes < 0 || c.Monitoring.MaxConsecutiveScanErrors < 0 {
+		return errors.New("monitoring interval/error values cannot be negative")
+	}
+	if c.Monitoring.Enabled {
+		if c.Monitoring.MarketScanIntervalMinutes < 5 {
+			return errors.New("monitoring.market_scan_interval_minutes must be >=5 when monitoring is enabled")
+		}
+		if c.Monitoring.TelegramDigestIntervalMinutes > 0 && c.Monitoring.TelegramDigestIntervalMinutes < 15 {
+			return errors.New("monitoring.telegram_digest_interval_minutes must be 0 or >=15")
+		}
+		if c.Monitoring.CriticalRepeatMinutes > 0 && c.Monitoring.CriticalRepeatMinutes < 15 {
+			return errors.New("monitoring.critical_repeat_minutes must be 0 or >=15")
+		}
+		if c.Monitoring.MaxConsecutiveScanErrors == 0 {
+			return errors.New("monitoring.max_consecutive_scan_errors must be >=1 when monitoring is enabled")
 		}
 	}
 	if c.Execution.OrderExpiryHours <= 0 {

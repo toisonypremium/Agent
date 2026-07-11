@@ -354,6 +354,63 @@ func TestValidateResearchEnabledValid(t *testing.T) {
 	}
 }
 
+func TestValidateMonitoringEnabledValid(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Monitoring.Enabled = true
+	cfg.Monitoring.MarketScanIntervalMinutes = 15
+	cfg.Monitoring.TelegramDigestIntervalMinutes = 60
+	cfg.Monitoring.NotifyOnStateChange = true
+	cfg.Monitoring.NotifyOnCritical = true
+	cfg.Monitoring.CriticalRepeatMinutes = 60
+	cfg.Monitoring.MaxConsecutiveScanErrors = 3
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateMonitoringRejectsInvalidValues(t *testing.T) {
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"negative scan", func(cfg *Config) { cfg.Monitoring.MarketScanIntervalMinutes = -1 }},
+		{"negative digest", func(cfg *Config) { cfg.Monitoring.TelegramDigestIntervalMinutes = -1 }},
+		{"negative repeat", func(cfg *Config) { cfg.Monitoring.CriticalRepeatMinutes = -1 }},
+		{"negative errors", func(cfg *Config) { cfg.Monitoring.MaxConsecutiveScanErrors = -1 }},
+		{"short scan enabled", func(cfg *Config) {
+			cfg.Monitoring.Enabled = true
+			cfg.Monitoring.MarketScanIntervalMinutes = 4
+			cfg.Monitoring.MaxConsecutiveScanErrors = 3
+		}},
+		{"short digest enabled", func(cfg *Config) {
+			cfg.Monitoring.Enabled = true
+			cfg.Monitoring.MarketScanIntervalMinutes = 15
+			cfg.Monitoring.TelegramDigestIntervalMinutes = 10
+			cfg.Monitoring.MaxConsecutiveScanErrors = 3
+		}},
+		{"short repeat enabled", func(cfg *Config) {
+			cfg.Monitoring.Enabled = true
+			cfg.Monitoring.MarketScanIntervalMinutes = 15
+			cfg.Monitoring.CriticalRepeatMinutes = 10
+			cfg.Monitoring.MaxConsecutiveScanErrors = 3
+		}},
+		{"zero max errors enabled", func(cfg *Config) {
+			cfg.Monitoring.Enabled = true
+			cfg.Monitoring.MarketScanIntervalMinutes = 15
+			cfg.Monitoring.MaxConsecutiveScanErrors = 0
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestValidateRequiresExactlyThreeAccumulationAssets(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Data.Symbols.Assets = []string{"ETHUSDT", "SOLUSDT"}

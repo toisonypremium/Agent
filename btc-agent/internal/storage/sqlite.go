@@ -19,6 +19,17 @@ import (
 
 type DB struct{ *sql.DB }
 
+type RuntimeEvent struct {
+	ID          int64     `json:"id"`
+	Timestamp   time.Time `json:"timestamp"`
+	Source      string    `json:"source"`
+	Type        string    `json:"type"`
+	Severity    string    `json:"severity"`
+	Fingerprint string    `json:"fingerprint,omitempty"`
+	PayloadJSON string    `json:"payload_json,omitempty"`
+	HandledAt   time.Time `json:"handled_at,omitempty"`
+}
+
 func Open(path string) (*DB, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
 		return nil, err
@@ -45,6 +56,7 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS accumulation_plans(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, state TEXT, action_permission TEXT, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS paper_orders(id TEXT PRIMARY KEY, timestamp INTEGER, symbol TEXT, side TEXT, layer INTEGER, price REAL, quantity REAL, notional REAL, status TEXT, expires_at INTEGER, invalidation_price REAL, reason TEXT);`,
 		`CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, type TEXT, content TEXT);`,
+		`CREATE TABLE IF NOT EXISTS runtime_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, source TEXT, type TEXT, severity TEXT, fingerprint TEXT, payload_json TEXT, handled_at INTEGER);`,
 		`CREATE TABLE IF NOT EXISTS performance_reviews(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_orders(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, type TEXT, price REAL, quantity REAL, notional REAL, status TEXT, submitted_at INTEGER, updated_at INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_order_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, status TEXT, payload_json TEXT);`,
@@ -290,6 +302,70 @@ func (d *DB) OpenPaperOrders() ([]agent2.PaperOrder, error) {
 
 func (d *DB) SaveReport(t, content string) error {
 	_, err := d.Exec(`INSERT INTO reports(timestamp,type,content) VALUES(?,?,?)`, time.Now().Unix(), t, content)
+	return err
+}
+
+func (d *DB) SaveRuntimeEvent(e RuntimeEvent) error {
+	if e.Timestamp.IsZero() {
+		e.Timestamp = time.Now().UTC()
+	}
+	if e.Source == "" {
+		e.Source = "unknown"
+	}
+	if e.Type == "" {
+		e.Type = "event"
+	}
+	if e.Severity == "" {
+		e.Severity = "info"
+	}
+	if e.Fingerprint != "" {
+		var existing int
+		err := d.QueryRow(`SELECT id FROM runtime_events WHERE source=? AND type=? AND fingerprint=? ORDER BY id DESC LIMIT 1`, e.Source, e.Type, e.Fingerprint).Scan(&existing)
+		if err == nil {
+			return nil
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+	}
+	_, err := d.Exec(`INSERT INTO runtime_events(timestamp, source, type, severity, fingerprint, payload_json, handled_at) VALUES(?,?,?,?,?,?,NULL)`, e.Timestamp.Unix(), e.Source, e.Type, e.Severity, e.Fingerprint, e.PayloadJSON)
+	return err
+}
+
+func (d *DB) PendingRuntimeEvents(limit int) ([]RuntimeEvent, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.Query(`SELECT id, timestamp, source, type, severity, fingerprint, payload_json, handled_at FROM runtime_events WHERE handled_at IS NULL OR handled_at=0 ORDER BY id DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []RuntimeEvent{}
+	for rows.Next() {
+		var e RuntimeEvent
+		var ts int64
+		var handled sql.NullInt64
+		if err := rows.Scan(&e.ID, &ts, &e.Source, &e.Type, &e.Severity, &e.Fingerprint, &e.PayloadJSON, &handled); err != nil {
+			return nil, err
+		}
+		e.Timestamp = time.Unix(ts, 0)
+		if handled.Valid && handled.Int64 > 0 {
+			e.HandledAt = time.Unix(handled.Int64, 0)
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+func (d *DB) MarkRuntimeEventHandled(id int64, handledAt time.Time) error {
+	if id <= 0 {
+		return fmt.Errorf("runtime event id required")
+	}
+	if handledAt.IsZero() {
+		handledAt = time.Now().UTC()
+	}
+	_, err := d.Exec(`UPDATE runtime_events SET handled_at=? WHERE id=?`, handledAt.Unix(), id)
 	return err
 }
 

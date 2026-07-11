@@ -38,6 +38,7 @@ type MaintenanceResult struct {
 	ReportsDeleted            int64             `json:"reports_deleted"`
 	LiveOrderEventsDeleted    int64             `json:"live_order_events_deleted"`
 	LivePositionEventsDeleted int64             `json:"live_position_events_deleted"`
+	RuntimeEventsDeleted      int64             `json:"runtime_events_deleted"`
 	ClosedPaperOrdersDeleted  int64             `json:"closed_paper_orders_deleted"`
 	CandlesDeleted            int64             `json:"candles_deleted"`
 	AnalysesDeleted           int64             `json:"analyses_deleted"`
@@ -99,6 +100,12 @@ func (d *DB) PruneMaintenance(cfg MaintenanceConfig, now time.Time) (Maintenance
 		return result, fmt.Errorf("prune live position events: %w", err)
 	}
 	result.LivePositionEventsDeleted = positionEventsDeleted
+
+	runtimeEventsDeleted, err := execRows(d.DB, `DELETE FROM runtime_events WHERE timestamp < ?`, eventCutoff)
+	if err != nil {
+		return result, fmt.Errorf("prune runtime events: %w", err)
+	}
+	result.RuntimeEventsDeleted = runtimeEventsDeleted
 
 	closedOrdersDeleted, err := pruneClosedPaperOrders(d.DB, cfg.MaxClosedPaperOrders)
 	if err != nil {
@@ -197,7 +204,7 @@ func maintenanceSummary(r MaintenanceResult) string {
 	if !r.Enabled {
 		return "Maintenance disabled"
 	}
-	return fmt.Sprintf("Maintenance deleted reports=%d live_order_events=%d live_position_events=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d stale_live_orders_closed=%d", r.ReportsDeleted, r.LiveOrderEventsDeleted, r.LivePositionEventsDeleted, r.ClosedPaperOrdersDeleted, r.CandlesDeleted, r.AnalysesDeleted, r.PlansDeleted, r.ReportFilesDeleted, r.StaleOpenLiveOrdersClosed)
+	return fmt.Sprintf("Maintenance deleted reports=%d live_order_events=%d live_position_events=%d runtime_events=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d stale_live_orders_closed=%d", r.ReportsDeleted, r.LiveOrderEventsDeleted, r.LivePositionEventsDeleted, r.RuntimeEventsDeleted, r.ClosedPaperOrdersDeleted, r.CandlesDeleted, r.AnalysesDeleted, r.PlansDeleted, r.ReportFilesDeleted, r.StaleOpenLiveOrdersClosed)
 }
 
 // closeStaleOpenLiveOrders marks LIVE_OPEN/SUBMITTED/PLANNED/PARTIAL_FILL orders as

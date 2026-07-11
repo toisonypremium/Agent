@@ -113,6 +113,9 @@ bin/
 ./bin/btc-agent fetch --config config.yaml
 ./bin/btc-agent analyze --config config.yaml
 ./bin/btc-agent plan --config config.yaml
+./bin/btc-agent operations-plan --config config.yaml
+./bin/btc-agent market-watch --config config.yaml
+./bin/btc-agent ops-events --config config.yaml
 ./bin/btc-agent status --config config.yaml
 ./bin/btc-agent run-daily --config config.yaml
 ./bin/btc-agent paper-manager --config config.yaml
@@ -164,6 +167,28 @@ BTC_AGENT_ALLOW_AUTO_LIVE=true
 
 Nếu bất kỳ gate nào fail, bot block hoặc chỉ reconcile.
 
+## Auto-live monitoring
+
+`market-watch` là vòng quét vận hành read-only: fetch dữ liệu mới, analyze BTC, build Agent2 plan, ghi operations plan, ghi runtime event, và gửi Telegram khi state/critical thay đổi. Nó không đặt/hủy lệnh; live execution vẫn chỉ qua `live-supervisor` và managed order engine.
+
+```bash
+./bin/btc-agent market-watch --config config.yaml
+./bin/btc-agent operations-plan --config config.yaml
+./bin/btc-agent ops-events --config config.yaml
+```
+
+Reports/state:
+
+```text
+reports/operations_plan_latest.md/json
+reports/market_watch_state.json
+SQLite runtime_events
+```
+
+`operations-plan` hiển thị BTC accumulation phase, quyền live, capital envelope, exposure hiện có, executable budget, opportunity budget, và next trigger. Executable budget chỉ >0 khi đủ `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED`.
+
+`ops-events` đọc pending runtime events từ SQLite để gom tín hiệu vận hành: market state changed, market critical, live supervisor event. Lệnh này read-only, không đặt/hủy lệnh.
+
 ## Report-only survey và learning
 
 Flow khảo sát dữ liệu thật:
@@ -211,6 +236,7 @@ reports/technical_scorecard_latest.md/json
 reports/capital_plan_research_latest.md/json
 reports/coin_universe_research_latest.md/json
 reports/decision_dashboard_latest.md/json
+reports/operations_plan_latest.md/json
 reports/auto_live_management_latest.md/json
 reports/live_supervisor_latest.md/json
 reports/live_doctor_latest.md/json

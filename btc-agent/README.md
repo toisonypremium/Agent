@@ -116,6 +116,7 @@ bin/
 ./bin/btc-agent operations-plan --config config.yaml
 ./bin/btc-agent market-watch --config config.yaml
 ./bin/btc-agent ops-events --config config.yaml
+./bin/btc-agent microstructure-fetch --config config.yaml
 ./bin/btc-agent status --config config.yaml
 ./bin/btc-agent run-daily --config config.yaml
 ./bin/btc-agent paper-manager --config config.yaml
@@ -169,12 +170,13 @@ Nếu bất kỳ gate nào fail, bot block hoặc chỉ reconcile.
 
 ## Auto-live monitoring
 
-`market-watch` là vòng quét vận hành read-only: fetch dữ liệu mới, analyze BTC, build Agent2 plan, ghi operations plan, ghi runtime event, và gửi Telegram khi state/critical thay đổi. Nó không đặt/hủy lệnh; live execution vẫn chỉ qua `live-supervisor` và managed order engine.
+`market-watch` là vòng quét vận hành read-only: fetch dữ liệu mới, fetch microstructure nếu bật, analyze BTC, build Agent2 plan, ghi operations plan, ghi runtime event, và gửi Telegram khi state/critical thay đổi. Nó không đặt/hủy lệnh; live execution vẫn chỉ qua `live-supervisor` và managed order engine.
 
 ```bash
 ./bin/btc-agent market-watch --config config.yaml
 ./bin/btc-agent operations-plan --config config.yaml
 ./bin/btc-agent ops-events --config config.yaml
+./bin/btc-agent microstructure-fetch --config config.yaml
 ```
 
 Reports/state:
@@ -183,11 +185,15 @@ Reports/state:
 reports/operations_plan_latest.md/json
 reports/market_watch_state.json
 SQLite runtime_events
+reports/microstructure_latest.md/json
+SQLite microstructure_snapshots
 ```
 
 `operations-plan` hiển thị BTC accumulation phase, quyền live, capital envelope, exposure hiện có, executable budget, opportunity budget, và next trigger. Executable budget chỉ >0 khi đủ `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED`.
 
-`ops-events` đọc pending runtime events từ SQLite để gom tín hiệu vận hành: market state changed, market critical, live supervisor event. Lệnh này read-only, không đặt/hủy lệnh.
+`ops-events` đọc pending runtime events từ SQLite để gom tín hiệu vận hành: market state changed, market critical, live supervisor event, microstructure stale/fetch/state event. Lệnh này read-only, không đặt/hủy lệnh.
+
+`microstructure-fetch` là report-only: đọc Binance public spot/futures observation (taker flow/CVD/orderbook/OI/funding/basis), ghi snapshot và report. Dữ liệu futures chỉ quan sát, không futures execution. Nếu `microstructure.require_fresh_for_active=true`, stale/missing microstructure chỉ được dùng để hạ quyền: BTC max `WATCH`, asset không lên `ACTIVE_LIMIT`.
 
 ## Report-only survey và learning
 

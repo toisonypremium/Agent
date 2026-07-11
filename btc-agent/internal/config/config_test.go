@@ -411,6 +411,64 @@ func TestValidateMonitoringRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestValidateMicrostructureEnabledValid(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Microstructure.Enabled = true
+	cfg.Microstructure.FetchOnMarketWatch = true
+	cfg.Microstructure.RequireFreshForActive = true
+	cfg.Microstructure.BinanceSpotBaseURL = "https://api.binance.com"
+	cfg.Microstructure.BinanceFuturesBaseURL = "https://fapi.binance.com"
+	cfg.Microstructure.Interval = "5m"
+	cfg.Microstructure.LookbackLimit = 120
+	cfg.Microstructure.MaxAgeMinutes = 30
+	cfg.Microstructure.OrderBookDepthLimit = 100
+	cfg.Microstructure.MinFreshSymbolsRequired = 4
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateMicrostructureRejectsInvalidValues(t *testing.T) {
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"negative lookback", func(cfg *Config) { cfg.Microstructure.LookbackLimit = -1 }},
+		{"negative max age", func(cfg *Config) { cfg.Microstructure.MaxAgeMinutes = -1 }},
+		{"negative depth", func(cfg *Config) { cfg.Microstructure.OrderBookDepthLimit = -1 }},
+		{"negative required", func(cfg *Config) { cfg.Microstructure.MinFreshSymbolsRequired = -1 }},
+		{"missing spot", func(cfg *Config) {
+			cfg.Microstructure.Enabled = true
+			cfg.Microstructure.BinanceFuturesBaseURL = "https://fapi.binance.com"
+		}},
+		{"missing futures", func(cfg *Config) {
+			cfg.Microstructure.Enabled = true
+			cfg.Microstructure.BinanceSpotBaseURL = "https://api.binance.com"
+		}},
+		{"large lookback", func(cfg *Config) {
+			cfg.Microstructure.Enabled = true
+			cfg.Microstructure.BinanceSpotBaseURL = "https://api.binance.com"
+			cfg.Microstructure.BinanceFuturesBaseURL = "https://fapi.binance.com"
+			cfg.Microstructure.LookbackLimit = 1001
+		}},
+		{"large depth", func(cfg *Config) {
+			cfg.Microstructure.Enabled = true
+			cfg.Microstructure.BinanceSpotBaseURL = "https://api.binance.com"
+			cfg.Microstructure.BinanceFuturesBaseURL = "https://fapi.binance.com"
+			cfg.Microstructure.OrderBookDepthLimit = 1001
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestValidateRequiresExactlyThreeAccumulationAssets(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Data.Symbols.Assets = []string{"ETHUSDT", "SOLUSDT"}

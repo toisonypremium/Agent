@@ -13,6 +13,7 @@ import (
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
+	"btc-agent/internal/microstructure"
 )
 
 const (
@@ -24,15 +25,16 @@ const (
 )
 
 type Report struct {
-	GeneratedAt time.Time      `json:"generated_at"`
-	Mode        string         `json:"mode"`
-	Market      MarketPlan     `json:"market"`
-	Capital     CapitalPlan    `json:"capital"`
-	Monitoring  MonitoringPlan `json:"monitoring"`
-	Runtime     RuntimePlan    `json:"runtime"`
-	Telegram    TelegramPlan   `json:"telegram"`
-	Fingerprint string         `json:"fingerprint"`
-	Summary     string         `json:"summary"`
+	GeneratedAt    time.Time          `json:"generated_at"`
+	Mode           string             `json:"mode"`
+	Market         MarketPlan         `json:"market"`
+	Microstructure MicrostructurePlan `json:"microstructure"`
+	Capital        CapitalPlan        `json:"capital"`
+	Monitoring     MonitoringPlan     `json:"monitoring"`
+	Runtime        RuntimePlan        `json:"runtime"`
+	Telegram       TelegramPlan       `json:"telegram"`
+	Fingerprint    string             `json:"fingerprint"`
+	Summary        string             `json:"summary"`
 }
 
 type MarketPlan struct {
@@ -58,6 +60,22 @@ type MarketPlan struct {
 	MainScenario        string            `json:"main_scenario"`
 	UnlockScenario      string            `json:"unlock_scenario"`
 	InvalidScenario     string            `json:"invalid_scenario"`
+}
+
+type MicrostructurePlan struct {
+	Enabled       bool     `json:"enabled"`
+	Status        string   `json:"status"`
+	FreshSymbols  int      `json:"fresh_symbols"`
+	RequiredFresh int      `json:"required_fresh"`
+	BTCTakerBuy   float64  `json:"btc_taker_buy_ratio,omitempty"`
+	BTCCVD        float64  `json:"btc_cvd_quote_usdt,omitempty"`
+	BTCSpreadBps  float64  `json:"btc_spread_bps,omitempty"`
+	BTCOrderBook  string   `json:"btc_orderbook_bias,omitempty"`
+	BTCFunding    float64  `json:"btc_funding_rate,omitempty"`
+	BTCBasisPct   float64  `json:"btc_basis_pct,omitempty"`
+	Blockers      []string `json:"blockers,omitempty"`
+	Warnings      []string `json:"warnings,omitempty"`
+	Summary       string   `json:"summary"`
 }
 
 type ExposureSnapshot struct {
@@ -145,13 +163,14 @@ func Build(cfg config.Config, analysis agent1.MarketAnalysis, plan agent2.Plan, 
 		exposure = normalizeExposure(snapshots[0])
 	}
 	report := Report{
-		GeneratedAt: time.Now(),
-		Mode:        cfg.App.Mode,
-		Market:      buildMarketPlan(analysis, plan),
-		Capital:     buildCapitalPlan(cfg, analysis, plan, exposure),
-		Monitoring:  buildMonitoringPlan(cfg, analysis, plan),
-		Runtime:     buildRuntimePlan(cfg),
-		Telegram:    buildTelegramPlan(),
+		GeneratedAt:    time.Now(),
+		Mode:           cfg.App.Mode,
+		Market:         buildMarketPlan(analysis, plan),
+		Microstructure: buildMicrostructurePlan(analysis.Microstructure),
+		Capital:        buildCapitalPlan(cfg, analysis, plan, exposure),
+		Monitoring:     buildMonitoringPlan(cfg, analysis, plan),
+		Runtime:        buildRuntimePlan(cfg),
+		Telegram:       buildTelegramPlan(),
 	}
 	report.Fingerprint = fingerprint(report)
 	report.Summary = fmt.Sprintf("BTC %s | plan %s | urgency %s | committed %.2f | available %.2f | executable %.2f USDT | reserve %.2f USDT", report.Market.Permission, report.Market.PlanState, report.Market.Urgency, report.Capital.AlreadyCommittedUSDT, report.Capital.AvailableCycleCapacityUSDT, report.Capital.ExecutableNowUSDT, report.Capital.ReserveCashUSDT)
@@ -209,6 +228,19 @@ func marketUrgency(a agent1.MarketAnalysis, p agent2.Plan) (string, []string) {
 	default:
 		return UrgencyNormal, nil
 	}
+}
+
+func buildMicrostructurePlan(summary microstructure.Summary) MicrostructurePlan {
+	plan := MicrostructurePlan{Enabled: summary.Enabled, Status: summary.Status, FreshSymbols: summary.FreshSymbols, RequiredFresh: summary.RequiredFresh, Blockers: summary.Blockers, Warnings: summary.Warnings, Summary: summary.Summary}
+	if summary.BTC.Symbol != "" {
+		plan.BTCTakerBuy = finite(summary.BTC.SpotFlow.TakerBuyRatio)
+		plan.BTCCVD = finite(summary.BTC.SpotFlow.CVDQuoteUSDT)
+		plan.BTCSpreadBps = finite(summary.BTC.OrderBook.SpreadBps)
+		plan.BTCOrderBook = summary.BTC.Signals.OrderBookBias
+		plan.BTCFunding = finite(summary.BTC.Futures.FundingRate)
+		plan.BTCBasisPct = finite(summary.BTC.Futures.BasisPct)
+	}
+	return plan
 }
 
 func buildCapitalPlan(cfg config.Config, analysis agent1.MarketAnalysis, plan agent2.Plan, exposure ExposureSnapshot) CapitalPlan {
@@ -570,6 +602,9 @@ func fingerprint(report Report) string {
 		FOMO              string       `json:"fomo"`
 		FlowBias          string       `json:"flow_bias"`
 		Urgency           string       `json:"urgency"`
+		MicroStatus       string       `json:"micro_status"`
+		MicroFresh        int          `json:"micro_fresh"`
+		MicroBlockers     int          `json:"micro_blockers"`
 		AvailableCapacity int          `json:"available_capacity_bucket"`
 		Assets            []assetState `json:"assets"`
 	}{
@@ -581,6 +616,9 @@ func fingerprint(report Report) string {
 		FOMO:              string(report.Market.FOMORisk),
 		FlowBias:          report.Market.FlowBias,
 		Urgency:           report.Market.Urgency,
+		MicroStatus:       report.Microstructure.Status,
+		MicroFresh:        report.Microstructure.FreshSymbols,
+		MicroBlockers:     len(report.Microstructure.Blockers),
 		AvailableCapacity: ratioBucket(report.Capital.AvailableCycleCapacityUSDT, report.Capital.CycleDeploymentCapUSDT, 10),
 		Assets:            assets,
 	}

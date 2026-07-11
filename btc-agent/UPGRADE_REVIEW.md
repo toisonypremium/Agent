@@ -62,6 +62,17 @@ Current upgrade also split overloaded command/scheduler code into focused files 
 
 Order authority remains single-writer: live-supervisor + managed order engine only.
 
+## Microstructure observation
+
+Milestone B adds report-only microstructure plumbing:
+
+- `microstructure-fetch` reads Binance public spot/futures observation only: taker flow/CVD, orderbook imbalance/spread, open interest, funding, spot-perp basis.
+- SQLite `microstructure_snapshots` stores latest observation evidence.
+- `market-watch` can fetch microstructure and write runtime events.
+- `operations-plan` and `real-data-survey` show microstructure status and blockers.
+- Futures data is observation-only. No futures execution, no leverage, no market order.
+- If `microstructure.require_fresh_for_active=true`, stale/missing microstructure can only reduce authority: BTC max `WATCH`, asset cannot stay `ACTIVE_LIMIT`.
+
 ## Safety invariants
 
 - `WATCH`, `SCOUT`, and `ARMED` are not order authority.

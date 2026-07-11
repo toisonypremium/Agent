@@ -116,7 +116,7 @@ func protectedReportFiles() []string {
 func maintenanceMarkdown(result storage.MaintenanceResult) string {
 	md := fmt.Sprintf("MAINTENANCE REPORT\n\nGenerated: %s\nSummary: %s\n\n", result.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"), result.Summary)
 	md += fmt.Sprintf("Retention: reports=%dd events=%dd max_report_files=%d max_closed_paper_orders=%d max_candles_per_pair=%d max_analysis_rows=%d max_plan_rows=%d wal_checkpoint=%v\n", result.Config.ReportRetentionDays, result.Config.EventRetentionDays, result.Config.MaxReportFiles, result.Config.MaxClosedPaperOrders, result.Config.MaxCandlesPerSymbolInterval, result.Config.MaxAnalysisRows, result.Config.MaxPlanRows, result.Config.WALCheckpoint)
-	md += fmt.Sprintf("Deleted: reports=%d live_order_events=%d live_position_events=%d runtime_events=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d\n", result.ReportsDeleted, result.LiveOrderEventsDeleted, result.LivePositionEventsDeleted, result.RuntimeEventsDeleted, result.ClosedPaperOrdersDeleted, result.CandlesDeleted, result.AnalysesDeleted, result.PlansDeleted, result.ReportFilesDeleted)
+	md += fmt.Sprintf("Deleted: reports=%d live_order_events=%d live_position_events=%d runtime_events=%d microstructure=%d closed_paper_orders=%d candles=%d analyses=%d plans=%d report_files=%d\n", result.ReportsDeleted, result.LiveOrderEventsDeleted, result.LivePositionEventsDeleted, result.RuntimeEventsDeleted, result.MicrostructureDeleted, result.ClosedPaperOrdersDeleted, result.CandlesDeleted, result.AnalysesDeleted, result.PlansDeleted, result.ReportFilesDeleted)
 	if result.WALCheckpointed {
 		md += "WAL checkpoint: done\n"
 	}

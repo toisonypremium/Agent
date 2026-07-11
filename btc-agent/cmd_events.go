@@ -8,6 +8,7 @@ import (
 
 	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/microstructure"
 	"btc-agent/internal/opsplan"
 	"btc-agent/internal/storage"
 )
@@ -147,4 +148,23 @@ func shouldRecordSupervisorEvent(result liveguard.SupervisorResult) bool {
 		len(result.Managed.Canceled) > 0 ||
 		len(result.Managed.Replaced) > 0 ||
 		len(result.Managed.Blocked) > 0
+}
+
+func saveMicrostructureRuntimeEvents(db *storage.DB, summary microstructure.Summary) {
+	if !summary.Enabled {
+		return
+	}
+	payload := map[string]any{
+		"status":         summary.Status,
+		"summary":        summary.Summary,
+		"fresh_symbols":  summary.FreshSymbols,
+		"required_fresh": summary.RequiredFresh,
+		"blockers":       summary.Blockers,
+		"warnings":       summary.Warnings,
+		"fingerprint":    summary.Fingerprint,
+	}
+	if summary.Status == microstructure.StatusBlock {
+		saveRuntimeEventJSON(db, "microstructure", "MICROSTRUCTURE_STALE", "warning", "stale:"+summary.Fingerprint, payload)
+	}
+	saveRuntimeEventJSON(db, "microstructure", "MICROSTRUCTURE_STATE_CHANGED", "info", summary.Fingerprint, payload)
 }

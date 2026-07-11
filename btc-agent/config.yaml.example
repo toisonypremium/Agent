@@ -113,6 +113,18 @@ monitoring:
   critical_repeat_minutes: 60
   max_consecutive_scan_errors: 3
 
+microstructure:
+  enabled: true
+  fetch_on_market_watch: true
+  require_fresh_for_active: true
+  binance_spot_base_url: "https://api.binance.com"
+  binance_futures_base_url: "https://fapi.binance.com"
+  interval: "5m"
+  lookback_limit: 120
+  max_age_minutes: 30
+  orderbook_depth_limit: 100
+  min_fresh_symbols_required: 4
+
 live:
   enabled: false
   exchange: "okx"

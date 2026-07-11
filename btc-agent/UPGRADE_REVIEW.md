@@ -40,6 +40,28 @@ Old canary/auto-ladder production logic is no longer part of the current scenari
 - No canary config fallback.
 - Managed order engine is the live-auto execution path.
 
+## Live operations monitoring
+
+Selected upgrade content from `Agent-main-advanced-operations-upgrade.zip` was ported only for live operations:
+
+- `operations-plan` builds read-only capital/exposure/trigger plan.
+- `market-watch` refreshes data, analysis, plan, reports, and Telegram state alerts.
+- Scheduler can run market-watch between supervisor cycles with backoff/error alerts.
+- Canary/demo/legacy auto-ladder code remains excluded.
+
+These features do not place, cancel, or override orders. Execution remains supervisor + managed order engine only.
+
+## Architecture load reduction
+
+Current upgrade also split overloaded command/scheduler code into focused files while keeping one `package main` and the same runtime behavior:
+
+- `cmd_market.go`, `cmd_ops.go`, `cmd_live.go`, `cmd_supervisor.go`, `cmd_reconcile.go`, `cmd_research.go`, `cmd_notify.go`, `cmd_status.go`, `cmd_maintenance.go`, `cli.go` split command responsibilities.
+- `scheduler_heartbeat.go`, `scheduler_lock.go`, `scheduler_backoff.go`, `scheduler_telegram.go`, `scheduler_time.go` split scheduler helpers while keeping `runScheduler` as the only orchestration loop.
+- SQLite `runtime_events` stores read-only ops signals for market-watch and live-supervisor events.
+- `ops-events` reads pending ops events. It does not place, cancel, or override orders.
+
+Order authority remains single-writer: live-supervisor + managed order engine only.
+
 ## Safety invariants
 
 - `WATCH`, `SCOUT`, and `ARMED` are not order authority.

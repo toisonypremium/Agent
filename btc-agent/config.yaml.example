@@ -104,6 +104,15 @@ research:
       - "https://www.coindesk.com/arc/outboundfeeds/rss/"
       - "https://cointelegraph.com/rss"
 
+monitoring:
+  enabled: true
+  market_scan_interval_minutes: 15
+  telegram_digest_interval_minutes: 60
+  notify_on_state_change: true
+  notify_on_critical: true
+  critical_repeat_minutes: 60
+  max_consecutive_scan_errors: 3
+
 live:
   enabled: false
   exchange: "okx"

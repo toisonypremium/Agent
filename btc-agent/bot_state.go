@@ -71,22 +71,25 @@ type BotRuntimeSnapshot struct {
 }
 
 type BotBTCSnapshot struct {
-	Price            float64     `json:"price,omitempty"`
-	Regime           string      `json:"regime,omitempty"`
-	TrendScore       float64     `json:"trend_score,omitempty"`
-	WeeklyBias       string      `json:"weekly_bias,omitempty"`
-	DailyBias        string      `json:"daily_bias,omitempty"`
-	FourHourBias     string      `json:"four_hour_bias,omitempty"`
-	FlowBias         string      `json:"flow_bias,omitempty"`
-	FlowScore        float64     `json:"flow_score,omitempty"`
-	PermissionReason string      `json:"permission_reason,omitempty"`
-	RiskLevel        agent1.Risk `json:"risk_level,omitempty"`
-	FallingKnifeRisk agent1.Risk `json:"falling_knife_risk,omitempty"`
-	FomoRisk         agent1.Risk `json:"fomo_risk,omitempty"`
-	SupportZone      market.Zone `json:"support_zone,omitempty"`
-	ResistanceZone   market.Zone `json:"resistance_zone,omitempty"`
-	AccumulationZone market.Zone `json:"accumulation_zone,omitempty"`
-	InvalidationZone market.Zone `json:"invalidation_zone,omitempty"`
+	Price               float64     `json:"price,omitempty"`
+	Regime              string      `json:"regime,omitempty"`
+	TrendScore          float64     `json:"trend_score,omitempty"`
+	WeeklyBias          string      `json:"weekly_bias,omitempty"`
+	DailyBias           string      `json:"daily_bias,omitempty"`
+	FourHourBias        string      `json:"four_hour_bias,omitempty"`
+	FlowBias            string      `json:"flow_bias,omitempty"`
+	FlowScore           float64     `json:"flow_score,omitempty"`
+	AccumulationPhase   string      `json:"accumulation_phase,omitempty"`
+	AccumulationScore   float64     `json:"accumulation_score,omitempty"`
+	AccumulationTrigger string      `json:"accumulation_trigger,omitempty"`
+	PermissionReason    string      `json:"permission_reason,omitempty"`
+	RiskLevel           agent1.Risk `json:"risk_level,omitempty"`
+	FallingKnifeRisk    agent1.Risk `json:"falling_knife_risk,omitempty"`
+	FomoRisk            agent1.Risk `json:"fomo_risk,omitempty"`
+	SupportZone         market.Zone `json:"support_zone,omitempty"`
+	ResistanceZone      market.Zone `json:"resistance_zone,omitempty"`
+	AccumulationZone    market.Zone `json:"accumulation_zone,omitempty"`
+	InvalidationZone    market.Zone `json:"invalidation_zone,omitempty"`
 }
 
 type BotOpenOrderSnapshot struct {
@@ -239,7 +242,7 @@ func buildBotRuntimeSnapshot(cfg config.Config, db *storage.DB, supervisor liveg
 		s.Errors = append(s.Errors, "latest analysis: "+err.Error())
 	} else {
 		s.BTCPermission = analysis.ActionPermission
-		s.BTC = BotBTCSnapshot{Price: analysis.BTCPrice, Regime: analysis.MarketRegime, TrendScore: analysis.TrendScore, WeeklyBias: analysis.WeeklyBias, DailyBias: analysis.DailyBias, FourHourBias: analysis.FourHourBias, FlowBias: string(analysis.Flow.Bias), FlowScore: analysis.Flow.Score, PermissionReason: analysis.PermissionReason, RiskLevel: analysis.RiskLevel, FallingKnifeRisk: analysis.FallingKnifeRisk, FomoRisk: analysis.FomoRisk, SupportZone: analysis.PrimarySupportZone, ResistanceZone: analysis.ResistanceZone, AccumulationZone: analysis.AccumulationZone, InvalidationZone: analysis.InvalidationZone}
+		s.BTC = BotBTCSnapshot{Price: analysis.BTCPrice, Regime: analysis.MarketRegime, TrendScore: analysis.TrendScore, WeeklyBias: analysis.WeeklyBias, DailyBias: analysis.DailyBias, FourHourBias: analysis.FourHourBias, FlowBias: string(analysis.Flow.Bias), FlowScore: analysis.Flow.Score, AccumulationPhase: string(analysis.BTCAccumulation.Phase), AccumulationScore: analysis.BTCAccumulation.Score, AccumulationTrigger: analysis.BTCAccumulation.NextTrigger, PermissionReason: analysis.PermissionReason, RiskLevel: analysis.RiskLevel, FallingKnifeRisk: analysis.FallingKnifeRisk, FomoRisk: analysis.FomoRisk, SupportZone: analysis.PrimarySupportZone, ResistanceZone: analysis.ResistanceZone, AccumulationZone: analysis.AccumulationZone, InvalidationZone: analysis.InvalidationZone}
 	}
 	plan, err := db.LatestPlan()
 	if err != nil {
@@ -261,7 +264,7 @@ func buildBotRuntimeSnapshot(cfg config.Config, db *storage.DB, supervisor liveg
 
 func canSubmitLiveOrderFromSnapshot(s BotRuntimeSnapshot) bool {
 	runtimeCanSubmit := s.Mode == "live-auto" && !s.DryRun && s.AutoLiveAllowed && s.LiveEnabled && s.AutoExecute && !s.RequireManualConfirm && !s.ProofOnly && s.RealTradingEnabled && !s.OperatorHalt && s.DoctorStatus != string(liveguard.DoctorBlock)
-	return runtimeCanSubmit && s.PlanState == agent2.StateActiveLimit && s.DesiredOrders > 0
+	return runtimeCanSubmit && s.PlanState == agent2.StateActiveLimit && s.DesiredOrders > 0 && s.BTC.AccumulationPhase == "ACCUMULATION_CONFIRMED"
 }
 
 func applyManagedToSnapshot(s *BotRuntimeSnapshot, managed liveguard.ManagedCycleResult) {
@@ -324,11 +327,14 @@ func buildScenarioReport(cfg config.Config, s BotRuntimeSnapshot) ScenarioReport
 
 func buildBTCScenario(s BotRuntimeSnapshot) BTCScenario {
 	btc := BTCScenario{CurrentPermission: s.BTCPermission, PermissionReason: s.BTC.PermissionReason, RiskLevel: s.BTC.RiskLevel, KeyZones: ScenarioZones{Support: s.BTC.SupportZone, Resistance: s.BTC.ResistanceZone, Accumulation: s.BTC.AccumulationZone, Invalidation: s.BTC.InvalidationZone}}
-	btc.BaseCase = fmt.Sprintf("BTC permission %s, plan %s. Bot chỉ đặt lệnh khi plan ACTIVE_LIMIT và safety gates pass.", emptyStringDefault(string(s.BTCPermission), "UNKNOWN"), emptyStringDefault(string(s.PlanState), "UNKNOWN"))
-	btc.BullUnlock = "BTC chuyển ALLOWED, flow/reclaim xác nhận, asset có ACTIVE_LIMIT layer hợp lệ. Bot tự đặt spot limit BUY post-only theo cap."
+	btc.BaseCase = fmt.Sprintf("BTC permission %s, plan %s, accumulation %s %.0f. Bot chỉ đặt lệnh khi plan ACTIVE_LIMIT và safety gates pass.", emptyStringDefault(string(s.BTCPermission), "UNKNOWN"), emptyStringDefault(string(s.PlanState), "UNKNOWN"), emptyStringDefault(s.BTC.AccumulationPhase, "UNKNOWN"), s.BTC.AccumulationScore)
+	btc.BullUnlock = "BTC chuyển ALLOWED + ACCUMULATION_CONFIRMED, flow/reclaim xác nhận, asset có ACTIVE_LIMIT layer hợp lệ. Bot tự đặt spot limit BUY post-only theo cap."
 	btc.BearInvalidation = "BTC mất support/invalidation hoặc data/reconcile/risk chuyển BLOCK. Bot đứng ngoài hoặc reconcile-only fail-closed."
 	if s.BTCPermission != agent1.Allowed {
 		btc.UnlockConditions = append(btc.UnlockConditions, "BTC permission chuyển ALLOWED")
+	}
+	if s.BTC.AccumulationPhase != "ACCUMULATION_CONFIRMED" {
+		btc.UnlockConditions = append(btc.UnlockConditions, "BTC accumulation chuyển ACCUMULATION_CONFIRMED")
 	}
 	if s.BTC.FlowBias == "" || strings.Contains(strings.ToLower(s.BTC.FlowBias), "neutral") {
 		btc.UnlockConditions = append(btc.UnlockConditions, "BTC flow/reclaim rõ hơn")

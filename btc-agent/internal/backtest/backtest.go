@@ -46,6 +46,7 @@ type Result struct {
 	ThresholdCalibration          ThresholdCalibrationResult    `json:"threshold_calibration"`
 	ZoneEntrySanity               ZoneEntrySanityResult         `json:"zone_entry_sanity"`
 	MMAccumulationAudit           MMAccumulationAuditResult     `json:"mm_accumulation_audit"`
+	AccumulationPhaseAudit        AccumulationPhaseAuditResult  `json:"accumulation_phase_audit"`
 	Agent2Simulation              Agent2Simulation              `json:"agent2_simulation"`
 	Agent2ArmedResearchSimulation Agent2Simulation              `json:"agent2_armed_research_simulation"`
 	WatchlistTriggerAudit         WatchlistTriggerAuditResult   `json:"watchlist_trigger_audit"`
@@ -390,6 +391,20 @@ func Markdown(r Result) string {
 			for _, item := range r.MMAccumulationAudit.TopMissing {
 				b.WriteString(fmt.Sprintf("- %s: %d\n", item.Reason, item.Count))
 			}
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("10d. BTC Accumulation Phase Forward / False-Positive Audit\n")
+	if !r.AccumulationPhaseAudit.Enabled {
+		b.WriteString("- " + emptyDash(r.AccumulationPhaseAudit.Summary) + "\n\n")
+	} else {
+		b.WriteString("- " + r.AccumulationPhaseAudit.Summary + "\n")
+		b.WriteString("- Diagnostic only: accumulation phase audit does not change live permission, config, or order authority.\n")
+		b.WriteString("| Phase | Count | Avg score | 7D avg/win | 14D MAE/MFE | False+ | Verdict |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---|\n")
+		for _, row := range SortedAccumulationPhaseRows(r.AccumulationPhaseAudit.Rows) {
+			b.WriteString(fmt.Sprintf("| %s | %d | %.1f | %s | %s | %.1f%% | %s |\n", row.Phase, row.Count, row.AvgScore, accumulationPhaseReturnCell(row, 7), accumulationPhaseMAEMFECell(row, 14), row.FalsePositiveRate*100, row.Verdict))
 		}
 		b.WriteString("\n")
 	}
@@ -759,6 +774,20 @@ func assetFlowEntryAuditHorizonCell(row AssetFlowEntryAuditRow, horizon int) str
 		return "n/a"
 	}
 	return fmt.Sprintf("%.2f%% / %.1f%% / %.2f%%", row.AvgReturn[horizon]*100, row.WinRate[horizon]*100, row.WorstDrawdown[horizon]*100)
+}
+
+func accumulationPhaseReturnCell(row AccumulationPhaseAuditRow, horizon int) string {
+	if row.AvgForwardReturn == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.1f%%", row.AvgForwardReturn[horizon]*100, row.WinRate[horizon]*100)
+}
+
+func accumulationPhaseMAEMFECell(row AccumulationPhaseAuditRow, horizon int) string {
+	if row.WorstMAE == nil || row.BestMFE == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.2f%%", row.WorstMAE[horizon]*100, row.BestMFE[horizon]*100)
 }
 
 func watchAuditHorizonCell(row WatchlistTriggerAuditRow, horizon int) string {

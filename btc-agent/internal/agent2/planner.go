@@ -173,7 +173,8 @@ func applyBTCGateToAsset(cfg config.Config, a agent1.MarketAnalysis, ap AssetPla
 		ap.NextTrigger = "Chờ BTC hết panic/falling knife/FOMO hard risk trước khi tạo setup."
 		return ap
 	}
-	if a.ActionPermission == agent1.Allowed && (a.MarketRegime != "DOWNTREND" || cfg.Risk.AllowScoutInDowntrend) {
+	btcAccumulationConfirmed := string(a.BTCAccumulation.Phase) == "ACCUMULATION_CONFIRMED"
+	if a.ActionPermission == agent1.Allowed && btcAccumulationConfirmed && (a.MarketRegime != "DOWNTREND" || cfg.Risk.AllowScoutInDowntrend) {
 		if a.MarketRegime != "DOWNTREND" {
 			return ap
 		}
@@ -188,8 +189,11 @@ func applyBTCGateToAsset(cfg config.Config, a agent1.MarketAnalysis, ap AssetPla
 		}
 		ap.State = StateScout
 		ap.Layers = nil
-		ap.Reason = firstNonEmptyMM(PrimaryReason(gateReasons), "setup đủ asset gate nhưng BTC chưa ALLOWED")
-		ap.NextTrigger = "SCOUT: chờ BTC chuyển ALLOWED; không tạo order."
+		ap.Reason = firstNonEmptyMM(PrimaryReason(gateReasons), "setup đủ asset gate nhưng BTC chưa ALLOWED/CONFIRMED")
+		if a.ActionPermission == agent1.Allowed && !btcAccumulationConfirmed {
+			ap.Reason = "BTC chưa ACCUMULATION_CONFIRMED; không cho ACTIVE_LIMIT"
+		}
+		ap.NextTrigger = "SCOUT: chờ BTC chuyển ALLOWED và ACCUMULATION_CONFIRMED; không tạo order."
 		return ap
 	}
 	if ap.State == StateWatch && !HasHardBlock(ap.Reasons) && nearActionableSetup(cfg, ap) {

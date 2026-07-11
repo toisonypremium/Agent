@@ -23,8 +23,8 @@ func ClassifyAssetRisk(c []market.Candle, ema20, rsi float64, resistance market.
 	}
 	last := c[len(c)-1]
 	prev := c[len(c)-2]
-	avgRange := avgRangeMM(c[:len(c)-1], 20)
-	avgVol := avgVolumeMM(c[:len(c)-1], 20)
+	avgRange := avgRangeAssetRisk(c[:len(c)-1], 20)
+	avgVol := avgVolumeAssetRisk(c[:len(c)-1], 20)
 	breakPrevLow := last.Close < prev.Low
 	volumeSpike := last.Volume > prev.Volume*1.5 || (avgVol > 0 && last.Volume > avgVol*1.5)
 	atrExpansion := avgRange > 0 && (last.High-last.Low) > avgRange*1.5
@@ -53,4 +53,43 @@ func ClassifyAssetRisk(c []market.Candle, ema20, rsi float64, resistance market.
 		s.Reasons = AddReason(s.Reasons, NewDecisionReason(ReasonFOMO, ReasonSoftWait, ReasonScopeRisk, "FOMO soft: nhịp hồi nóng, chờ pullback/retest"))
 	}
 	return s
+}
+
+func avgVolumeAssetRisk(c []market.Candle, n int) float64 {
+	if len(c) == 0 || n <= 0 {
+		return 0
+	}
+	if n > len(c) {
+		n = len(c)
+	}
+	start := len(c) - n
+	sum := 0.0
+	for _, x := range c[start:] {
+		sum += x.Volume
+	}
+	return sum / float64(n)
+}
+
+func avgRangeAssetRisk(c []market.Candle, n int) float64 {
+	if len(c) == 0 || n <= 0 {
+		return 0
+	}
+	if n > len(c) {
+		n = len(c)
+	}
+	start := len(c) - n
+	sum := 0.0
+	count := 0
+	for _, x := range c[start:] {
+		r := x.High - x.Low
+		if r <= 0 {
+			continue
+		}
+		sum += r
+		count++
+	}
+	if count == 0 {
+		return 0
+	}
+	return sum / float64(count)
 }

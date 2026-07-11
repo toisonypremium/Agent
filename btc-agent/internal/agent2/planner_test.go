@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"btc-agent/internal/accumulation"
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/config"
 	"btc-agent/internal/market"
@@ -24,7 +25,7 @@ func testConfig() config.Config {
 }
 
 func allowedAnalysis() agent1.MarketAnalysis {
-	return agent1.MarketAnalysis{ActionPermission: agent1.Allowed, MarketRegime: "ACCUMULATION", FallingKnifeRisk: agent1.Low, FomoRisk: agent1.Low}
+	return agent1.MarketAnalysis{ActionPermission: agent1.Allowed, MarketRegime: "ACCUMULATION", FallingKnifeRisk: agent1.Low, FomoRisk: agent1.Low, BTCAccumulation: accumulation.Result{Phase: accumulation.PhaseConfirmed, Score: 80, DataQuality: 1}}
 }
 
 func assetCandles(n int, lastNearSupport bool) []market.Candle {

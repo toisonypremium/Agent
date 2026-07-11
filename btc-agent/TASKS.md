@@ -6,6 +6,8 @@
 - [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED` appears.
 - [ ] Use full verification gate before reporting implementation work done.
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
+- [ ] Milestone B: add microstructure data sources (CVD/OI/funding/orderbook) with data-health stale blockers before considering live expansion.
+- [ ] Milestone C: prove BTC accumulation false-positive/drawdown improvement in walk-forward before any live sizing change.
 
 ## Done
 
@@ -16,6 +18,7 @@
 - [x] Connect live allocator to `OpportunityComposite` inside `ACTIVE_LIMIT` guard.
 - [x] Remove stale canary/auto-ladder production logic from new live-auto scenario.
 - [x] Add real-data survey report path for learning evidence without changing live authority.
+- [x] Add OHLCV BTC accumulation phase detector and false-positive/forward-return audit without changing live authority.
 
 ## Verification commands
 
@@ -31,7 +34,7 @@ BTC_AGENT_MODE=live-auto BTC_AGENT_ALLOW_AUTO_LIVE=true ./bin/btc-agent live-sup
 ## Safety invariants
 
 - Scheduler `live-auto` uses supervisor + managed order engine as production path.
-- `ACTIVE_LIMIT + ALLOWED` required for normal live desired orders.
+- `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` required for normal live desired orders.
 - `WATCH`, `SCOUT`, and `ARMED` do not create normal live orders.
 - Spot limit BUY post-only only.
 - No futures.

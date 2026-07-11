@@ -32,6 +32,8 @@ func DailyReport(a MarketAnalysis, planSummary string) string {
 
 5. MM / Liquidity Flow
 - Bias: %s | score %.2f
+- BTC accumulation phase: %s | score %.1f | data_quality %.2f
+- Next trigger: %s
 - Daily: sweep_low=%v reclaim=%v absorption=%v failed_breakout=%v distribution=%v
 - 4H: sweep_low=%v reclaim=%v absorption=%v failed_breakout=%v distribution=%v
 - Kết luận flow: %s
@@ -47,5 +49,5 @@ func DailyReport(a MarketAnalysis, planSummary string) string {
 
 8. Kết luận hành động
 - %s
-`, a.MarketRegime, a.WeeklyBias, a.DailyBias, a.FourHourBias, a.RiskLevel, a.TrendScore, a.ActionPermission, a.WeeklyBias, a.DailyBias, a.FourHourBias, a.PrimarySupportZone.Low, a.PrimarySupportZone.High, a.DeepSupportZone.Low, a.DeepSupportZone.High, a.ResistanceZone.Low, a.ResistanceZone.High, a.AccumulationZone.Low, a.AccumulationZone.High, a.MacroAccumulationZone.Low, a.MacroAccumulationZone.High, a.InvalidationZone.Low, a.InvalidationZone.High, a.FallingKnifeRisk, a.FomoRisk, a.RiskLevel, a.FearGreed.Classification, a.FearGreed.Value, a.Flow.Bias, a.Flow.Score, a.Flow.Daily.SweepLow, a.Flow.Daily.ReclaimSupport, a.Flow.Daily.Absorption, a.Flow.Daily.FailedBreakout, a.Flow.Daily.Distribution, a.Flow.FourHour.SweepLow, a.Flow.FourHour.ReclaimSupport, a.Flow.FourHour.Absorption, a.Flow.FourHour.FailedBreakout, a.Flow.FourHour.Distribution, a.Flow.Summary, planSummary, a.ScenarioMain, a.ScenarioBullish, a.ScenarioBearish, a.ActionPermission)
+`, a.MarketRegime, a.WeeklyBias, a.DailyBias, a.FourHourBias, a.RiskLevel, a.TrendScore, a.ActionPermission, a.WeeklyBias, a.DailyBias, a.FourHourBias, a.PrimarySupportZone.Low, a.PrimarySupportZone.High, a.DeepSupportZone.Low, a.DeepSupportZone.High, a.ResistanceZone.Low, a.ResistanceZone.High, a.AccumulationZone.Low, a.AccumulationZone.High, a.MacroAccumulationZone.Low, a.MacroAccumulationZone.High, a.InvalidationZone.Low, a.InvalidationZone.High, a.FallingKnifeRisk, a.FomoRisk, a.RiskLevel, a.FearGreed.Classification, a.FearGreed.Value, a.Flow.Bias, a.Flow.Score, a.BTCAccumulation.Phase, a.BTCAccumulation.Score, a.BTCAccumulation.DataQuality, a.BTCAccumulation.NextTrigger, a.Flow.Daily.SweepLow, a.Flow.Daily.ReclaimSupport, a.Flow.Daily.Absorption, a.Flow.Daily.FailedBreakout, a.Flow.Daily.Distribution, a.Flow.FourHour.SweepLow, a.Flow.FourHour.ReclaimSupport, a.Flow.FourHour.Absorption, a.Flow.FourHour.FailedBreakout, a.Flow.FourHour.Distribution, a.Flow.Summary, planSummary, a.ScenarioMain, a.ScenarioBullish, a.ScenarioBearish, a.ActionPermission)
 }

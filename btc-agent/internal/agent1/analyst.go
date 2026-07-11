@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"btc-agent/internal/accumulation"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/flow"
@@ -57,6 +58,7 @@ type MarketAnalysis struct {
 	FearGreed             exchange.FearGreed            `json:"fear_greed"`
 	Frames                map[string]market.FrameSignal `json:"frames"`
 	Flow                  flow.MultiFrame               `json:"flow"`
+	BTCAccumulation       accumulation.Result           `json:"btc_accumulation"`
 }
 
 type ScoreBreakdown struct {
@@ -86,6 +88,10 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	macroAcc := market.MacroAccumulationZone(ps, cfg.BTCCycle.StressPriceReference)
 	trend := (w.TrendScore*0.45 + d.TrendScore*0.40 + h4.TrendScore*0.15)
 	fl := flow.AnalyzeMultiFrame(btc)
+	btcAccumulation := accumulation.Analyze("BTCUSDT", btc["1d"])
+	if cfg.Data.Symbols.BTC != "" {
+		btcAccumulation.Symbol = cfg.Data.Symbols.BTC
+	}
 	breakdown := ScoreBreakdown{WeeklyTrend: w.TrendScore, DailyTrend: d.TrendScore, FourHourTrend: h4.TrendScore, TrendScore: trend, FlowBias: string(fl.Bias), FlowScore: fl.Score, FlowComponents: compactFlowComponents(fl.Daily.Components, 6), FlowNextTrigger: fl.Daily.Diagnostics.NextBullTrigger}
 	regime := classifyRegime(w, d, h4, price, fg)
 	falling := fallingKnife(w, d, h4, btc["1d"])
@@ -107,6 +113,7 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 		perm = Armed
 		permissionReason = "flow accumulation/bear-trap đủ mạnh nên nâng từ WATCH lên ARMED"
 	}
+	perm, permissionReason = applyAccumulationPermissionGate(perm, permissionReason, btcAccumulation)
 	if fl.Bias == flow.BiasBullTrap || fl.Bias == flow.BiasDistribution {
 		if perm == Allowed {
 			perm = Watch
@@ -120,12 +127,30 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	if !inv.Valid() {
 		perm = NoTrade
 	}
-	a := MarketAnalysis{Timestamp: time.Now(), BTCPrice: price, WeeklyBias: w.Bias, DailyBias: d.Bias, FourHourBias: h4.Bias, MarketRegime: regime, TrendScore: trend, ScoreBreakdown: breakdown, PermissionReason: permissionReason, RiskLevel: risk, FallingKnifeRisk: falling, FomoRisk: fomo, PrimarySupportZone: ps, DeepSupportZone: deep, ResistanceZone: rs, AccumulationZone: acc, MacroAccumulationZone: macroAcc, InvalidationZone: inv, ActionPermission: perm, FearGreed: fg, Frames: map[string]market.FrameSignal{"1w": w, "1d": d, "4h": h4}, Flow: fl}
+	a := MarketAnalysis{Timestamp: time.Now(), BTCPrice: price, WeeklyBias: w.Bias, DailyBias: d.Bias, FourHourBias: h4.Bias, MarketRegime: regime, TrendScore: trend, ScoreBreakdown: breakdown, PermissionReason: permissionReason, RiskLevel: risk, FallingKnifeRisk: falling, FomoRisk: fomo, PrimarySupportZone: ps, DeepSupportZone: deep, ResistanceZone: rs, AccumulationZone: acc, MacroAccumulationZone: macroAcc, InvalidationZone: inv, ActionPermission: perm, FearGreed: fg, Frames: map[string]market.FrameSignal{"1w": w, "1d": d, "4h": h4}, Flow: fl, BTCAccumulation: btcAccumulation}
 	a.ScenarioMain = "Ưu tiên bảo toàn vốn; chỉ gom khi BTC giữ vùng hỗ trợ/value và có reclaim rõ."
 	a.ScenarioBullish = "BTC reclaim EMA/kháng cự gần, 1D giữ cấu trúc, volume bán giảm; Agent 2 có thể chuyển sang ARMED/ALLOWED."
 	a.ScenarioBearish = "BTC phá hỗ trợ chính với volume bán tăng hoặc 4H/1D tiếp tục lower-low; giữ NO_TRADE."
 	a.Summary = fmt.Sprintf("BTC %.2f, regime %s, trend %.1f, permission %s", price, regime, trend, perm)
 	return a, nil
+}
+
+func applyAccumulationPermissionGate(perm Permission, reason string, acc accumulation.Result) (Permission, string) {
+	switch acc.Phase {
+	case accumulation.PhaseDistribution, accumulation.PhaseInvalidated:
+		return NoTrade, fmt.Sprintf("BTC accumulation phase %s hard block: %s", acc.Phase, acc.NextTrigger)
+	case accumulation.PhaseMarkdown, accumulation.PhaseSweep, accumulation.PhaseAbsorption:
+		if perm == Allowed || perm == Armed {
+			return Watch, fmt.Sprintf("BTC accumulation phase %s chưa đủ reclaim/confirm; tối đa WATCH", acc.Phase)
+		}
+	case accumulation.PhaseReclaim:
+		if perm == Allowed {
+			return Armed, "BTC accumulation RECLAIM chưa CONFIRMED; tối đa ARMED"
+		}
+	case accumulation.PhaseConfirmed:
+		return perm, reason
+	}
+	return perm, reason
 }
 
 func classifyRegime(w, d, h4 market.FrameSignal, price float64, fg exchange.FearGreed) string {

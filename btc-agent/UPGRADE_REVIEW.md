@@ -27,6 +27,7 @@ live.supervisor_enabled=true
 execution.real_trading_enabled=true
 plan.State=ACTIVE_LIMIT
 plan.ActionPermission=ALLOWED
+BTC accumulation phase=ACCUMULATION_CONFIRMED
 asset.State=ACTIVE_LIMIT
 ```
 
@@ -48,6 +49,7 @@ Old canary/auto-ladder production logic is no longer part of the current scenari
 - No futures, no leverage, no market order.
 - Telegram commands are read-only.
 - Research reports and `real-data-survey` do not edit config or place orders.
+- BTC accumulation detector is an extra deterministic gate; it does not bypass `ACTIVE_LIMIT + ALLOWED`.
 
 ## Operator status target
 

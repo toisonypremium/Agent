@@ -3,6 +3,7 @@ package main
 import (
 	"testing"
 
+	"btc-agent/internal/accumulation"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/liveguard"
 )
@@ -21,6 +22,7 @@ func TestCanSubmitLiveOrderFromSnapshotMatrix(t *testing.T) {
 		DoctorStatus:         string(liveguard.DoctorOK),
 		PlanState:            agent2.StateActiveLimit,
 		DesiredOrders:        1,
+		BTC:                  BotBTCSnapshot{AccumulationPhase: string(accumulation.PhaseConfirmed)},
 	}
 
 	tests := []struct {
@@ -39,6 +41,7 @@ func TestCanSubmitLiveOrderFromSnapshotMatrix(t *testing.T) {
 		{name: "manual confirm blocks", edit: func(s *BotRuntimeSnapshot) { s.RequireManualConfirm = true }, want: false},
 		{name: "proof only blocks", edit: func(s *BotRuntimeSnapshot) { s.ProofOnly = true }, want: false},
 		{name: "real trading disabled blocks", edit: func(s *BotRuntimeSnapshot) { s.RealTradingEnabled = false }, want: false},
+		{name: "btc accumulation not confirmed blocks", edit: func(s *BotRuntimeSnapshot) { s.BTC.AccumulationPhase = string(accumulation.PhaseReclaim) }, want: false},
 	}
 
 	for _, tt := range tests {

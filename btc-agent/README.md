@@ -6,7 +6,7 @@ Rule-based BTC market gate + ETH/SOL/RENDER accumulation planner for Termux/root
 
 - Default config is safe: paper/simulation only, live disabled, proof-only enabled, real trading disabled.
 - Production runtime, when explicitly enabled, is one path: `scheduler` in `live-auto` mode -> `live-supervisor` -> managed order engine.
-- Normal live desired orders require deterministic `ACTIVE_LIMIT` plan and BTC permission `ALLOWED`.
+- Normal live desired orders require deterministic `ACTIVE_LIMIT` plan, BTC permission `ALLOWED`, and BTC `ACCUMULATION_CONFIRMED` gate evidence.
 - `WATCH`, `SCOUT`, and `ARMED` are observation/explanation states. They do not create normal live orders.
 - Live order type is spot limit BUY post-only only.
 - No futures, no leverage, no market order.
@@ -58,9 +58,9 @@ Manual proof execution still exists, but is separate and requires the exact conf
 
 ## Decision pipeline
 
-Agent 1 is BTC market gate/benchmark. BTC is not an accumulation asset.
+Agent 1 is BTC market gate/benchmark. BTC is not an accumulation asset. BTC first classifies deterministic market-maker accumulation phase from closed OHLCV data: `MARKDOWN`, `LIQUIDITY_SWEEP`, `SELL_ABSORPTION`, `RECLAIM`, `ACCUMULATION_CONFIRMED`, `DISTRIBUTION`, or `INVALIDATED`.
 
-Agent 2 evaluates configured accumulation assets only. Production config keeps exactly three assets in `data.symbols.assets`.
+Agent 2 evaluates configured accumulation assets only. Production config keeps exactly three assets in `data.symbols.assets`. Asset setup can only reach full order authority after BTC is `ACCUMULATION_CONFIRMED`, asset MM/reclaim gates pass, and discount/reward-risk/liquidity/rotation gates pass.
 
 Plan states:
 
@@ -75,6 +75,7 @@ Normal managed live desired orders are built only when:
 ```text
 plan.State == ACTIVE_LIMIT
 plan.ActionPermission == ALLOWED
+BTC accumulation phase == ACCUMULATION_CONFIRMED
 asset.State == ACTIVE_LIMIT
 ```
 
@@ -161,7 +162,7 @@ Recommended report-only flow:
 ./bin/btc-agent learn --config config.yaml
 ```
 
-`real-data-survey` consolidates local candle backtests, Agent 1/2 audits, managed live-manager history simulation, and learning actions into `reports/real_data_survey_latest.md/json`. It is diagnostic only: no config write, no OKX live order, no gate override. `learn` includes survey evidence but still requires manual review before any rule/config/code change.
+`real-data-survey` consolidates local candle backtests, BTC accumulation phase/false-positive audit, Agent 1/2 audits, managed live-manager history simulation, and learning actions into `reports/real_data_survey_latest.md/json`. It is diagnostic only: no config write, no OKX live order, no gate override. `learn` includes survey evidence but still requires manual review before any rule/config/code change.
 
 ## Telegram read-only management
 

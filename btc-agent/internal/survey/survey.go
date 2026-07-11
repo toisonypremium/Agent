@@ -22,14 +22,15 @@ const (
 )
 
 type RealDataSurvey struct {
-	GeneratedAt     time.Time      `json:"generated_at"`
-	DataCoverage    SurveyCoverage `json:"data_coverage"`
-	BTCGate         SurveySection  `json:"btc_gate"`
-	Agent2Gate      SurveySection  `json:"agent2_gate"`
-	ManagedLive     SurveySection  `json:"managed_live"`
-	LearningActions []SurveyAction `json:"learning_actions,omitempty"`
-	RiskNotes       []string       `json:"risk_notes,omitempty"`
-	Summary         string         `json:"summary"`
+	GeneratedAt       time.Time      `json:"generated_at"`
+	DataCoverage      SurveyCoverage `json:"data_coverage"`
+	BTCGate           SurveySection  `json:"btc_gate"`
+	Agent2Gate        SurveySection  `json:"agent2_gate"`
+	ManagedLive       SurveySection  `json:"managed_live"`
+	AccumulationPhase SurveySection  `json:"accumulation_phase"`
+	LearningActions   []SurveyAction `json:"learning_actions,omitempty"`
+	RiskNotes         []string       `json:"risk_notes,omitempty"`
+	Summary           string         `json:"summary"`
 }
 
 type SurveyCoverage struct {
@@ -71,10 +72,11 @@ func Build(result backtest.Result, history *liveguard.LiveManagerHistoryResult) 
 	out.BTCGate = buildBTCGateSection(result)
 	out.Agent2Gate = buildAgent2GateSection(result)
 	out.ManagedLive = buildManagedLiveSection(history)
+	out.AccumulationPhase = buildAccumulationPhaseSection(result)
 	out.RiskNotes = []string{
 		"Survey is diagnostic only and does not write config.",
 		"Survey does not place, cancel, or modify live orders.",
-		"WATCH, SCOUT, and ARMED remain observation states; only ACTIVE_LIMIT + ALLOWED can create normal live desired orders.",
+		"WATCH, SCOUT, and ARMED remain observation states; only ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED can create normal live desired orders.",
 	}
 	out.LearningActions = surveyActions(out)
 	out.Summary = summarize(out)
@@ -130,6 +132,34 @@ func buildAgent2GateSection(result backtest.Result) SurveySection {
 	return section
 }
 
+func buildAccumulationPhaseSection(result backtest.Result) SurveySection {
+	section := SurveySection{Area: "ACCUMULATION_PHASE", Verdict: SeverityNoChange, Confidence: confidenceByWindows(result.WindowsTested), Summary: "Accumulation phase audit unavailable or not enough evidence."}
+	if !result.AccumulationPhaseAudit.Enabled || len(result.AccumulationPhaseAudit.Rows) == 0 {
+		return section
+	}
+	var confirmed backtest.AccumulationPhaseAuditRow
+	for _, row := range result.AccumulationPhaseAudit.Rows {
+		if string(row.Phase) == "ACCUMULATION_CONFIRMED" {
+			confirmed = row
+			break
+		}
+	}
+	if confirmed.Count == 0 {
+		section.Summary = fmt.Sprintf("BTC accumulation phase audit found no confirmed samples; phases=%d", len(result.AccumulationPhaseAudit.Rows))
+		section.Evidence = []SurveyEvidence{{Metric: "confirmed_count", Value: "0"}}
+		section.Verdict = SeverityWatch
+		return section
+	}
+	section.Summary = fmt.Sprintf("BTC confirmed accumulation samples=%d avg_score=%.1f false_positive=%s verdict=%s", confirmed.Count, confirmed.AvgScore, pct(confirmed.FalsePositiveRate), confirmed.Verdict)
+	section.Evidence = []SurveyEvidence{{Metric: "confirmed_count", Value: fmt.Sprint(confirmed.Count)}, {Metric: "avg_score", Value: fmt.Sprintf("%.1f", confirmed.AvgScore)}, {Metric: "false_positive_rate", Value: pct(confirmed.FalsePositiveRate)}, {Metric: "verdict", Value: confirmed.Verdict}}
+	section.Confidence = confidenceByCount(confirmed.Count)
+	section.Verdict = SeverityWatch
+	if confirmed.Count >= 20 && confirmed.Verdict == "CANDIDATE" {
+		section.Verdict = SeverityActionableReview
+	}
+	return section
+}
+
 func buildManagedLiveSection(history *liveguard.LiveManagerHistoryResult) SurveySection {
 	section := SurveySection{Area: "MANAGED_LIVE", Verdict: SeverityNoChange, Confidence: ConfidenceLow, Summary: "live manager history simulation missing; run backtest-live-manager for quality evidence."}
 	if history == nil {
@@ -176,6 +206,9 @@ func surveyActions(s RealDataSurvey) []SurveyAction {
 	if s.ManagedLive.Verdict == SeverityActionableReview || s.ManagedLive.Verdict == SeverityWatch {
 		actions = append(actions, SurveyAction{Area: s.ManagedLive.Area, Severity: s.ManagedLive.Verdict, Confidence: s.ManagedLive.Confidence, Title: "Review managed order quality", Recommendation: "Historical managed-engine quality should guide sizing review only inside existing live guards.", ManualAction: "Use quality grade to review sizing/caps manually. Do not change live order authority; keep ACTIVE_LIMIT + ALLOWED required.", Evidence: s.ManagedLive.Evidence})
 	}
+	if s.AccumulationPhase.Verdict == SeverityActionableReview || s.AccumulationPhase.Verdict == SeverityWatch {
+		actions = append(actions, SurveyAction{Area: s.AccumulationPhase.Area, Severity: s.AccumulationPhase.Verdict, Confidence: s.AccumulationPhase.Confidence, Title: "Review BTC accumulation phase evidence", Recommendation: "Use accumulation false-positive and forward-return evidence before allowing any gate threshold change.", ManualAction: "Review confirmed vs falling-knife rows manually; do not bypass ACTIVE_LIMIT + ALLOWED or auto-tune config.", Evidence: s.AccumulationPhase.Evidence})
+	}
 	actions = append(actions, SurveyAction{Area: "LIVE_SAFETY", Severity: SeverityBlockedBySafety, Confidence: ConfidenceHigh, Title: "Keep survey report-only", Recommendation: "Survey/learning output must not write config, place orders, or bypass live gates.", ManualAction: "Apply any rule change only through reviewed implementation and full verification.", Evidence: []SurveyEvidence{{Metric: "required_gate", Value: "ACTIVE_LIMIT + ALLOWED"}}})
 	sort.SliceStable(actions, func(i, j int) bool {
 		return severityRank(actions[i].Severity) < severityRank(actions[j].Severity)
@@ -184,7 +217,7 @@ func surveyActions(s RealDataSurvey) []SurveyAction {
 }
 
 func summarize(s RealDataSurvey) string {
-	return fmt.Sprintf("real-data survey: windows=%d confidence=%s btc=%s agent2=%s managed=%s actions=%d report_only=true", s.DataCoverage.WindowsTested, s.DataCoverage.Confidence, s.BTCGate.Verdict, s.Agent2Gate.Verdict, s.ManagedLive.Verdict, len(s.LearningActions))
+	return fmt.Sprintf("real-data survey: windows=%d confidence=%s btc=%s accumulation=%s agent2=%s managed=%s actions=%d report_only=true", s.DataCoverage.WindowsTested, s.DataCoverage.Confidence, s.BTCGate.Verdict, s.AccumulationPhase.Verdict, s.Agent2Gate.Verdict, s.ManagedLive.Verdict, len(s.LearningActions))
 }
 
 func topOpportunityRow(rows []backtest.Agent2OpportunityAuditRow) backtest.Agent2OpportunityAuditRow {

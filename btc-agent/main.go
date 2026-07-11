@@ -485,6 +485,7 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 	}
 	result.ZoneEntrySanity = backtest.RunZoneEntrySanity(cfg, assets)
 	result.MMAccumulationAudit = backtest.RunMMAccumulationAudit(cfg, assets)
+	result.AccumulationPhaseAudit = backtest.RunAccumulationPhaseAudit(cfg.Data.Symbols.BTC, daily, []int{1, 3, 7, 14, 30})
 	sim, err := backtest.RunAgent2Simulation(cfg, btc, assets)
 	if err != nil {
 		result.Agent2Simulation = backtest.Agent2Simulation{Enabled: false, Assets: map[string]backtest.AssetSimStats{}, Summary: err.Error()}

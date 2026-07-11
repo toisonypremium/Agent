@@ -23,6 +23,9 @@ func EvaluateHealth(s Snapshot, now time.Time, maxAge time.Duration) Snapshot {
 		s.Health.Blockers = append(s.Health.Blockers, "microstructure timestamp missing")
 	} else {
 		s.Health.Age = now.Sub(s.Timestamp)
+		if s.Health.Age < 0 && s.Timestamp.Before(now.Add(2*time.Hour)) {
+			s.Health.Age = 0
+		}
 		if s.Health.Age < 0 || s.Health.Age > maxAge {
 			s.Health.Blockers = append(s.Health.Blockers, fmt.Sprintf("%s microstructure stale: age=%s max=%s", strings.ToUpper(s.Symbol), s.Health.Age.Round(time.Minute), maxAge))
 		}

@@ -169,7 +169,19 @@ func writeBotStateAndScenario(cfg config.Config, db *storage.DB, supervisor live
 	if err := reportio.WriteJSON("reports", "scenario_latest.json", scenario); err != nil {
 		return snapshot, scenario, err
 	}
-	if err := writeFilterAttributionReport(snapshot); err != nil {
+	filterReport := buildFilterAttributionReport(snapshot)
+	if err := writeFilterAttributionReportFile(filterReport); err != nil {
+		return snapshot, scenario, err
+	}
+	technicalReport := buildTechnicalScorecardReport(snapshot)
+	if err := writeTechnicalScorecardReportFile(technicalReport); err != nil {
+		return snapshot, scenario, err
+	}
+	capitalReport := buildCapitalPlanResearchReport(cfg, snapshot)
+	if err := writeCapitalPlanResearchReportFile(capitalReport); err != nil {
+		return snapshot, scenario, err
+	}
+	if err := writeDecisionDashboardReport(snapshot, scenario, technicalReport, capitalReport, filterReport); err != nil {
 		return snapshot, scenario, err
 	}
 	return snapshot, scenario, nil

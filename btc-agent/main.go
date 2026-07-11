@@ -104,6 +104,8 @@ func run(ctx context.Context, args []string) error {
 		return runBacktestLiveManager(cfg, db, hasFlag(args, "--research-armed"), argValue(args, "--research-profile"), researchExpiryDays, hasFlag(args, "--research-hold-through-watch"), researchHoldPriceAboveDiscountPct, hasFlag(args, "--production-armed-probe"))
 	case "learn":
 		return runLearning(cfg, db)
+	case "universe-research":
+		return runUniverseResearch(ctx, cfg, db)
 	case "export-training":
 		return runExportTraining(cfg, db)
 	case "run-ai-watch":
@@ -160,7 +162,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|universe-research|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -788,6 +790,35 @@ func runLearning(cfg config.Config, db *storage.DB) error {
 		return err
 	}
 	fmt.Println(md)
+	return nil
+}
+
+func runUniverseResearch(ctx context.Context, cfg config.Config, db *storage.DB) error {
+	analysis, err := db.LatestAnalysis()
+	if err != nil {
+		analysis, err = analyze(ctx, cfg, db)
+		if err != nil {
+			return fmt.Errorf("build latest analysis for universe research: %w", err)
+		}
+	}
+	btc1d, err := db.LoadCandles(cfg.Data.Symbols.BTC, "1d", cfg.Data.CandleLimit)
+	if err != nil {
+		return fmt.Errorf("load BTC benchmark for universe research: %w", err)
+	}
+	assets := map[string][]market.Candle{}
+	for _, symbol := range agent2.ResearchUniverseSymbols(cfg) {
+		candles, err := db.LoadCandles(symbol, "1d", cfg.Data.CandleLimit)
+		if err != nil {
+			assets[symbol] = nil
+			continue
+		}
+		assets[symbol] = candles
+	}
+	report := agent2.BuildUniverseResearchReport(cfg, analysis, assets, btc1d, time.Now())
+	if err := writeUniverseResearchReport(report); err != nil {
+		return err
+	}
+	fmt.Println(universeResearchMarkdown(report))
 	return nil
 }
 
@@ -2074,6 +2105,23 @@ func writeAutoLiveManagementResult(ctx context.Context, cfg config.Config, db *s
 	if err := writeFilterAttributionReportFromManaged(result); err != nil {
 		log.Printf("filter attribution report warning: %v", err)
 	}
+	if snapshot, err := buildBotRuntimeSnapshot(cfg, db, liveguard.SupervisorResult{Managed: &result}); err != nil {
+		log.Printf("analysis report snapshot warning: %v", err)
+	} else {
+		technicalReport := buildTechnicalScorecardReport(snapshot)
+		if err := writeTechnicalScorecardReportFile(technicalReport); err != nil {
+			log.Printf("technical scorecard report warning: %v", err)
+		}
+		capitalReport := buildCapitalPlanResearchReport(cfg, snapshot)
+		if err := writeCapitalPlanResearchReportFile(capitalReport); err != nil {
+			log.Printf("capital plan research report warning: %v", err)
+		}
+		filterReport := buildFilterAttributionReport(snapshot)
+		scenario := buildScenarioReport(cfg, snapshot)
+		if err := writeDecisionDashboardReport(snapshot, scenario, technicalReport, capitalReport, filterReport); err != nil {
+			log.Printf("decision dashboard report warning: %v", err)
+		}
+	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
 		sendTelegram(ctx, cfg, "auto-live-management", telegramreport.LiveOrderManagementHumanText(result))
 	}
@@ -2366,6 +2414,14 @@ func protectedReportFiles() []string {
 		"live_manager_simulation_latest.json",
 		"shadow_probe_latest.json",
 		"shadow_probe_journal.jsonl",
+		"technical_scorecard_latest.md",
+		"technical_scorecard_latest.json",
+		"capital_plan_research_latest.md",
+		"capital_plan_research_latest.json",
+		"coin_universe_research_latest.md",
+		"coin_universe_research_latest.json",
+		"decision_dashboard_latest.md",
+		"decision_dashboard_latest.json",
 		"cancel_all_live_orders_latest.md",
 		"cancel_all_live_orders_latest.json",
 		"telegram_state.json",

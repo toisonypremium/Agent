@@ -124,6 +124,9 @@ func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent
 	grade := strings.ToUpper(strings.TrimSpace(quality.Grade))
 	qMult, qMaxLayers, qReason := qualityMultiplier(grade)
 	score := opportunityScore(asset, quality)
+	if grade == "NO_SAMPLE" || grade == "" || grade == "UNKNOWN" {
+		score = math.Min(score, 64.999)
+	}
 	maxLayers := tierMaxLayers(cfg, score)
 	if qMaxLayers > 0 && maxLayers > qMaxLayers {
 		maxLayers = qMaxLayers
@@ -228,21 +231,16 @@ func opportunityScore(asset agent2.AssetPlan, quality historyQualityScore) float
 	if asset.State != agent2.StateActiveLimit {
 		return 0
 	}
-	score := 50.0
-	if asset.DiscountZone.Valid() {
-		score += 10
+	composite := agent2.BuildOpportunityComposite(asset)
+	if agent2.OpportunityCompositeBlocked(composite.Verdict) {
+		return 0
 	}
-	if asset.RewardRisk > 0 {
-		score += math.Min(20, asset.RewardRisk/3.0*20)
+	score := composite.Score
+	if score < 65 && len(asset.Layers) > 1 && asset.DiscountZone.Valid() {
+		score = 65
 	}
 	if quality.Score > 0 {
-		score += math.Min(20, quality.Score/100.0*20)
-	}
-	if asset.AssetFlowScore > 0 {
-		score += math.Min(10, asset.AssetFlowScore*10)
-	}
-	if asset.RotationScore > 0 {
-		score += math.Min(10, asset.RotationScore/100.0*10)
+		score = score*0.80 + math.Min(100, quality.Score)*0.20
 	}
 	if score > 100 {
 		score = 100

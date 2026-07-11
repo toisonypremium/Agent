@@ -408,6 +408,24 @@ func TestBuildManagedDesiredOrdersUsesOpportunityAllocationNotStaticLayerNotiona
 	}
 }
 
+func TestOpportunityScoreUsesCompositeInsideActiveLimitGuard(t *testing.T) {
+	watch := agent2.AssetPlan{Symbol: "ETHUSDT", State: agent2.StateWatch, SetupScore: 1, RotationScore: 1, RewardRisk: 3.5, AssetFlowScore: 1, MMScore: 100}
+	watch.LiquidityQuality.Score = 100
+	if got := opportunityScore(watch, historyQualityScore{Score: 100, Grade: "A"}); got != 0 {
+		t.Fatalf("non ACTIVE_LIMIT score should be 0, got %.2f", got)
+	}
+	active := watch
+	active.State = agent2.StateActiveLimit
+	if got := opportunityScore(active, historyQualityScore{Score: 100, Grade: "A"}); got <= 0 {
+		t.Fatalf("ACTIVE_LIMIT strong composite should score >0, got %.2f", got)
+	}
+	blocked := active
+	blocked.SetupGates = []agent2.SetupGateResult{{Name: agent2.EntryCheckData, Pass: false, Severity: agent2.SetupGateHard, Reason: "chưa đủ dữ liệu 1D"}}
+	if got := opportunityScore(blocked, historyQualityScore{Score: 100, Grade: "A"}); got != 0 {
+		t.Fatalf("blocked composite score should be 0, got %.2f", got)
+	}
+}
+
 func TestBuildManagedDesiredOrdersStatePermissionMatrix(t *testing.T) {
 	cfg := managedConfig()
 	tests := []struct {

@@ -47,7 +47,7 @@ Old canary/auto-ladder production logic is no longer part of the current scenari
 - Spot limit BUY post-only only.
 - No futures, no leverage, no market order.
 - Telegram commands are read-only.
-- Research reports do not edit config or place orders.
+- Research reports and `real-data-survey` do not edit config or place orders.
 
 ## Operator status target
 

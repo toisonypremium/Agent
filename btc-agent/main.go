@@ -30,6 +30,7 @@ import (
 	"btc-agent/internal/reportio"
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
+	"btc-agent/internal/survey"
 	"btc-agent/internal/telegramreport"
 	"btc-agent/internal/usertext"
 )
@@ -104,6 +105,8 @@ func run(ctx context.Context, args []string) error {
 		return runBacktestLiveManager(cfg, db, hasFlag(args, "--research-armed"), argValue(args, "--research-profile"), researchExpiryDays, hasFlag(args, "--research-hold-through-watch"), researchHoldPriceAboveDiscountPct, hasFlag(args, "--production-armed-probe"))
 	case "learn":
 		return runLearning(cfg, db)
+	case "real-data-survey":
+		return runRealDataSurvey(cfg, db)
 	case "universe-research":
 		return runUniverseResearch(ctx, cfg, db)
 	case "export-training":
@@ -162,7 +165,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|universe-research|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -784,13 +787,54 @@ func runLearning(cfg config.Config, db *storage.DB) error {
 	if err != nil {
 		return err
 	}
-	result := learning.BuildRecommendations(backtestResult)
+	history, historyOK := loadLiveManagerHistoryReport()
+	var historyPtr *liveguard.LiveManagerHistoryResult
+	if historyOK {
+		historyPtr = &history
+	}
+	surveyResult := survey.Build(backtestResult, historyPtr)
+	surveyMarkdown := survey.Markdown(surveyResult)
+	if err := survey.SaveReports("reports", surveyResult, surveyMarkdown); err != nil {
+		return err
+	}
+	result := learning.BuildRecommendationsWithSurvey(backtestResult, surveyResult)
 	md := learning.Markdown(result)
 	if err := learning.SaveReports("reports", result, md); err != nil {
 		return err
 	}
 	fmt.Println(md)
 	return nil
+}
+
+func runRealDataSurvey(cfg config.Config, db *storage.DB) error {
+	backtestResult, err := buildBacktestResult(cfg, db)
+	if err != nil {
+		return err
+	}
+	history, historyOK := loadLiveManagerHistoryReport()
+	var historyPtr *liveguard.LiveManagerHistoryResult
+	if historyOK {
+		historyPtr = &history
+	}
+	result := survey.Build(backtestResult, historyPtr)
+	md := survey.Markdown(result)
+	if err := survey.SaveReports("reports", result, md); err != nil {
+		return err
+	}
+	fmt.Println(md)
+	return nil
+}
+
+func loadLiveManagerHistoryReport() (liveguard.LiveManagerHistoryResult, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "live_manager_history_latest.json"))
+	if err != nil {
+		return liveguard.LiveManagerHistoryResult{}, false
+	}
+	var result liveguard.LiveManagerHistoryResult
+	if err := json.Unmarshal(b, &result); err != nil {
+		return liveguard.LiveManagerHistoryResult{}, false
+	}
+	return result, true
 }
 
 func runUniverseResearch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -2276,6 +2320,8 @@ func protectedReportFiles() []string {
 		"maintenance_latest.json",
 		"learning_latest.md",
 		"learning_latest.json",
+		"real_data_survey_latest.md",
+		"real_data_survey_latest.json",
 		"live_manager_history_latest.md",
 		"live_manager_history_latest.json",
 		"live_manager_simulation_latest.md",

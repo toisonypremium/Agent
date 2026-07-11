@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"btc-agent/internal/backtest"
+	"btc-agent/internal/survey"
 )
 
 const (
@@ -30,7 +31,20 @@ const (
 type RecommendationResult struct {
 	GeneratedAt     time.Time        `json:"generated_at"`
 	Summary         string           `json:"summary"`
+	SurveySummary   string           `json:"survey_summary,omitempty"`
+	EvidenceQuality string           `json:"evidence_quality,omitempty"`
+	SurveyActions   []SurveyAction   `json:"survey_actions,omitempty"`
 	Recommendations []Recommendation `json:"recommendations"`
+}
+
+type SurveyAction struct {
+	Area           string     `json:"area"`
+	Severity       string     `json:"severity"`
+	Confidence     string     `json:"confidence"`
+	Title          string     `json:"title"`
+	Recommendation string     `json:"recommendation"`
+	ManualAction   string     `json:"manual_action"`
+	Evidence       []Evidence `json:"evidence,omitempty"`
 }
 
 type Recommendation struct {
@@ -60,6 +74,32 @@ func BuildRecommendations(result backtest.Result) RecommendationResult {
 	out.Recommendations = append(out.Recommendations, strategyIntelligenceRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, layerRecommendations(result)...)
 	out.Recommendations = append(out.Recommendations, exitRecommendations(result)...)
+	finalizeRecommendations(&out, result)
+	return out
+}
+
+func BuildRecommendationsWithSurvey(result backtest.Result, s survey.RealDataSurvey) RecommendationResult {
+	out := BuildRecommendations(result)
+	out.SurveySummary = s.Summary
+	out.EvidenceQuality = s.DataCoverage.Confidence
+	out.SurveyActions = convertSurveyActions(s.LearningActions)
+	for _, action := range out.SurveyActions {
+		out.Recommendations = append(out.Recommendations, Recommendation{
+			Area:           "SURVEY_" + action.Area,
+			Title:          action.Title,
+			Recommendation: action.Recommendation,
+			ManualAction:   action.ManualAction,
+			Confidence:     normalizeConfidence(action.Confidence),
+			Severity:       normalizeSurveySeverity(action.Severity),
+			Evidence:       action.Evidence,
+		})
+	}
+	sortRecommendations(out.Recommendations)
+	out.Summary = summarizeRecommendations(out.Recommendations) + "; survey_evidence=" + emptyDash(out.EvidenceQuality)
+	return out
+}
+
+func finalizeRecommendations(out *RecommendationResult, result backtest.Result) {
 	if len(out.Recommendations) == 0 {
 		out.Recommendations = append(out.Recommendations, Recommendation{
 			Area:           AreaDataQuality,
@@ -73,7 +113,42 @@ func BuildRecommendations(result backtest.Result) RecommendationResult {
 	}
 	sortRecommendations(out.Recommendations)
 	out.Summary = summarizeRecommendations(out.Recommendations)
+}
+
+func convertSurveyActions(actions []survey.SurveyAction) []SurveyAction {
+	out := make([]SurveyAction, 0, len(actions))
+	for _, action := range actions {
+		out = append(out, SurveyAction{Area: action.Area, Severity: action.Severity, Confidence: action.Confidence, Title: action.Title, Recommendation: action.Recommendation, ManualAction: action.ManualAction, Evidence: convertSurveyEvidence(action.Evidence)})
+	}
 	return out
+}
+
+func convertSurveyEvidence(items []survey.SurveyEvidence) []Evidence {
+	out := make([]Evidence, 0, len(items))
+	for _, item := range items {
+		out = append(out, Evidence{Metric: item.Metric, Value: item.Value, Note: item.Note})
+	}
+	return out
+}
+
+func normalizeSurveySeverity(severity string) string {
+	switch severity {
+	case survey.SeverityActionableReview:
+		return SeverityActionable
+	case survey.SeverityWatch, survey.SeverityBlockedBySafety:
+		return SeverityWatch
+	default:
+		return SeverityInfo
+	}
+}
+
+func normalizeConfidence(confidence string) string {
+	switch confidence {
+	case ConfidenceHigh, ConfidenceMedium, ConfidenceLow:
+		return confidence
+	default:
+		return ConfidenceLow
+	}
 }
 
 func flowRecommendations(result backtest.Result) []Recommendation {
@@ -335,6 +410,13 @@ func confidenceByCount(count int) string {
 
 func pct(v float64) string {
 	return fmt.Sprintf("%.1f%%", v*100)
+}
+
+func emptyDash(value string) string {
+	if value == "" {
+		return "-"
+	}
+	return value
 }
 
 func sortRecommendations(rows []Recommendation) {

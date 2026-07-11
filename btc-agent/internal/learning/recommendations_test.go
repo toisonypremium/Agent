@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"btc-agent/internal/backtest"
+	"btc-agent/internal/survey"
 )
 
 func TestBuildRecommendationsFlowCandidate(t *testing.T) {
@@ -83,5 +84,31 @@ func TestBuildRecommendationsLayerAndExitCandidates(t *testing.T) {
 	}
 	if !areas[AreaLayering] || !areas[AreaExit] {
 		t.Fatalf("missing layer/exit recommendations: %+v", result.Recommendations)
+	}
+}
+
+func TestBuildRecommendationsWithSurveyAddsEvidence(t *testing.T) {
+	s := survey.RealDataSurvey{Summary: "survey summary", DataCoverage: survey.SurveyCoverage{Confidence: survey.ConfidenceHigh}, LearningActions: []survey.SurveyAction{{Area: "AGENT2_GATE", Severity: survey.SeverityActionableReview, Confidence: survey.ConfidenceHigh, Title: "Review gate", Recommendation: "Review missing gate manually.", ManualAction: "Manual review only; do not auto-tune config or place live orders.", Evidence: []survey.SurveyEvidence{{Metric: "top_missing", Value: "DISCOUNT_ZONE"}}}}}
+	result := BuildRecommendationsWithSurvey(backtest.Result{}, s)
+	if result.SurveySummary == "" || result.EvidenceQuality != survey.ConfidenceHigh || len(result.SurveyActions) == 0 {
+		t.Fatalf("missing survey metadata: %+v", result)
+	}
+	found := false
+	for _, rec := range result.Recommendations {
+		if rec.Area == "SURVEY_AGENT2_GATE" {
+			found = true
+		}
+		if rec.Area != "SURVEY_AGENT2_GATE" {
+			continue
+		}
+		text := strings.ToLower(rec.Recommendation + " " + rec.ManualAction)
+		for _, want := range []string{"manual review", "do not auto-tune config", "place live orders"} {
+			if !strings.Contains(text, want) {
+				t.Fatalf("survey recommendation missing safety phrase %q: %+v", want, rec)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing survey recommendation: %+v", result.Recommendations)
 	}
 }

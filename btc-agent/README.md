@@ -36,6 +36,8 @@ Do not commit real `config.yaml`, `.env`, DB, logs, reports, or binaries.
 ./bin/btc-agent run-daily --config config.yaml
 ./bin/btc-agent paper-manager --config config.yaml
 ./bin/btc-agent backtest --config config.yaml
+./bin/btc-agent backtest-live-manager --config config.yaml
+./bin/btc-agent real-data-survey --config config.yaml
 ./bin/btc-agent learn --config config.yaml
 ./bin/btc-agent universe-research --config config.yaml
 ./bin/btc-agent live-proof --config config.yaml
@@ -146,6 +148,20 @@ reports/live_position_latest.md/json
 ```
 
 Research-only reports do not edit config, replace production assets, or place orders.
+
+## Real-data survey and learning
+
+Recommended report-only flow:
+
+```bash
+./bin/btc-agent fetch --config config.yaml
+./bin/btc-agent backtest --config config.yaml
+./bin/btc-agent backtest-live-manager --config config.yaml
+./bin/btc-agent real-data-survey --config config.yaml
+./bin/btc-agent learn --config config.yaml
+```
+
+`real-data-survey` consolidates local candle backtests, Agent 1/2 audits, managed live-manager history simulation, and learning actions into `reports/real_data_survey_latest.md/json`. It is diagnostic only: no config write, no OKX live order, no gate override. `learn` includes survey evidence but still requires manual review before any rule/config/code change.
 
 ## Telegram read-only management
 

@@ -5,6 +5,7 @@
 - [ ] Keep scheduler running in real `live-auto` (`dry_run=false`) after verification.
 - [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED` appears.
 - [ ] Use full verification gate before reporting implementation work done.
+- [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
 
 ## Done
 
@@ -14,6 +15,7 @@
 - [x] Add technical scorecard, opportunity composite score, capital research plan, universe research, decision dashboard, and Telegram read-only management commands.
 - [x] Connect live allocator to `OpportunityComposite` inside `ACTIVE_LIMIT` guard.
 - [x] Remove stale canary/auto-ladder production logic from new live-auto scenario.
+- [x] Add real-data survey report path for learning evidence without changing live authority.
 
 ## Verification commands
 

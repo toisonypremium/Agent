@@ -13,8 +13,22 @@ func Markdown(result RecommendationResult) string {
 	b.WriteString("LEARNING RECOMMENDATIONS REPORT\n\n")
 	b.WriteString("1. Summary\n")
 	b.WriteString("- " + result.Summary + "\n")
+	if result.SurveySummary != "" {
+		b.WriteString("- Survey: " + result.SurveySummary + "\n")
+	}
+	if result.EvidenceQuality != "" {
+		b.WriteString("- Evidence quality: " + result.EvidenceQuality + "\n")
+	}
 	b.WriteString("- Deterministic engine remains authority. Manual review required before any rule/config/code change.\n")
 	b.WriteString("- No order placement, config write, exchange call, or LLM call is performed by learn.\n\n")
+
+	if len(result.SurveyActions) > 0 {
+		b.WriteString("2. Survey actions\n")
+		for _, action := range result.SurveyActions {
+			b.WriteString(fmt.Sprintf("- [%s/%s] %s: %s\n", action.Severity, action.Confidence, action.Area, action.Title))
+		}
+		b.WriteString("\n")
+	}
 
 	b.WriteString("2. Top recommendations\n")
 	b.WriteString("| Area | Severity | Confidence | Title | Manual action |\n")

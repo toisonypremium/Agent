@@ -12,6 +12,7 @@ import (
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/reportio"
+	"btc-agent/internal/survey"
 )
 
 const decisionDashboardResearchOnly = "Research/report only: dashboard không đặt lệnh, không sửa config, không bypass ACTIVE_LIMIT."
@@ -31,6 +32,8 @@ type DecisionDashboardReport struct {
 	FilterSummary      string            `json:"filter_summary,omitempty"`
 	UniverseSummary    string            `json:"universe_summary,omitempty"`
 	LiveSummary        string            `json:"live_summary,omitempty"`
+	LearningSummary    string            `json:"learning_summary,omitempty"`
+	LearningActions    []string          `json:"learning_actions,omitempty"`
 	Blockers           []string          `json:"blockers,omitempty"`
 	Actions            []string          `json:"actions,omitempty"`
 	Safety             string            `json:"safety"`
@@ -62,6 +65,10 @@ func buildDecisionDashboard(snapshot BotRuntimeSnapshot, scenario ScenarioReport
 	report.CapitalSummary = capital.Summary
 	report.FilterSummary = filter.Summary
 	report.UniverseSummary = emptyStringDefault(universe.Summary, "universe research not run yet")
+	if surveyReport, ok := loadRealDataSurveyReportFile(); ok {
+		report.LearningSummary = surveyReport.Summary
+		report.LearningActions = surveyActionLines(surveyReport.LearningActions, 3)
+	}
 	report.LiveSummary = snapshot.ManagedStatus
 	if report.LiveSummary == "" {
 		report.LiveSummary = snapshot.SupervisorSummary
@@ -142,6 +149,29 @@ func loadUniverseResearchReportFile() (agent2.UniverseResearchReport, bool) {
 	return out, true
 }
 
+func loadRealDataSurveyReportFile() (survey.RealDataSurvey, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "real_data_survey_latest.json"))
+	if err != nil {
+		return survey.RealDataSurvey{}, false
+	}
+	var out survey.RealDataSurvey
+	if err := json.Unmarshal(b, &out); err != nil {
+		return survey.RealDataSurvey{}, false
+	}
+	return out, true
+}
+
+func surveyActionLines(actions []survey.SurveyAction, limit int) []string {
+	out := []string{}
+	for _, action := range actions {
+		out = append(out, fmt.Sprintf("[%s/%s] %s: %s", action.Severity, action.Confidence, action.Area, action.Title))
+		if limit > 0 && len(out) >= limit {
+			break
+		}
+	}
+	return out
+}
+
 func decisionDashboardMarkdown(report DecisionDashboardReport) string {
 	var b strings.Builder
 	b.WriteString("DECISION DASHBOARD\n\n")
@@ -156,6 +186,15 @@ func decisionDashboardMarkdown(report DecisionDashboardReport) string {
 	b.WriteString("- Filters: " + emptyStringDefault(report.FilterSummary, "n/a") + "\n")
 	b.WriteString("- Universe: " + emptyStringDefault(report.UniverseSummary, "n/a") + "\n")
 	b.WriteString("- Live: " + emptyStringDefault(report.LiveSummary, "n/a") + "\n")
+	if report.LearningSummary != "" {
+		b.WriteString("- Learning: " + report.LearningSummary + "\n")
+	}
+	if len(report.LearningActions) > 0 {
+		b.WriteString("\nLearning actions:\n")
+		for _, action := range report.LearningActions {
+			b.WriteString("- " + action + "\n")
+		}
+	}
 	if len(report.Blockers) > 0 {
 		b.WriteString("\nBlockers:\n")
 		for _, blocker := range firstStrings(report.Blockers, 8) {

@@ -6,7 +6,7 @@
 - [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED` appears.
 - [ ] Use full verification gate before reporting implementation work done.
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
-- [ ] Milestone B: add microstructure data sources (CVD/OI/funding/orderbook) with data-health stale blockers before considering live expansion.
+- [x] Milestone B: add microstructure data sources (CVD/OI/funding/orderbook) with data-health stale blockers before considering live expansion.
 - [ ] Milestone C: prove BTC accumulation false-positive/drawdown improvement in walk-forward before any live sizing change.
 
 ## Done
@@ -21,6 +21,7 @@
 - [x] Add OHLCV BTC accumulation phase detector and false-positive/forward-return audit without changing live authority.
 - [x] Add auto-live market-watch monitoring and operations-plan report without changing live authority.
 - [x] Split overloaded command/scheduler code and add read-only runtime ops event queue without changing live authority.
+- [x] Add report-only microstructure data sources and stale blockers without changing live authority.
 
 ## Verification commands
 

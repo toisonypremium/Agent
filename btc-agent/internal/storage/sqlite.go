@@ -14,6 +14,7 @@ import (
 	"btc-agent/internal/exchange/live"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
+	"btc-agent/internal/microstructure"
 	_ "modernc.org/sqlite"
 )
 
@@ -57,6 +58,7 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS paper_orders(id TEXT PRIMARY KEY, timestamp INTEGER, symbol TEXT, side TEXT, layer INTEGER, price REAL, quantity REAL, notional REAL, status TEXT, expires_at INTEGER, invalidation_price REAL, reason TEXT);`,
 		`CREATE TABLE IF NOT EXISTS reports(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, type TEXT, content TEXT);`,
 		`CREATE TABLE IF NOT EXISTS runtime_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, source TEXT, type TEXT, severity TEXT, fingerprint TEXT, payload_json TEXT, handled_at INTEGER);`,
+		`CREATE TABLE IF NOT EXISTS microstructure_snapshots(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, symbol TEXT, source TEXT, status TEXT, fingerprint TEXT, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS performance_reviews(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_orders(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, type TEXT, price REAL, quantity REAL, notional REAL, status TEXT, submitted_at INTEGER, updated_at INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_order_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, status TEXT, payload_json TEXT);`,
@@ -367,6 +369,104 @@ func (d *DB) MarkRuntimeEventHandled(id int64, handledAt time.Time) error {
 	}
 	_, err := d.Exec(`UPDATE runtime_events SET handled_at=? WHERE id=?`, handledAt.Unix(), id)
 	return err
+}
+
+func (d *DB) SaveMicrostructureSnapshot(s microstructure.Snapshot) error {
+	if s.Timestamp.IsZero() {
+		s.Timestamp = time.Now().UTC()
+	}
+	if s.Source == "" {
+		s.Source = "unknown"
+	}
+	b, err := json.Marshal(s)
+	if err != nil {
+		return err
+	}
+	_, err = d.Exec(`INSERT INTO microstructure_snapshots(timestamp, symbol, source, status, fingerprint, payload_json) VALUES(?,?,?,?,?,?)`, s.Timestamp.Unix(), strings.ToUpper(s.Symbol), s.Source, microstructureSnapshotStatus(s), microstructureSnapshotFingerprint(s), string(b))
+	return err
+}
+
+func (d *DB) SaveMicrostructureSnapshots(items []microstructure.Snapshot) error {
+	return withSQLiteRetry(func() error {
+		tx, err := d.Begin()
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		st, err := tx.Prepare(`INSERT INTO microstructure_snapshots(timestamp, symbol, source, status, fingerprint, payload_json) VALUES(?,?,?,?,?,?)`)
+		if err != nil {
+			return err
+		}
+		defer st.Close()
+		for _, s := range items {
+			if s.Timestamp.IsZero() {
+				s.Timestamp = time.Now().UTC()
+			}
+			if s.Source == "" {
+				s.Source = "unknown"
+			}
+			b, err := json.Marshal(s)
+			if err != nil {
+				return err
+			}
+			if _, err := st.Exec(s.Timestamp.Unix(), strings.ToUpper(s.Symbol), s.Source, microstructureSnapshotStatus(s), microstructureSnapshotFingerprint(s), string(b)); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	})
+}
+
+func (d *DB) LatestMicrostructureSnapshots(symbols []string) ([]microstructure.Snapshot, error) {
+	out := []microstructure.Snapshot{}
+	for _, symbol := range symbols {
+		rows, err := d.LoadMicrostructureSnapshots(symbol, 1)
+		if err != nil {
+			return out, err
+		}
+		if len(rows) > 0 {
+			out = append(out, rows[0])
+		}
+	}
+	return out, nil
+}
+
+func (d *DB) LoadMicrostructureSnapshots(symbol string, limit int) ([]microstructure.Snapshot, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.Query(`SELECT payload_json FROM microstructure_snapshots WHERE symbol=? ORDER BY timestamp DESC, id DESC LIMIT ?`, strings.ToUpper(symbol), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []microstructure.Snapshot{}
+	for rows.Next() {
+		var js string
+		if err := rows.Scan(&js); err != nil {
+			return nil, err
+		}
+		var s microstructure.Snapshot
+		if err := json.Unmarshal([]byte(js), &s); err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+func microstructureSnapshotStatus(s microstructure.Snapshot) string {
+	if s.Health.Fresh {
+		return microstructure.StatusOK
+	}
+	if len(s.Health.Blockers) > 0 {
+		return microstructure.StatusBlock
+	}
+	return microstructure.StatusWarn
+}
+
+func microstructureSnapshotFingerprint(s microstructure.Snapshot) string {
+	return fmt.Sprintf("%s|fresh=%v|buy=%s|cvd=%s|ob=%s|fund=%s|basis=%s|b=%d|w=%d", strings.ToUpper(s.Symbol), s.Health.Fresh, s.Signals.BuyPressure, s.Signals.CVDTrend, s.Signals.OrderBookBias, s.Signals.FundingBias, s.Signals.BasisBias, len(s.Health.Blockers), len(s.Health.Warnings))
 }
 
 func (d *DB) SaveManagedCycleReport(result liveguard.ManagedCycleResult) error {

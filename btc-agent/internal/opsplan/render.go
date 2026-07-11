@@ -21,6 +21,12 @@ func Markdown(r Report) string {
 		b.WriteString("- Cảnh báo: " + strings.Join(r.Market.CriticalReasons, "; ") + "\n")
 	}
 	b.WriteString(fmt.Sprintf("- Vùng BTC: support %.2f-%.2f | invalidation %.2f | resistance từ %.2f\n", r.Market.PrimarySupportLow, r.Market.PrimarySupportHigh, r.Market.InvalidationLow, r.Market.ResistanceLow))
+	if r.Microstructure.Enabled {
+		b.WriteString(fmt.Sprintf("- Microstructure: %s | fresh %d/%d | BTC taker %.1f%% | CVD %.2f | spread %.2fbps | OB %s | funding %.4f | basis %.2f%%\n", r.Microstructure.Status, r.Microstructure.FreshSymbols, r.Microstructure.RequiredFresh, r.Microstructure.BTCTakerBuy*100, r.Microstructure.BTCCVD, r.Microstructure.BTCSpreadBps, fallback(r.Microstructure.BTCOrderBook, "n/a"), r.Microstructure.BTCFunding, r.Microstructure.BTCBasisPct))
+		if len(r.Microstructure.Blockers) > 0 {
+			b.WriteString("- Micro blockers: " + strings.Join(r.Microstructure.Blockers, "; ") + "\n")
+		}
+	}
 	b.WriteString(fmt.Sprintf("- Kịch bản chính: %s\n", r.Market.MainScenario))
 	b.WriteString(fmt.Sprintf("- Kịch bản mở khóa: %s\n", r.Market.UnlockScenario))
 	b.WriteString(fmt.Sprintf("- Kịch bản vô hiệu: %s\n\n", r.Market.InvalidScenario))
@@ -63,6 +69,9 @@ func TelegramDigest(r Report) string {
 	var b strings.Builder
 	b.WriteString("📊 BTC Agent — Kế hoạch vận hành\n\n")
 	b.WriteString(fmt.Sprintf("I. THỊ TRƯỜNG\nBTC %.2f | %s | trend %.1f | flow %s %.2f\nAccumulation %s %.1f | Permission %s | Plan %s | Risk %s | ưu tiên %s\n", r.Market.BTCPrice, r.Market.Regime, r.Market.TrendScore, r.Market.FlowBias, r.Market.FlowScore, fallback(r.Market.AccumulationPhase, "n/a"), r.Market.AccumulationScore, r.Market.Permission, r.Market.PlanState, r.Market.Risk, r.Market.Urgency))
+	if r.Microstructure.Enabled {
+		b.WriteString(fmt.Sprintf("Micro %s fresh %d/%d | taker %.1f%% | CVD %.0f | OB %s | funding %.4f | basis %.2f%%\n", r.Microstructure.Status, r.Microstructure.FreshSymbols, r.Microstructure.RequiredFresh, r.Microstructure.BTCTakerBuy*100, r.Microstructure.BTCCVD, fallback(r.Microstructure.BTCOrderBook, "n/a"), r.Microstructure.BTCFunding, r.Microstructure.BTCBasisPct))
+	}
 	if len(r.Market.CriticalReasons) > 0 {
 		b.WriteString("⚠️ " + strings.Join(r.Market.CriticalReasons, "; ") + "\n")
 	}

@@ -152,6 +152,7 @@ func analyze(ctx context.Context, cfg config.Config, db *storage.DB) (agent1.Mar
 	if err != nil {
 		return analysis, err
 	}
+	analysis = applyMicrostructurePermissionGate(cfg, analysis, latestMicrostructureSummary(cfg, db, time.Now().UTC()))
 	if err := db.SaveAnalysis(analysis); err != nil {
 		return analysis, err
 	}
@@ -177,6 +178,7 @@ func plan(ctx context.Context, cfg config.Config, db *storage.DB) (agent2.Plan, 
 	}
 	benchmarks := map[string][]market.Candle{cfg.Data.Symbols.BTC: btc1d, "BTCUSDT": btc1d}
 	p := agent2.BuildPlanWithBenchmarks(cfg, analysis, assets, benchmarks)
+	p = applyMicrostructureAssetGate(cfg, p, latestMicrostructureSummary(cfg, db, time.Now().UTC()))
 	if err := db.SavePlan(p); err != nil {
 		return p, err
 	}
@@ -203,6 +205,7 @@ func monitorPlan(cfg config.Config, db *storage.DB) (agent2.Plan, error) {
 	}
 	benchmarks := map[string][]market.Candle{cfg.Data.Symbols.BTC: btc1d, "BTCUSDT": btc1d}
 	p := agent2.BuildPlanWithBenchmarks(cfg, analysis, assets, benchmarks)
+	p = applyMicrostructureAssetGate(cfg, p, latestMicrostructureSummary(cfg, db, time.Now().UTC()))
 	if err := db.SavePlan(p); err != nil {
 		return p, err
 	}

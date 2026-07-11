@@ -19,10 +19,11 @@ func Markdown(s RealDataSurvey) string {
 
 	writeSection(&b, "2. BTC gate", s.BTCGate)
 	writeSection(&b, "3. BTC accumulation phase", s.AccumulationPhase)
-	writeSection(&b, "4. Agent2 gate", s.Agent2Gate)
-	writeSection(&b, "5. Managed live history", s.ManagedLive)
+	writeSection(&b, "4. Microstructure", s.Microstructure)
+	writeSection(&b, "5. Agent2 gate", s.Agent2Gate)
+	writeSection(&b, "6. Managed live history", s.ManagedLive)
 
-	b.WriteString("6. Learning actions\n")
+	b.WriteString("7. Learning actions\n")
 	if len(s.LearningActions) == 0 {
 		b.WriteString("- none\n")
 	} else {
@@ -34,7 +35,7 @@ func Markdown(s RealDataSurvey) string {
 	}
 	b.WriteString("\n")
 
-	b.WriteString("7. Safety\n")
+	b.WriteString("8. Safety\n")
 	for _, note := range s.RiskNotes {
 		b.WriteString("- " + note + "\n")
 	}

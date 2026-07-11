@@ -112,6 +112,14 @@ func runMarketWatch(ctx context.Context, cfg config.Config, db *storage.DB, noti
 	if err := fetch(ctx, cfg, db); err != nil {
 		return opsplan.Report{}, err
 	}
+	if cfg.Microstructure.Enabled && cfg.Microstructure.FetchOnMarketWatch {
+		if summary, err := fetchMicrostructureSummary(ctx, cfg, db); err != nil {
+			saveRuntimeEventJSON(db, "microstructure", "MICROSTRUCTURE_FETCH_ERROR", "warning", "fetch-error", map[string]any{"error": err.Error()})
+		} else {
+			_ = writeMicrostructureReport(summary)
+			saveMicrostructureRuntimeEvents(db, summary)
+		}
+	}
 	analysis, err := analyze(ctx, cfg, db)
 	if err != nil {
 		return opsplan.Report{}, err

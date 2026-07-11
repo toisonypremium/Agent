@@ -8,6 +8,7 @@ import (
 
 	"btc-agent/internal/backtest"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/microstructure"
 )
 
 const (
@@ -28,6 +29,7 @@ type RealDataSurvey struct {
 	Agent2Gate        SurveySection  `json:"agent2_gate"`
 	ManagedLive       SurveySection  `json:"managed_live"`
 	AccumulationPhase SurveySection  `json:"accumulation_phase"`
+	Microstructure    SurveySection  `json:"microstructure"`
 	LearningActions   []SurveyAction `json:"learning_actions,omitempty"`
 	RiskNotes         []string       `json:"risk_notes,omitempty"`
 	Summary           string         `json:"summary"`
@@ -67,12 +69,17 @@ type SurveyAction struct {
 }
 
 func Build(result backtest.Result, history *liveguard.LiveManagerHistoryResult) RealDataSurvey {
+	return BuildWithMicrostructure(result, history, microstructure.Summary{})
+}
+
+func BuildWithMicrostructure(result backtest.Result, history *liveguard.LiveManagerHistoryResult, micro microstructure.Summary) RealDataSurvey {
 	out := RealDataSurvey{GeneratedAt: time.Now()}
 	out.DataCoverage = buildCoverage(result)
 	out.BTCGate = buildBTCGateSection(result)
 	out.Agent2Gate = buildAgent2GateSection(result)
 	out.ManagedLive = buildManagedLiveSection(history)
 	out.AccumulationPhase = buildAccumulationPhaseSection(result)
+	out.Microstructure = buildMicrostructureSection(micro)
 	out.RiskNotes = []string{
 		"Survey is diagnostic only and does not write config.",
 		"Survey does not place, cancel, or modify live orders.",
@@ -160,6 +167,25 @@ func buildAccumulationPhaseSection(result backtest.Result) SurveySection {
 	return section
 }
 
+func buildMicrostructureSection(summary microstructure.Summary) SurveySection {
+	section := SurveySection{Area: "MICROSTRUCTURE", Verdict: SeverityNoChange, Confidence: ConfidenceLow, Summary: "Microstructure unavailable or disabled."}
+	if !summary.Enabled {
+		return section
+	}
+	section.Summary = fmt.Sprintf("microstructure status=%s fresh=%d/%d blockers=%d warnings=%d", summary.Status, summary.FreshSymbols, summary.RequiredFresh, len(summary.Blockers), len(summary.Warnings))
+	section.Evidence = []SurveyEvidence{{Metric: "status", Value: summary.Status}, {Metric: "fresh_symbols", Value: fmt.Sprint(summary.FreshSymbols)}, {Metric: "required_fresh", Value: fmt.Sprint(summary.RequiredFresh)}, {Metric: "blockers", Value: fmt.Sprint(len(summary.Blockers))}}
+	if summary.BTC.Symbol != "" {
+		section.Evidence = append(section.Evidence, SurveyEvidence{Metric: "btc_taker_buy_ratio", Value: fmt.Sprintf("%.1f%%", summary.BTC.SpotFlow.TakerBuyRatio*100)}, SurveyEvidence{Metric: "btc_cvd_quote_usdt", Value: fmt.Sprintf("%.2f", summary.BTC.SpotFlow.CVDQuoteUSDT)}, SurveyEvidence{Metric: "btc_funding_rate", Value: fmt.Sprintf("%.4f", summary.BTC.Futures.FundingRate)}, SurveyEvidence{Metric: "btc_basis_pct", Value: fmt.Sprintf("%.2f%%", summary.BTC.Futures.BasisPct)})
+	}
+	section.Confidence = confidenceByCount(summary.FreshSymbols)
+	if summary.Status == microstructure.StatusBlock || len(summary.Blockers) > 0 {
+		section.Verdict = SeverityBlockedBySafety
+	} else if summary.Status == microstructure.StatusWarn || len(summary.Warnings) > 0 {
+		section.Verdict = SeverityWatch
+	}
+	return section
+}
+
 func buildManagedLiveSection(history *liveguard.LiveManagerHistoryResult) SurveySection {
 	section := SurveySection{Area: "MANAGED_LIVE", Verdict: SeverityNoChange, Confidence: ConfidenceLow, Summary: "live manager history simulation missing; run backtest-live-manager for quality evidence."}
 	if history == nil {
@@ -217,7 +243,7 @@ func surveyActions(s RealDataSurvey) []SurveyAction {
 }
 
 func summarize(s RealDataSurvey) string {
-	return fmt.Sprintf("real-data survey: windows=%d confidence=%s btc=%s accumulation=%s agent2=%s managed=%s actions=%d report_only=true", s.DataCoverage.WindowsTested, s.DataCoverage.Confidence, s.BTCGate.Verdict, s.AccumulationPhase.Verdict, s.Agent2Gate.Verdict, s.ManagedLive.Verdict, len(s.LearningActions))
+	return fmt.Sprintf("real-data survey: windows=%d confidence=%s btc=%s accumulation=%s micro=%s agent2=%s managed=%s actions=%d report_only=true", s.DataCoverage.WindowsTested, s.DataCoverage.Confidence, s.BTCGate.Verdict, s.AccumulationPhase.Verdict, s.Microstructure.Verdict, s.Agent2Gate.Verdict, s.ManagedLive.Verdict, len(s.LearningActions))
 }
 
 func topOpportunityRow(rows []backtest.Agent2OpportunityAuditRow) backtest.Agent2OpportunityAuditRow {

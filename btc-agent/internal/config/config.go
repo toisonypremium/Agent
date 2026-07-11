@@ -120,6 +120,18 @@ type Config struct {
 		CriticalRepeatMinutes         int  `yaml:"critical_repeat_minutes"`
 		MaxConsecutiveScanErrors      int  `yaml:"max_consecutive_scan_errors"`
 	} `yaml:"monitoring"`
+	Microstructure struct {
+		Enabled                 bool   `yaml:"enabled"`
+		FetchOnMarketWatch      bool   `yaml:"fetch_on_market_watch"`
+		RequireFreshForActive   bool   `yaml:"require_fresh_for_active"`
+		BinanceSpotBaseURL      string `yaml:"binance_spot_base_url"`
+		BinanceFuturesBaseURL   string `yaml:"binance_futures_base_url"`
+		Interval                string `yaml:"interval"`
+		LookbackLimit           int    `yaml:"lookback_limit"`
+		MaxAgeMinutes           int    `yaml:"max_age_minutes"`
+		OrderBookDepthLimit     int    `yaml:"orderbook_depth_limit"`
+		MinFreshSymbolsRequired int    `yaml:"min_fresh_symbols_required"`
+	} `yaml:"microstructure"`
 	Live struct {
 		Enabled                           bool    `yaml:"enabled"`
 		Exchange                          string  `yaml:"exchange"`
@@ -458,6 +470,23 @@ func (c Config) Validate() error {
 		}
 		if c.Monitoring.MaxConsecutiveScanErrors == 0 {
 			return errors.New("monitoring.max_consecutive_scan_errors must be >=1 when monitoring is enabled")
+		}
+	}
+	if c.Microstructure.LookbackLimit < 0 || c.Microstructure.MaxAgeMinutes < 0 || c.Microstructure.OrderBookDepthLimit < 0 || c.Microstructure.MinFreshSymbolsRequired < 0 {
+		return errors.New("microstructure values cannot be negative")
+	}
+	if c.Microstructure.Enabled {
+		if strings.TrimSpace(c.Microstructure.BinanceSpotBaseURL) == "" {
+			return errors.New("microstructure.binance_spot_base_url required when microstructure is enabled")
+		}
+		if strings.TrimSpace(c.Microstructure.BinanceFuturesBaseURL) == "" {
+			return errors.New("microstructure.binance_futures_base_url required when microstructure is enabled")
+		}
+		if c.Microstructure.LookbackLimit > 1000 {
+			return errors.New("microstructure.lookback_limit must be <=1000")
+		}
+		if c.Microstructure.OrderBookDepthLimit > 1000 {
+			return errors.New("microstructure.orderbook_depth_limit must be <=1000")
 		}
 	}
 	if c.Execution.OrderExpiryHours <= 0 {

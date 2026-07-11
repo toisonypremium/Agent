@@ -11,6 +11,7 @@ import (
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/flow"
 	"btc-agent/internal/market"
+	"btc-agent/internal/microstructure"
 )
 
 type Risk string
@@ -59,6 +60,7 @@ type MarketAnalysis struct {
 	Frames                map[string]market.FrameSignal `json:"frames"`
 	Flow                  flow.MultiFrame               `json:"flow"`
 	BTCAccumulation       accumulation.Result           `json:"btc_accumulation"`
+	Microstructure        microstructure.Summary        `json:"microstructure,omitempty"`
 }
 
 type ScoreBreakdown struct {

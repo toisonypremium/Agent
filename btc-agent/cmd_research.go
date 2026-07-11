@@ -385,7 +385,7 @@ func runLearning(cfg config.Config, db *storage.DB) error {
 	if historyOK {
 		historyPtr = &history
 	}
-	surveyResult := survey.Build(backtestResult, historyPtr)
+	surveyResult := survey.BuildWithMicrostructure(backtestResult, historyPtr, latestMicrostructureSummary(cfg, db, time.Now().UTC()))
 	surveyMarkdown := survey.Markdown(surveyResult)
 	if err := survey.SaveReports("reports", surveyResult, surveyMarkdown); err != nil {
 		return err
@@ -409,7 +409,7 @@ func runRealDataSurvey(cfg config.Config, db *storage.DB) error {
 	if historyOK {
 		historyPtr = &history
 	}
-	result := survey.Build(backtestResult, historyPtr)
+	result := survey.BuildWithMicrostructure(backtestResult, historyPtr, latestMicrostructureSummary(cfg, db, time.Now().UTC()))
 	md := survey.Markdown(result)
 	if err := survey.SaveReports("reports", result, md); err != nil {
 		return err

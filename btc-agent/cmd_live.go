@@ -805,6 +805,7 @@ func refreshDeterministicPlanForLive(ctx context.Context, cfg config.Config, db 
 	}
 	benchmarks := map[string][]market.Candle{cfg.Data.Symbols.BTC: btc1d, "BTCUSDT": btc1d}
 	p := agent2.BuildPlanWithBenchmarks(cfg, analysis, assets, benchmarks)
+	p = applyMicrostructureAssetGate(cfg, p, latestMicrostructureSummary(cfg, db, time.Now().UTC()))
 	if err := db.SavePlan(p); err != nil {
 		return p, err
 	}

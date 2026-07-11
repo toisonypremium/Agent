@@ -1,19 +1,91 @@
 # btc-agent
 
-Rule-based BTC market gate + ETH/SOL/RENDER accumulation planner for Termux/root Android.
+Bot giao dịch spot theo luật cứng cho Termux/root Android. Hệ thống dùng BTC làm market gate, sau đó đánh giá ETH/SOL/RENDER theo setup accumulation riêng. Bot chỉ tạo lệnh spot limit BUY post-only khi mọi gate an toàn cùng pass.
+
+## Trạng thái hiện tại
+
+- Runtime chính: `scheduler` ở `live-auto` -> `live-supervisor` -> managed order engine.
+- Gate live bắt buộc: `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED`.
+- Khi BTC chưa xác nhận accumulation, bot giữ `WATCH`/`SCOUT`, `desired=0`, không đặt lệnh.
+- Dữ liệu futures/microstructure nếu thêm sau này chỉ dùng quan sát, không dùng để thực thi futures.
 
 ## Safety invariants
 
-- Default config is safe: paper/simulation only, live disabled, proof-only enabled, real trading disabled.
-- Production runtime, when explicitly enabled, is one path: `scheduler` in `live-auto` mode -> `live-supervisor` -> managed order engine.
-- Normal live desired orders require deterministic `ACTIVE_LIMIT` plan, BTC permission `ALLOWED`, and BTC `ACCUMULATION_CONFIRMED` gate evidence.
-- `WATCH`, `SCOUT`, and `ARMED` are observation/explanation states. They do not create normal live orders.
-- Live order type is spot limit BUY post-only only.
-- No futures, no leverage, no market order.
-- Telegram commands are read-only. No Telegram buy/sell/cancel/override path.
-- Research/report layers can explain or rank opportunities, but cannot override Agent 1/2 or live safety gates.
+- Config mặc định an toàn: paper/simulation only, live disabled, proof-only enabled, real trading disabled.
+- Normal live desired orders chỉ được tạo khi plan `ACTIVE_LIMIT`, BTC permission `ALLOWED`, BTC accumulation phase `ACCUMULATION_CONFIRMED`, asset state `ACTIVE_LIMIT`.
+- `WATCH`, `SCOUT`, `ARMED` chỉ là trạng thái quan sát/giải thích. Không có quyền tạo normal live order.
+- Chỉ dùng spot limit BUY post-only.
+- Không futures, không leverage, không market order.
+- Telegram chỉ read-only. Không có lệnh mua/bán/hủy/override qua Telegram.
+- Survey, learning, report, dashboard không được sửa config, không đặt lệnh, không bypass Agent 1/2 hoặc live guard.
+- Secret không được commit: OKX keys, Telegram token, `.env`, `config.yaml`, DB, logs, reports, binaries.
 
-## Termux install
+## Kiến trúc quyết định
+
+```text
+BTC market gate
+  -> BTC accumulation detector
+  -> Agent 1 permission
+  -> Agent 2 asset setup
+  -> ladder spot-limit planner
+  -> liveguard preflight/risk/reconcile/data checks
+  -> managed order engine
+```
+
+### Agent 1: BTC market gate
+
+Agent 1 phân tích BTC như benchmark thị trường, không xem BTC là asset để gom. BTC được phân loại deterministic từ OHLCV đóng nến:
+
+```text
+MARKDOWN
+LIQUIDITY_SWEEP
+SELL_ABSORPTION
+RECLAIM
+ACCUMULATION_CONFIRMED
+DISTRIBUTION
+INVALIDATED
+```
+
+Mapping quyền:
+
+- `MARKDOWN`, `LIQUIDITY_SWEEP`, `SELL_ABSORPTION`: tối đa `WATCH`.
+- `RECLAIM`: tối đa `ARMED`.
+- `ACCUMULATION_CONFIRMED`: được xét tiếp để lên `ALLOWED`, nhưng vẫn phải qua risk/FOMO/data/RR gates.
+- `DISTRIBUTION`, `INVALIDATED`: hard block hoặc `NO_TRADE`.
+
+### Agent 2: asset accumulation planner
+
+Agent 2 chỉ đánh giá assets trong `data.symbols.assets`. Setup asset cần pass:
+
+- BTC đã `ACCUMULATION_CONFIRMED`.
+- BTC permission `ALLOWED`.
+- Asset flow có reclaim/absorption footprint hợp lệ.
+- Không falling knife/distribution.
+- Discount zone, reward/risk, liquidity, rotation, relative strength đạt chuẩn.
+- Data health, risk governor, reconcile safety, live preflight đều pass.
+
+Plan states:
+
+| State | Ý nghĩa | Có quyền tạo normal live order? |
+|---|---|---|
+| `NO_TRADE` | hard block hoặc setup không dùng được | Không |
+| `WATCH` | candidate để theo dõi | Không |
+| `SCOUT` | gần setup nhưng còn chờ gate mềm | Không |
+| `ARMED` | context mạnh, chưa đủ order authority | Không |
+| `ACTIVE_LIMIT` | đủ gate cuối, có layers hợp lệ | Có, nếu mọi live guard pass |
+
+Normal managed live desired orders chỉ được build khi:
+
+```text
+plan.State == ACTIVE_LIMIT
+plan.ActionPermission == ALLOWED
+BTC accumulation phase == ACCUMULATION_CONFIRMED
+asset.State == ACTIVE_LIMIT
+```
+
+Sau đó vẫn phải pass preflight, data health, reconcile safety, risk governor, notional caps, open-order caps, liquidity/MM checks, post-only checks.
+
+## Cài đặt trên Termux
 
 ```bash
 pkg update
@@ -24,9 +96,18 @@ go build -o bin/btc-agent .
 cp config.yaml.example config.yaml
 ```
 
-Do not commit real `config.yaml`, `.env`, DB, logs, reports, or binaries.
+Không commit file runtime thật:
 
-## Core commands
+```text
+config.yaml
+.env
+*.db
+reports/
+logs/
+bin/
+```
+
+## Lệnh chính
 
 ```bash
 ./bin/btc-agent fetch --config config.yaml
@@ -50,57 +131,25 @@ Do not commit real `config.yaml`, `.env`, DB, logs, reports, or binaries.
 ./bin/btc-agent scheduler --config config.yaml --run-now --dry-run
 ```
 
-Manual proof execution still exists, but is separate and requires the exact confirm phrase plus live gates:
+Manual proof order là path riêng, cần confirm phrase chính xác và vẫn phải qua live gates:
 
 ```bash
 ./bin/btc-agent execute-live-proof-order --config config.yaml --confirm I_UNDERSTAND_THIS_PLACES_A_REAL_SPOT_LIMIT_ORDER
 ```
 
-## Decision pipeline
-
-Agent 1 is BTC market gate/benchmark. BTC is not an accumulation asset. BTC first classifies deterministic market-maker accumulation phase from closed OHLCV data: `MARKDOWN`, `LIQUIDITY_SWEEP`, `SELL_ABSORPTION`, `RECLAIM`, `ACCUMULATION_CONFIRMED`, `DISTRIBUTION`, or `INVALIDATED`.
-
-Agent 2 evaluates configured accumulation assets only. Production config keeps exactly three assets in `data.symbols.assets`. Asset setup can only reach full order authority after BTC is `ACCUMULATION_CONFIRMED`, asset MM/reclaim gates pass, and discount/reward-risk/liquidity/rotation gates pass.
-
-Plan states:
-
-- `NO_TRADE`: hard block or unusable setup.
-- `WATCH`: visible candidate, not actionable.
-- `SCOUT`: near setup with only soft waits, not order authority.
-- `ARMED`: strong watch/probe context, not order authority.
-- `ACTIVE_LIMIT`: strict final gates passed and valid layers exist.
-
-Normal managed live desired orders are built only when:
-
-```text
-plan.State == ACTIVE_LIMIT
-plan.ActionPermission == ALLOWED
-BTC accumulation phase == ACCUMULATION_CONFIRMED
-asset.State == ACTIVE_LIMIT
-```
-
-Then preflight, risk governor, data health, reconcile safety, MM/liquidity gate, notional caps, open-order caps, and post-only checks still apply.
-
 ## Live-auto production runtime
 
-Use scheduler/supervisor only:
+Nạp env runtime từ `$HOME/btc-agent.env`:
 
 ```bash
+set -a; . "$HOME/btc-agent.env"; set +a
 export BTC_AGENT_MODE=live-auto
 export BTC_AGENT_ALLOW_AUTO_LIVE=true
 ./bin/btc-agent live-doctor --config config.yaml
 ./scripts/btc-agent-scheduler.sh
 ```
 
-Wrapper behavior:
-
-- `paper` and `live-proof` modes run scheduler with `--dry-run`.
-- `live-auto` requires `BTC_AGENT_ALLOW_AUTO_LIVE=true`.
-- `live-auto` runs `live-doctor` before starting real scheduler.
-- Scheduler uses `live-supervisor` at `live.management_interval_minutes`.
-- Supervisor calls managed order engine; it does not use old ladder/canary paths.
-
-Live-auto config gates must be explicit:
+Gates live-auto cần bật rõ:
 
 ```text
 live.enabled=true
@@ -113,23 +162,45 @@ execution.real_trading_enabled=true
 BTC_AGENT_ALLOW_AUTO_LIVE=true
 ```
 
-If any gate fails, bot blocks or reconciles only.
+Nếu bất kỳ gate nào fail, bot block hoặc chỉ reconcile.
 
-## Allocation logic
+## Report-only survey và learning
 
-Live capital allocator uses `OpportunityComposite` plus history quality only inside existing live guards:
+Flow khảo sát dữ liệu thật:
 
-- Non-`ACTIVE_LIMIT` asset: score `0`, `MaxLayers=0`.
-- BTC permission not `ALLOWED`: zero live risk budget.
-- Data/risk/hard blocker composite verdict: score `0`.
-- Quality grade adjusts size only; D blocks, A/B full, C reduced, missing/NO_SAMPLE small probe size.
-- Portfolio caps, per-order cap, per-asset cap, total cap, positions, and open orders still cap budget.
+```bash
+./bin/btc-agent fetch --config config.yaml
+./bin/btc-agent backtest --config config.yaml
+./bin/btc-agent backtest-live-manager --config config.yaml
+./bin/btc-agent real-data-survey --config config.yaml
+./bin/btc-agent learn --config config.yaml
+```
 
-This ranks/sizes already-qualified opportunities. It does not open permission for `WATCH`, `SCOUT`, or `ARMED`.
+`real-data-survey` gom các bằng chứng:
+
+- coverage dữ liệu local.
+- BTC permission audit.
+- BTC accumulation phase forward/false-positive audit.
+- Agent2 opportunity/near-miss audit.
+- Managed live-manager history simulation.
+- Learning actions dạng khuyến nghị thủ công.
+
+Survey/learning chỉ diagnostic. Không sửa `config.yaml`, không đặt/hủy lệnh, không thay đổi quyền live.
+
+Ví dụ kết luận an toàn khi thị trường chưa đủ gate:
+
+```text
+plan=SCOUT
+BTC permission=WATCH
+BTC accumulation=MARKDOWN
+desired=0
+placed=0
+can_submit=false
+```
 
 ## Reports
 
-Main report files:
+File report chính:
 
 ```text
 reports/latest.md/json
@@ -140,31 +211,19 @@ reports/technical_scorecard_latest.md/json
 reports/capital_plan_research_latest.md/json
 reports/coin_universe_research_latest.md/json
 reports/decision_dashboard_latest.md/json
-reports/live_supervisor_latest.md/json
 reports/auto_live_management_latest.md/json
+reports/live_supervisor_latest.md/json
 reports/live_doctor_latest.md/json
 reports/live_readiness_latest.md/json
 reports/live_reconcile_latest.md/json
 reports/live_position_latest.md/json
+reports/real_data_survey_latest.md/json
+reports/learning_latest.md/json
 ```
 
-Research-only reports do not edit config, replace production assets, or place orders.
+Research-only reports không thay production assets, không sửa config, không đặt lệnh.
 
-## Real-data survey and learning
-
-Recommended report-only flow:
-
-```bash
-./bin/btc-agent fetch --config config.yaml
-./bin/btc-agent backtest --config config.yaml
-./bin/btc-agent backtest-live-manager --config config.yaml
-./bin/btc-agent real-data-survey --config config.yaml
-./bin/btc-agent learn --config config.yaml
-```
-
-`real-data-survey` consolidates local candle backtests, BTC accumulation phase/false-positive audit, Agent 1/2 audits, managed live-manager history simulation, and learning actions into `reports/real_data_survey_latest.md/json`. It is diagnostic only: no config write, no OKX live order, no gate override. `learn` includes survey evidence but still requires manual review before any rule/config/code change.
-
-## Telegram read-only management
+## Telegram read-only
 
 Allowed commands:
 
@@ -188,17 +247,17 @@ Allowed commands:
 /help
 ```
 
-Blocked/not implemented by design:
+Blocked/not implemented:
 
 ```text
 /buy /sell /market /leverage /override /resume /halt /cancel /close
 ```
 
-Telegram can show state, blockers, scorecard, allocation research, universe research, dashboard, trigger, orders, positions, doctor, and supervisor summaries. It cannot place/cancel/close orders or override gates.
+Telegram chỉ hiển thị state, blockers, dashboard, trigger, orders, positions, doctor, supervisor. Không đặt/hủy/đóng lệnh và không override gates.
 
-## Verification
+## Verification trước khi báo done
 
-Before reporting code work done:
+Mechanical checks:
 
 ```bash
 gofmt -w .
@@ -207,15 +266,26 @@ go vet ./...
 go build -o bin/btc-agent .
 ```
 
-Dry-run live check:
+Report-only flow:
+
+```bash
+./bin/btc-agent fetch --config config.yaml
+./bin/btc-agent backtest --config config.yaml
+./bin/btc-agent backtest-live-manager --config config.yaml
+./bin/btc-agent real-data-survey --config config.yaml
+./bin/btc-agent learn --config config.yaml
+```
+
+Live dry-run safety:
 
 ```bash
 set -a; . "$HOME/btc-agent.env"; set +a
 BTC_AGENT_MODE=live-auto BTC_AGENT_ALLOW_AUTO_LIVE=true ./bin/btc-agent live-supervisor --config config.yaml --dry-run
 ./bin/btc-agent live-doctor --config config.yaml
+./bin/btc-agent telegram-commands --config config.yaml
 ```
 
-Expected while market is not `ACTIVE_LIMIT + ALLOWED`:
+Expected nếu chưa đủ `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED`:
 
 ```text
 desired=0
@@ -224,9 +294,36 @@ can_submit=false
 No real order was placed.
 ```
 
-## Secrets
+## Roadmap
 
-- Never paste OKX keys, Telegram token, `.env`, or real config secrets into chat/logs.
-- Use `$HOME/btc-agent.env` for runtime env.
-- Use OKX IP whitelist and least permissions.
-- Rotate any key pasted outside the device.
+### Milestone A: done
+
+- OHLCV deterministic BTC accumulation detector.
+- Agent1 accumulation permission cap.
+- Agent2 BTC accumulation gate.
+- Backtest accumulation phase forward/false-positive audit.
+- Survey/learning/dashboard evidence report-only.
+
+### Milestone B: data sources
+
+- Spot taker buy/sell volume.
+- CVD/volume delta.
+- Order book imbalance.
+- Open interest, funding, liquidation proxy.
+- Spot-perp basis.
+- Anchored VWAP/volume profile.
+- Data stale blockers: stale microstructure => tối đa `WATCH`, không `ACTIVE_LIMIT`.
+
+### Milestone C: proof before sizing
+
+- Walk-forward proof detector giảm false positive/drawdown.
+- No live sizing expansion nếu sample thấp hoặc false-positive cao.
+- Exit/invalidation engine rõ trước khi tăng quyền live.
+
+## Secrets và vận hành an toàn
+
+- Không paste OKX keys, Telegram token, `.env`, hoặc config thật vào chat/logs.
+- Dùng `$HOME/btc-agent.env` cho runtime env.
+- Bật OKX IP whitelist và least permissions.
+- Rotate mọi key từng bị paste ra ngoài thiết bị.
+- `config.yaml`, `.env`, DB, reports, logs, backups, binaries giữ local-only.

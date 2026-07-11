@@ -28,7 +28,7 @@ fail() {
 }
 
 case "$MODE" in
-  paper|live-proof|live-auto|live-canary-auto) ;;
+  paper|live-proof|live-auto) ;;
   *) fail "invalid BTC_AGENT_MODE=$MODE; use paper|live-proof|live-auto" ;;
 esac
 
@@ -56,11 +56,11 @@ allow_live_command() {
       return 1
       ;;
     auto-live-order)
-      ([ "$MODE" = "live-auto" ] || [ "$MODE" = "live-canary-auto" ]) && [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" = "true" ]
+      [ "$MODE" = "live-auto" ] && [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" = "true" ]
       return $?
       ;;
     live-proof|live-readiness|reconcile-live-orders|live-positions|operator-status)
-      [ "$MODE" = "live-proof" ] || [ "$MODE" = "live-auto" ] || [ "$MODE" = "live-canary-auto" ]
+      [ "$MODE" = "live-proof" ] || [ "$MODE" = "live-auto" ]
       return $?
       ;;
   esac
@@ -136,7 +136,7 @@ run_live_readiness_stack() {
 }
 
 run_live_auto_attempt() {
-  if [ "$MODE" != "live-auto" ] && [ "$MODE" != "live-canary-auto" ]; then
+  if [ "$MODE" != "live-auto" ]; then
     return 0
   fi
   if [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" != "true" ]; then

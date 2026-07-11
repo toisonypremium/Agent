@@ -112,25 +112,18 @@ type Config struct {
 		} `yaml:"rss"`
 	} `yaml:"research"`
 	Live struct {
-		Enabled                 bool    `yaml:"enabled"`
-		Exchange                string  `yaml:"exchange"`
-		APIKeyEnv               string  `yaml:"api_key_env"`
-		APISecretEnv            string  `yaml:"api_secret_env"`
-		APIPassphraseEnv        string  `yaml:"api_passphrase_env"`
-		MaxOrderNotionalUSDT    float64 `yaml:"max_order_notional_usdt"`
-		MinAccountFreeUSDT      float64 `yaml:"min_account_free_usdt"`
-		RequirePostOnly         bool    `yaml:"require_post_only"`
-		RequireManualConfirm    bool    `yaml:"require_manual_confirm"`
-		AutoExecute             bool    `yaml:"auto_execute"`
-		LiveAutoMode            bool    `yaml:"live_auto_mode"`
-		LiveAutoMaxNotionalUSDT float64 `yaml:"live_auto_max_notional_usdt"`
-		// Legacy canary fields are kept for older local configs; use LiveAuto* in code.
-		CanaryMode                        bool    `yaml:"canary_mode"`
-		CanaryMaxNotionalUSDT             float64 `yaml:"canary_max_notional_usdt"`
-		AutoLadderEnabled                 bool    `yaml:"auto_ladder_enabled"`
-		MaxAutoLayersPerCycle             int     `yaml:"max_auto_layers_per_cycle"`
-		MaxOpenLiveOrders                 int     `yaml:"max_open_live_orders"`
-		AutoLadderMaxNotionalUSDT         float64 `yaml:"auto_ladder_max_notional_usdt"`
+		Enabled                           bool    `yaml:"enabled"`
+		Exchange                          string  `yaml:"exchange"`
+		APIKeyEnv                         string  `yaml:"api_key_env"`
+		APISecretEnv                      string  `yaml:"api_secret_env"`
+		APIPassphraseEnv                  string  `yaml:"api_passphrase_env"`
+		MaxOrderNotionalUSDT              float64 `yaml:"max_order_notional_usdt"`
+		MinAccountFreeUSDT                float64 `yaml:"min_account_free_usdt"`
+		RequirePostOnly                   bool    `yaml:"require_post_only"`
+		RequireManualConfirm              bool    `yaml:"require_manual_confirm"`
+		AutoExecute                       bool    `yaml:"auto_execute"`
+		LiveAutoMode                      bool    `yaml:"live_auto_mode"`
+		LiveAutoMaxNotionalUSDT           float64 `yaml:"live_auto_max_notional_usdt"`
 		OrderManagementEnabled            bool    `yaml:"order_management_enabled"`
 		MaxAutoLayersPerAsset             int     `yaml:"max_auto_layers_per_asset"`
 		MaxOpenLiveOrdersPerAsset         int     `yaml:"max_open_live_orders_per_asset"`
@@ -181,20 +174,14 @@ func Load(path string) (Config, error) {
 	return c, nil
 }
 
-// LiveAutoMode returns the preferred live-auto mode flag, accepting legacy canary_mode for older configs.
+// LiveAutoMode returns the current live-auto mode flag.
 func LiveAutoMode(c Config) bool {
-	return c.Live.LiveAutoMode || c.Live.CanaryMode
+	return c.Live.LiveAutoMode
 }
 
-// LiveAutoMaxNotionalUSDT returns the preferred live-auto cap, accepting legacy canary_max_notional_usdt for older configs.
+// LiveAutoMaxNotionalUSDT returns the current live-auto cap.
 func LiveAutoMaxNotionalUSDT(c Config) float64 {
-	if c.Live.LiveAutoMaxNotionalUSDT > 0 {
-		return c.Live.LiveAutoMaxNotionalUSDT
-	}
-	if c.Live.CanaryMode {
-		return c.Live.CanaryMaxNotionalUSDT
-	}
-	return 0
+	return c.Live.LiveAutoMaxNotionalUSDT
 }
 
 func validClockTime(value string) bool {
@@ -251,23 +238,6 @@ func (c Config) Validate() error {
 		}
 		if LiveAutoMaxNotionalUSDT(c) > c.Live.MaxOrderNotionalUSDT {
 			return fmt.Errorf("live live_auto_max_notional_usdt (%.2f) cannot exceed max_order_notional_usdt (%.2f)", LiveAutoMaxNotionalUSDT(c), c.Live.MaxOrderNotionalUSDT)
-		}
-	}
-	if c.Live.AutoLadderEnabled {
-		if !c.Live.AutoExecute {
-			return errors.New("auto ladder requires live.auto_execute=true")
-		}
-		if c.Live.MaxAutoLayersPerCycle < 1 || c.Live.MaxAutoLayersPerCycle > 3 {
-			return errors.New("live.max_auto_layers_per_cycle must be between 1 and 3")
-		}
-		if c.Live.MaxOpenLiveOrders < 1 || c.Live.MaxOpenLiveOrders > 10 {
-			return errors.New("live.max_open_live_orders must be between 1 and 10")
-		}
-		if c.Live.AutoLadderMaxNotionalUSDT <= 0 {
-			return errors.New("live.auto_ladder_max_notional_usdt must be positive")
-		}
-		if c.Live.AutoLadderMaxNotionalUSDT > c.Live.MaxOrderNotionalUSDT {
-			return errors.New("live.auto_ladder_max_notional_usdt cannot exceed live.max_order_notional_usdt")
 		}
 	}
 	if c.Live.OrderManagementEnabled {

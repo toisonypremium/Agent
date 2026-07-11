@@ -53,6 +53,10 @@ data:
       - "ETHUSDT"
       - "SOLUSDT"
       - "RENDERUSDT"
+    research_universe:
+      - "LINKUSDT"
+      - "AVAXUSDT"
+      - "NEARUSDT"
   intervals:
     - "4h"
     - "1d"
@@ -113,12 +117,32 @@ live:
   auto_execute: false
   live_auto_mode: false
   live_auto_max_notional_usdt: 2.0
+  order_management_enabled: false
+  max_auto_layers_per_asset: 3
+  max_open_live_orders_per_asset: 3
+  max_open_live_orders_total: 9
+  max_live_notional_per_order_usdt: 2.0
+  max_live_notional_per_asset_usdt: 6.0
+  max_live_notional_total_usdt: 18.0
+  cancel_if_plan_not_active: true
+  cancel_if_price_above_discount_zone_pct: 0.02
+  replace_if_price_drift_pct: 0.01
+  cancel_stale_after_minutes: 240
+  cancel_on_btc_permission_not_allowed: true
   supervisor_enabled: false
   management_interval_minutes: 15
   heartbeat_interval_minutes: 360
   auto_halt_after_errors: 3
   notify_on_no_action: false
   proof_only: true
+  liquidity_gate_enabled: true
+  require_orderbook_liquidity: true
+  max_spread_bps: 20
+  max_slippage_bps: 15
+  min_bid_depth_to_order_ratio: 3
+  max_order_to_avg_5m_quote_volume_pct: 0.2
+  mm_gate_samples: 3
+  mm_gate_sample_delay_ms: 500
 
 execution:
   paper_trading: true

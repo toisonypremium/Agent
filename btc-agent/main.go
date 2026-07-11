@@ -975,10 +975,6 @@ type liveReadinessReport struct {
 	AutoExecute                    bool                            `json:"auto_execute"`
 	LiveAutoMode                   bool                            `json:"live_auto_mode"`
 	LiveAutoMaxNotional            float64                         `json:"live_auto_max_notional_usdt"`
-	AutoLadderEnabled              bool                            `json:"auto_ladder_enabled"`
-	MaxAutoLayersPerCycle          int                             `json:"max_auto_layers_per_cycle"`
-	MaxOpenLiveOrders              int                             `json:"max_open_live_orders"`
-	AutoLadderMaxNotionalUSDT      float64                         `json:"auto_ladder_max_notional_usdt"`
 	OrderManagementEnabled         bool                            `json:"order_management_enabled"`
 	MaxAutoLayersPerAsset          int                             `json:"max_auto_layers_per_asset"`
 	MaxOpenLiveOrdersPerAsset      int                             `json:"max_open_live_orders_per_asset"`
@@ -997,7 +993,6 @@ type liveReadinessReport struct {
 	CredentialEnvPresent           map[string]bool                 `json:"credential_env_present"`
 	PlanState                      agent2.State                    `json:"plan_state"`
 	Proof                          liveguard.Proof                 `json:"proof"`
-	LadderProof                    liveguard.LadderProof           `json:"ladder_proof"`
 	OpenLiveOrders                 []live.OrderStatus              `json:"open_live_orders"`
 	LivePositions                  []live.LivePosition             `json:"live_positions"`
 	DataHealth                     liveguard.DataHealthResult      `json:"data_health"`
@@ -1047,7 +1042,6 @@ func runLiveReadiness(ctx context.Context, cfg config.Config, db *storage.DB) er
 		}
 	}
 	proof := liveguard.BuildProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
-	ladderProof := liveguard.BuildLadderProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
 	managedSummaries := liveguard.BuildManagedCoinSummaries(cfg, p, open, liveguard.ManagedCycleResult{PlanState: p.State, Desired: []liveguard.ManagedDesiredOrder{}, DataHealth: dataHealth, ReconcileSafety: reconcileSafety, RiskGovernor: riskGovernor})
 	report := liveReadinessReport{
 		GeneratedAt:                    time.Now(),
@@ -1057,10 +1051,6 @@ func runLiveReadiness(ctx context.Context, cfg config.Config, db *storage.DB) er
 		AutoExecute:                    cfg.Live.AutoExecute,
 		LiveAutoMode:                   config.LiveAutoMode(cfg),
 		LiveAutoMaxNotional:            config.LiveAutoMaxNotionalUSDT(cfg),
-		AutoLadderEnabled:              cfg.Live.AutoLadderEnabled,
-		MaxAutoLayersPerCycle:          cfg.Live.MaxAutoLayersPerCycle,
-		MaxOpenLiveOrders:              cfg.Live.MaxOpenLiveOrders,
-		AutoLadderMaxNotionalUSDT:      cfg.Live.AutoLadderMaxNotionalUSDT,
 		OrderManagementEnabled:         cfg.Live.OrderManagementEnabled,
 		MaxAutoLayersPerAsset:          cfg.Live.MaxAutoLayersPerAsset,
 		MaxOpenLiveOrdersPerAsset:      cfg.Live.MaxOpenLiveOrdersPerAsset,
@@ -1079,7 +1069,6 @@ func runLiveReadiness(ctx context.Context, cfg config.Config, db *storage.DB) er
 		CredentialEnvPresent:           liveCredentialEnvPresent(cfg),
 		PlanState:                      p.State,
 		Proof:                          proof,
-		LadderProof:                    ladderProof,
 		OpenLiveOrders:                 open,
 		LivePositions:                  positions,
 		DataHealth:                     dataHealth,
@@ -1400,10 +1389,6 @@ func liveReadinessTelegramView(r liveReadinessReport) telegramreport.LiveReadine
 		LiveAutoMaxNotional:           r.LiveAutoMaxNotional,
 		RequireManualConfirm:          r.RequireManualConfirm,
 		ProofOnly:                     r.ProofOnly,
-		AutoLadderEnabled:             r.AutoLadderEnabled,
-		MaxAutoLayers:                 r.MaxAutoLayersPerCycle,
-		MaxOpenLiveOrders:             r.MaxOpenLiveOrders,
-		AutoLadderMaxNotional:         r.AutoLadderMaxNotionalUSDT,
 		OrderManagementEnabled:        r.OrderManagementEnabled,
 		MaxAutoLayersPerAsset:         r.MaxAutoLayersPerAsset,
 		MaxOpenLiveOrdersPerAsset:     r.MaxOpenLiveOrdersPerAsset,
@@ -1415,7 +1400,6 @@ func liveReadinessTelegramView(r liveReadinessReport) telegramreport.LiveReadine
 		CancelIfPriceAboveDiscountPct: r.CancelIfPriceAboveDiscountZone,
 		ReplaceIfPriceDriftPct:        r.ReplaceIfPriceDriftPct,
 		CancelStaleAfterMinutes:       r.CancelStaleAfterMinutes,
-		LadderProof:                   r.LadderProof,
 		ManagedCoinSummaries:          r.ManagedCoinSummaries,
 	}
 }
@@ -1435,13 +1419,12 @@ func liveReadinessMarkdown(r liveReadinessReport) string {
 	md += fmt.Sprintf("Mode: %s | auto env: %v\n", emptyDefault(r.Mode, "unset"), r.AutoLiveEnv)
 	md += fmt.Sprintf("Config: live=%v real=%v auto_execute=%v manual_confirm=%v proof_only=%v\n", r.LiveEnabled, r.RealTradingEnabled, r.AutoExecute, r.RequireManualConfirm, r.ProofOnly)
 	md += fmt.Sprintf("Optional live-auto cap: enabled=%v max=%.2f USDT\n", r.LiveAutoMode, r.LiveAutoMaxNotional)
-	md += fmt.Sprintf("Legacy auto ladder: enabled=%v max_layers_per_cycle=%d max_open_orders_legacy=%d max_notional=%.2f proof=%s candidates=%d total=%.2f\n", r.AutoLadderEnabled, r.MaxAutoLayersPerCycle, r.MaxOpenLiveOrders, r.AutoLadderMaxNotionalUSDT, r.LadderProof.Status, len(r.LadderProof.Candidates), r.LadderProof.TotalNotional)
 	md += fmt.Sprintf("Managed order engine: enabled=%v max_layers_per_asset=%d max_open_per_asset=%d max_open_total=%d\n", r.OrderManagementEnabled, r.MaxAutoLayersPerAsset, r.MaxOpenLiveOrdersPerAsset, r.MaxOpenLiveOrdersTotal)
 	md += fmt.Sprintf("Managed notional caps: per_order=%.2f per_asset=%.2f total=%.2f USDT\n", r.MaxLiveNotionalPerOrderUSDT, r.MaxLiveNotionalPerAssetUSDT, r.MaxLiveNotionalTotalUSDT)
 	md += fmt.Sprintf("Managed cancel/replace: cancel_plan_inactive=%v cancel_price_above_discount=%.2f%% replace_drift=%.2f%% stale_after=%dm\n", r.CancelIfPlanNotActive, r.CancelIfPriceAboveDiscountZone*100, r.ReplaceIfPriceDriftPct*100, r.CancelStaleAfterMinutes)
 	if r.LiveAutoMode && r.OrderManagementEnabled {
 		md += "Risk sizing: BTC permission controls budget multiplier; hard safety still blocks dangerous actions.\n"
-		md += "Opportunity allocation: live capital follows current setup score, not fixed portfolio percentages.\n"
+		md += "Opportunity allocation: live capital uses OpportunityComposite plus history quality inside ACTIVE_LIMIT guard.\n"
 		md += "Quality multiplier: A/B full, C reduced, NO_SAMPLE/missing probe, D blocked.\n"
 	}
 	md += fmt.Sprintf("Operator halt: %v\n", r.OperatorHalted)
@@ -1667,7 +1650,7 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 	if err != nil {
 		return fmt.Errorf("load open live orders: %w", err)
 	}
-	if len(open) > 0 || cfg.Live.AutoLadderEnabled || cfg.Live.OrderManagementEnabled {
+	if len(open) > 0 || cfg.Live.OrderManagementEnabled {
 		if err := runReconcileLiveOrdersWithNotify(ctx, cfg, db, notifyTelegram && !dryRun); err != nil {
 			return fmt.Errorf("pre-auto reconcile live orders: %w", err)
 		}
@@ -1704,23 +1687,24 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 	}
 	reconcileSafety := liveguard.ReconcileSafety(liveguard.ReconcileResult{Checked: len(open), Orders: open})
 	riskGovernor := liveguard.EvaluateRiskGovernor(cfg, analysis, p, open, positions, dataHealth, reconcileSafety)
-	if dataHealth.Status == liveguard.DataHealthBlock || reconcileSafety.Status == liveguard.ReconcileBlock || riskGovernor.Status == liveguard.RiskGovernorBlock {
+	if dataHealth.Status == liveguard.DataHealthBlock || reconcileSafety.Status == liveguard.ReconcileBlock || riskGovernor.Status == liveguard.RiskGovernorBlock || !cfg.Live.OrderManagementEnabled {
 		result := liveguard.ManagedCycleResult{GeneratedAt: time.Now(), Status: liveguard.ManagedCycleBlocked, PlanState: p.State, Desired: []liveguard.ManagedDesiredOrder{}, DryRun: dryRun, DataHealth: dataHealth, ReconcileSafety: reconcileSafety, RiskGovernor: riskGovernor}
 		result.Reasons = append(result.Reasons, dataHealth.Blockers...)
 		result.Reasons = append(result.Reasons, reconcileSafety.Blockers...)
 		result.Reasons = append(result.Reasons, riskGovernor.Blockers...)
+		if !cfg.Live.OrderManagementEnabled {
+			result.Reasons = append(result.Reasons, "live.order_management_enabled=false")
+		}
 		result.Reasons = uniqueStringsMain(result.Reasons)
 		result.PerCoin = liveguard.BuildManagedCoinSummaries(cfg, p, open, result)
 		result.Summary = result.Status + ": " + strings.Join(result.Reasons, "; ")
 		return writeAutoLiveManagementResult(ctx, cfg, db, result, notifyTelegram && !dryRun)
 	}
 	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
-	var balanceReader liveguard.BalanceReader
 	var filterReader liveguard.FilterReader
 	var placer liveguard.OrderPlacer
 	var canceler liveguard.OrderCanceler
 	if err == nil {
-		balanceReader = client
 		filterReader = client
 		placer = client
 		canceler = client
@@ -1738,119 +1722,35 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 			log.Printf("live balance fetch warning (using config value %.2f): %v", cfg.Portfolio.TotalCapital, berr)
 		}
 	}
-	if cfg.Live.OrderManagementEnabled {
-		// #9: skip OKX InstrumentFilters HTTP call when plan is not ACTIVE_LIMIT
-		// and there are no open orders to cancel. Avoids unnecessary API usage every cycle.
-		noActiveWork := p.State != agent2.StateActiveLimit && len(open) == 0
-		filters := []live.InstrumentFilter{}
-		if filterReader != nil && !noActiveWork {
-			filters, err = filterReader.InstrumentFilters(ctx)
-			if err != nil {
-				return fmt.Errorf("load instrument filters for order management: %w", err)
-			}
-		}
-		var recorder liveguard.ManagedOrderRecorder
-		if !dryRun {
-			recorder = db
-		}
-		result := liveguard.ManageLiveOrdersWithRecorder(ctx, cfg, p, open, positions, filters, placer, canceler, db, recorder, dryRun)
-		result.DataHealth = dataHealth
-		result.ReconcileSafety = reconcileSafety
-		result.RiskGovernor = riskGovernor
-		if !dryRun {
-			if err := persistManagedCycleResult(db, result); err != nil {
-				return err
-			}
-		}
-		if !dryRun && result.Status != liveguard.ManagedCycleBlocked && (len(result.Canceled) > 0 || len(result.Placed) > 0 || len(result.Replaced) > 0) {
-			if err := runReconcileLiveOrders(ctx, cfg, db); err != nil {
-				log.Printf("post-managed auto reconcile warning: %v", err)
-			}
-		}
-		return writeAutoLiveManagementResult(ctx, cfg, db, result, notifyTelegram && !dryRun)
-	}
-	if cfg.Live.AutoLadderEnabled {
-		proof := liveguard.BuildLadderProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
-		result := liveguard.ExecuteAutoLadderProofOrder(ctx, cfg, proof, placer, open, positions, db)
-		for i, order := range result.Orders {
-			if !order.Submitted || i >= len(result.Candidates) {
-				continue
-			}
-			candidate := result.Candidates[i]
-			if err := db.SaveLiveOrderFromParams(order.ClientOrderID, order.OrderID, order.InstID, candidate.Symbol, candidate.Side, candidate.Type, candidate.Price, candidate.Quantity, candidate.Notional, live.StatusLiveOpen); err != nil {
-				return fmt.Errorf("save auto ladder live order: %w", err)
-			}
-			if err := db.SaveLiveOrderEvent(live.OrderStatus{ClientOrderID: order.ClientOrderID, OrderID: order.OrderID, InstID: order.InstID, Status: live.StatusLiveOpen}); err != nil {
-				return fmt.Errorf("save auto ladder live order event: %w", err)
-			}
-		}
-		if result.Status == liveguard.LiveOrderSubmitted {
-			if err := runReconcileLiveOrders(ctx, cfg, db); err != nil {
-				log.Printf("post-auto ladder reconcile warning: %v", err)
-			}
-		}
-		if err := saveJSONFile("reports", "auto_live_ladder_latest.json", result); err != nil {
-			return err
-		}
-		md := autoLiveLadderMarkdown(result)
-		if err := os.MkdirAll("reports", 0700); err != nil {
-			return err
-		}
-		if err := os.WriteFile(filepath.Join("reports", "auto_live_ladder_latest.md"), []byte(md), 0600); err != nil {
-			return err
-		}
-		if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
-			sendTelegram(ctx, cfg, "auto-live-ladder", telegramreport.LiveLadderOrderHumanText(result))
-		}
-		fmt.Println(md)
-		return nil
-	}
-	proof := liveguard.BuildProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
-	result := liveguard.ExecuteAutoProofOrder(ctx, cfg, proof, placer, open, positions, db)
-	if result.Status == liveguard.LiveOrderSubmitted {
-		if err := db.SaveLiveOrderFromParams(
-			result.Order.ClientOrderID,
-			result.Order.OrderID,
-			result.Order.InstID,
-			result.Candidate.Symbol,
-			result.Candidate.Side,
-			result.Candidate.Type,
-			result.Candidate.Price,
-			result.Candidate.Quantity,
-			result.Candidate.Notional,
-			live.StatusLiveOpen,
-		); err != nil {
-			return fmt.Errorf("save auto live order: %w", err)
-		}
-		if err := db.SaveLiveOrderEvent(live.OrderStatus{
-			ClientOrderID: result.Order.ClientOrderID,
-			OrderID:       result.Order.OrderID,
-			InstID:        result.Order.InstID,
-			Status:        live.StatusLiveOpen,
-		}); err != nil {
-			return fmt.Errorf("save auto live order event: %w", err)
+	// Skip OKX InstrumentFilters HTTP call when plan is not ACTIVE_LIMIT
+	// and there are no open orders to cancel. Avoids unnecessary API usage every cycle.
+	noActiveWork := p.State != agent2.StateActiveLimit && len(open) == 0
+	filters := []live.InstrumentFilter{}
+	if filterReader != nil && !noActiveWork {
+		filters, err = filterReader.InstrumentFilters(ctx)
+		if err != nil {
+			return fmt.Errorf("load instrument filters for order management: %w", err)
 		}
 	}
-	if result.Status == liveguard.LiveOrderSubmitted {
+	var recorder liveguard.ManagedOrderRecorder
+	if !dryRun {
+		recorder = db
+	}
+	result := liveguard.ManageLiveOrdersWithRecorder(ctx, cfg, p, open, positions, filters, placer, canceler, db, recorder, dryRun)
+	result.DataHealth = dataHealth
+	result.ReconcileSafety = reconcileSafety
+	result.RiskGovernor = riskGovernor
+	if !dryRun {
+		if err := persistManagedCycleResult(db, result); err != nil {
+			return err
+		}
+	}
+	if !dryRun && result.Status != liveguard.ManagedCycleBlocked && (len(result.Canceled) > 0 || len(result.Placed) > 0 || len(result.Replaced) > 0) {
 		if err := runReconcileLiveOrders(ctx, cfg, db); err != nil {
-			log.Printf("post-auto reconcile warning: %v", err)
+			log.Printf("post-managed auto reconcile warning: %v", err)
 		}
 	}
-	if err := saveJSONFile("reports", "auto_live_order_latest.json", result); err != nil {
-		return err
-	}
-	md := autoLiveOrderMarkdown(result)
-	if err := os.MkdirAll("reports", 0700); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join("reports", "auto_live_order_latest.md"), []byte(md), 0600); err != nil {
-		return err
-	}
-	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
-		sendTelegram(ctx, cfg, "auto-live-order", telegramreport.LiveOrderHumanText(result, true))
-	}
-	fmt.Println(md)
-	return nil
+	return writeAutoLiveManagementResult(ctx, cfg, db, result, notifyTelegram && !dryRun)
 }
 
 func refreshDeterministicPlanForLive(ctx context.Context, cfg config.Config, db *storage.DB) (agent2.Plan, error) {
@@ -2089,17 +1989,11 @@ func writeAutoLiveManagementResult(ctx context.Context, cfg config.Config, db *s
 	if err := saveJSONFile("reports", "auto_live_management_latest.json", result); err != nil {
 		return err
 	}
-	if err := saveJSONFile("reports", "auto_live_ladder_latest.json", result); err != nil {
-		return err
-	}
 	md := autoLiveManagementMarkdown(result)
 	if err := os.MkdirAll("reports", 0700); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join("reports", "auto_live_management_latest.md"), []byte(md), 0600); err != nil {
-		return err
-	}
-	if err := os.WriteFile(filepath.Join("reports", "auto_live_ladder_latest.md"), []byte(md), 0600); err != nil {
 		return err
 	}
 	if err := writeFilterAttributionReportFromManaged(result); err != nil {
@@ -2265,28 +2159,6 @@ func firstNonZero(values ...int) int {
 	return 0
 }
 
-func autoLiveLadderMarkdown(result liveguard.LadderExecutionResult) string {
-	md := fmt.Sprintf("AUTO LIVE LADDER\n\nStatus: %s\nSummary: %s\nProof status: %s\nTotal notional: %.2f\n", result.Status, result.Summary, result.ProofStatus, result.TotalNotional)
-	if len(result.Candidates) > 0 {
-		md += "Candidates:\n"
-		for i, candidate := range result.Candidates {
-			md += fmt.Sprintf("- #%d %s %s limit %.8f qty %.8f notional %.2f\n", i+1, candidate.Side, candidate.Symbol, candidate.Price, candidate.Quantity, candidate.Notional)
-		}
-	}
-	if len(result.Orders) > 0 {
-		md += "Orders:\n"
-		for i, order := range result.Orders {
-			md += fmt.Sprintf("- #%d submitted=%v inst_id=%s order_id=%s client_order_id=%s\n", i+1, order.Submitted, order.InstID, order.OrderID, order.ClientOrderID)
-		}
-	} else {
-		md += "Orders: submitted=0\n"
-	}
-	if len(result.Reasons) > 0 {
-		md += "Reasons: " + fmt.Sprint(result.Reasons) + "\n"
-	}
-	return md
-}
-
 func liveOrderAttemptText(proof liveguard.Proof) string {
 	return fmt.Sprintf("MANUAL LIVE ORDER ATTEMPT\nproof=%s symbol=%s inst_id=%s notional=%.2f\nNo order yet; hard gates still apply.", proof.Status, proof.Candidate.Symbol, proof.Preflight.InstID, proof.Candidate.Notional)
 }
@@ -2396,10 +2268,6 @@ func protectedReportFiles() []string {
 		"live_position_latest.json",
 		"live_reconcile_latest.md",
 		"live_reconcile_latest.json",
-		"auto_live_order_latest.md",
-		"auto_live_order_latest.json",
-		"auto_live_ladder_latest.md",
-		"auto_live_ladder_latest.json",
 		"auto_live_management_latest.md",
 		"auto_live_management_latest.json",
 		"live_supervisor_latest.md",

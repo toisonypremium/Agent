@@ -103,8 +103,5 @@ func isProtectedReportFile(name string, protected map[string]bool) bool {
 	if strings.HasPrefix(name, "live_") && strings.Contains(name, "_latest.") {
 		return true
 	}
-	if strings.HasPrefix(name, "auto_live_order_latest.") {
-		return true
-	}
 	return false
 }

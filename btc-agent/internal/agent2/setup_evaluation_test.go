@@ -24,7 +24,7 @@ func TestSetupEvaluationAccumulatesSoftMisses(t *testing.T) {
 		}
 	}
 	if len(ap.SoftBlockers) < 3 || ap.State != StateWatch || len(ap.SetupGates) == 0 || ap.SetupScore <= 0 {
-		t.Fatalf("expected accumulated soft blockers and setup score: ap=%+v eval=%+v", ap, eval)
+		t.Fatalf("expected accumulated soft blockers and positive setup metric: ap=%+v eval=%+v", ap, eval)
 	}
 }
 

@@ -32,10 +32,6 @@ type LiveReadinessView struct {
 	LiveAutoMaxNotional           float64
 	RequireManualConfirm          bool
 	ProofOnly                     bool
-	AutoLadderEnabled             bool
-	MaxAutoLayers                 int
-	MaxOpenLiveOrders             int
-	AutoLadderMaxNotional         float64
 	OrderManagementEnabled        bool
 	MaxAutoLayersPerAsset         int
 	MaxOpenLiveOrdersPerAsset     int
@@ -47,7 +43,6 @@ type LiveReadinessView struct {
 	CancelIfPriceAboveDiscountPct float64
 	ReplaceIfPriceDriftPct        float64
 	CancelStaleAfterMinutes       int
-	LadderProof                   liveguard.LadderProof
 	DataHealth                    liveguard.DataHealthResult
 	ReconcileSafety               liveguard.ReconcileSafetyResult
 	RiskGovernor                  liveguard.RiskGovernorResult
@@ -398,32 +393,6 @@ func LiveOrderHumanText(result liveguard.ExecutionResult, auto bool) string {
 			b.WriteString("- " + ExplainBlocker(reason) + "\n")
 		}
 	}
-	return trimTelegram(b.String())
-}
-
-func LiveLadderOrderHumanText(result liveguard.LadderExecutionResult) string {
-	var b strings.Builder
-	b.WriteString("🤖 BTC Agent — Rải lệnh tự động\n\n")
-	b.WriteString(fmt.Sprintf("Kết luận: %s\n", ExplainOrderStatus(result.Status)))
-	if result.Status == liveguard.LiveOrderSubmitted {
-		b.WriteString(fmt.Sprintf("Lệnh thật: ĐÃ gửi %d lệnh giới hạn lên OKX.\n", len(result.Orders)))
-	} else {
-		b.WriteString("Lệnh thật: KHÔNG đặt lệnh hoặc chỉ đặt một phần trước khi bị chặn/lỗi.\n")
-	}
-	b.WriteString(fmt.Sprintf("Tổng giá trị dự kiến: %.2f USDT.\n", result.TotalNotional))
-	if len(result.Candidates) > 0 {
-		b.WriteString("Danh sách tầng lệnh:\n")
-		for i, c := range result.Candidates {
-			b.WriteString(fmt.Sprintf("%d) %s %s giá giới hạn %.8f, giá trị %.2f USDT, chỉ tạo thanh khoản=%v, live auto=%v.\n", i+1, c.Side, c.Symbol, c.Price, c.Notional, c.PostOnly, c.LiveAuto))
-		}
-	}
-	if len(result.Reasons) > 0 {
-		b.WriteString("Lý do/cảnh báo:\n")
-		for _, reason := range result.Reasons {
-			b.WriteString("- " + ExplainBlocker(reason) + "\n")
-		}
-	}
-	b.WriteString("Việc cần theo dõi: đối soát lệnh, kiểm tra khớp lệnh, không hợp đồng tương lai, không đòn bẩy, không lệnh thị trường.\n")
 	return trimTelegram(b.String())
 }
 

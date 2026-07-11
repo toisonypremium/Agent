@@ -83,19 +83,6 @@ func TestLiveProofHumanTextLengthAndSafety(t *testing.T) {
 	}
 }
 
-func TestLiveLadderOrderHumanText(t *testing.T) {
-	text := LiveLadderOrderHumanText(liveguard.LadderExecutionResult{
-		Status:        liveguard.LiveOrderSubmitted,
-		Candidates:    []liveguard.CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Price: 100, Notional: 2, PostOnly: true, LiveAuto: true}},
-		TotalNotional: 2,
-	})
-	for _, want := range []string{"Rải lệnh tự động", "ĐÃ gửi", "ETHUSDT", "2.00 USDT"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("missing %q:\n%s", want, text)
-		}
-	}
-}
-
 func TestLiveSupervisorHumanText(t *testing.T) {
 	result := liveguard.SupervisorResult{
 		Status:            liveguard.SupervisorWarn,

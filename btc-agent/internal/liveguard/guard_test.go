@@ -137,28 +137,6 @@ func TestBuildProofReadyLiveAutoModeScalesNotional(t *testing.T) {
 	}
 }
 
-func TestBuildLadderProofWithChecksReady(t *testing.T) {
-	cfg := liveTestConfig(t)
-	cfg.Execution.RealTradingEnabled = true
-	cfg.Live.ProofOnly = false
-	cfg.Live.AutoExecute = true
-	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.LiveAutoMode = true
-	cfg.Live.LiveAutoMaxNotionalUSDT = 2
-	cfg.Live.AutoLadderMaxNotionalUSDT = 4
-	cfg.Live.MaxAutoLayersPerCycle = 2
-	plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 2, Quantity: 0.02}, {Index: 2, Price: 90, Notional: 2, Quantity: 0.022222}}}}}
-	balanceReader := fakeBalanceReader{balances: []live.Balance{{Asset: "USDT", Free: 25}}}
-	filterReader := fakeFilterReader{filters: []live.InstrumentFilter{{Symbol: "ETHUSDT", InstID: "ETH-USDT", TickSize: 0.01, StepSize: 0.0001, MinSize: 0.001, MinNotional: 1}}}
-	got := BuildLadderProofWithChecks(context.Background(), cfg, plan, balanceReader, filterReader)
-	if got.Status != ReadyForManualLiveProofOrder || len(got.Candidates) != 2 {
-		t.Fatalf("unexpected ladder proof: %+v", got)
-	}
-	if got.TotalNotional > 4.000001 {
-		t.Fatalf("total notional not capped: %.2f", got.TotalNotional)
-	}
-}
-
 func liveTestConfig(t *testing.T) config.Config {
 	t.Helper()
 	t.Setenv("OKX_API_KEY", "set")

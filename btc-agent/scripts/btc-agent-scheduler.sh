@@ -54,7 +54,7 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 case "$MODE" in
-  paper|live-proof|live-auto|live-canary-auto) ;;
+  paper|live-proof|live-auto) ;;
   *) fail "invalid BTC_AGENT_MODE=$MODE; use paper|live-proof|live-auto" ;;
 esac
 
@@ -83,7 +83,7 @@ case "$MODE" in
     rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
     run_with_rotating_log "$LOG_DIR/scheduler.log" ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now --dry-run
     ;;
-  live-auto|live-canary-auto)
+  live-auto)
     if [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" != "true" ]; then
       fail "live-auto requires BTC_AGENT_ALLOW_AUTO_LIVE=true"
     fi

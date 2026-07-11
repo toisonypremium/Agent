@@ -22,6 +22,16 @@ func TestRuntimeDoctorRefreshSummaryBlocksAndDedupes(t *testing.T) {
 	}
 }
 
+func TestRuntimeDoctorEnvFileStatusDoesNotStoreSecrets(t *testing.T) {
+	result := RuntimeDoctorResult{
+		EnvFiles: []EnvFileStatus{{Path: "/tmp/btc-agent.env", Exists: true, Mode: "live-auto", AutoLiveAllow: "true", OKXKeyPresent: true, OKXSecretPresent: true, OKXPassphrasePresent: true}},
+	}
+	result.RefreshSummary()
+	if result.EnvFiles[0].Mode != "live-auto" || !result.EnvFiles[0].OKXKeyPresent {
+		t.Fatalf("unexpected env file status: %#v", result.EnvFiles[0])
+	}
+}
+
 func TestRuntimeDoctorSummaryDoesNotIncludeSecretValues(t *testing.T) {
 	result := RuntimeDoctorResult{
 		AutoLiveEnv:          true,

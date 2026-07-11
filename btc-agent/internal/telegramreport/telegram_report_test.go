@@ -39,12 +39,16 @@ func TestLiveReadinessHumanTextExplainsNotReady(t *testing.T) {
 			Status:  liveguard.NotReadyNoDeterministicOrder,
 			Reasons: []string{"no deterministic ACTIVE_LIMIT layer available"},
 		},
-		AutoLiveBlockers: []string{"operator halt active"},
+		AutoLiveBlockers:     []string{"operator halt active"},
+		ManagedCoinSummaries: []liveguard.ManagedCoinSummary{{Symbol: "ETHUSDT", State: agent2.StateScout, WhyNoOrder: []string{"BTC permission WATCH", "reward/risk thấp"}, NextTrigger: "Chờ BTC chuyển ALLOWED."}},
 	})
 	for _, want := range []string{
 		"lý do đang chặn",
 		"Khóa vận hành đang bật",
 		"Biến môi trường OKX: đủ",
+		"Giới hạn live-auto tùy chọn",
+		"Vì sao chưa tự đặt lệnh",
+		"ETHUSDT",
 	} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("text missing %q:\n%s", want, text)
@@ -82,7 +86,7 @@ func TestLiveProofHumanTextLengthAndSafety(t *testing.T) {
 func TestLiveLadderOrderHumanText(t *testing.T) {
 	text := LiveLadderOrderHumanText(liveguard.LadderExecutionResult{
 		Status:        liveguard.LiveOrderSubmitted,
-		Candidates:    []liveguard.CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Price: 100, Notional: 2, PostOnly: true, Canary: true}},
+		Candidates:    []liveguard.CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Price: 100, Notional: 2, PostOnly: true, LiveAuto: true}},
 		TotalNotional: 2,
 	})
 	for _, want := range []string{"Rải lệnh tự động", "ĐÃ gửi", "ETHUSDT", "2.00 USDT"} {

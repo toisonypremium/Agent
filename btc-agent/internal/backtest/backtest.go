@@ -54,6 +54,7 @@ type Result struct {
 	NearMissLayerAudit            NearMissLayerAuditResult      `json:"near_miss_layer_audit"`
 	ChecklistPassCountAudit       ChecklistPassCountAuditResult `json:"checklist_pass_count_audit"`
 	Agent2OpportunityAudit        Agent2OpportunityAuditResult  `json:"agent2_opportunity_audit"`
+	FilterValueAudit              FilterValueAuditResult        `json:"filter_value_audit"`
 	LayerAudit                    LayerAuditResult              `json:"layer_audit"`
 	ExitAudit                     ExitAuditResult               `json:"exit_audit"`
 	WalkForwardReport             WalkForwardReport             `json:"walk_forward_report"`
@@ -576,7 +577,25 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("18. Agent 2 Invalidation/Layer Audit\n")
+	b.WriteString("18. Filter Value / False-Negative Audit\n")
+	if !r.FilterValueAudit.Enabled {
+		b.WriteString("- Filter value audit: skipped / not enough aligned candles\n\n")
+	} else {
+		b.WriteString("- " + r.FilterValueAudit.Summary + "\n")
+		b.WriteString("- Research-only: measures blocked vs passed forward returns; no production rule changed.\n")
+		b.WriteString("| Filter | Samples | Blocked | Passed | 7D blocked avg/win | 7D passed avg/win | Worst DD | False neg | Verdict |\n")
+		b.WriteString("|---|---:|---:|---:|---:|---:|---:|---:|---|\n")
+		limit := len(r.FilterValueAudit.Rows)
+		if limit > 18 {
+			limit = 18
+		}
+		for _, row := range r.FilterValueAudit.Rows[:limit] {
+			b.WriteString(fmt.Sprintf("| %s | %d | %d | %d | %s | %s | %.2f%% | %.1f%% | %s |\n", row.Filter, row.Samples, row.Blocked, row.Passed, filterValueAuditBlockedCell(row, 7), filterValueAuditPassedCell(row, 7), row.WorstDrawdown[7]*100, row.FalseNegativeRate*100, row.Verdict))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("19. Agent 2 Invalidation/Layer Audit\n")
 	if !r.LayerAudit.Enabled {
 		b.WriteString("- Layer audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -593,7 +612,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("19. Agent 2 Exit / Take-Profit Audit\n")
+	b.WriteString("20. Agent 2 Exit / Take-Profit Audit\n")
 	if !r.ExitAudit.Enabled {
 		b.WriteString("- Exit audit: skipped / not enough asset candles\n\n")
 	} else {
@@ -610,7 +629,7 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("20. Walk-Forward Split Audit\n")
+	b.WriteString("21. Walk-Forward Split Audit\n")
 	if !r.WalkForwardReport.Enabled {
 		b.WriteString("- Walk-forward audit: skipped / not enough local history\n\n")
 	} else {
@@ -624,12 +643,12 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("21. Strategy Intelligence Summary\n")
+	b.WriteString("22. Strategy Intelligence Summary\n")
 	b.WriteString("- Research only; no live config changed; no order authority changed. WATCH/SCOUT/ARMED must not create orders.\n")
 	b.WriteString(strategyIntelligenceSummary(r))
 	b.WriteString("\n")
 
-	b.WriteString("22. Kết luận\n")
+	b.WriteString("23. Kết luận\n")
 	b.WriteString("- " + r.Summary + "\n")
 	b.WriteString("- Đây là audit rule bằng dữ liệu quá khứ, không phải cam kết lợi nhuận. Mẫu ít thì chỉ dùng để debug rule. Agent 2 simulation chưa mô hình take-profit.\n")
 	return b.String()
@@ -761,6 +780,20 @@ func thresholdCalibrationHorizonCell(row ThresholdProfileRow, horizon int) strin
 		return "n/a"
 	}
 	return fmt.Sprintf("%.2f%% / %.1f%% / %.2f%%", row.AvgReturn[horizon]*100, row.WinRate[horizon]*100, row.WorstDrawdown[horizon]*100)
+}
+
+func filterValueAuditBlockedCell(row FilterValueAuditRow, horizon int) string {
+	if row.BlockedAvgForwardReturn == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.1f%%", row.BlockedAvgForwardReturn[horizon]*100, row.BlockedWinRate[horizon]*100)
+}
+
+func filterValueAuditPassedCell(row FilterValueAuditRow, horizon int) string {
+	if row.PassedAvgForwardReturn == nil {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f%% / %.1f%%", row.PassedAvgForwardReturn[horizon]*100, row.PassedWinRate[horizon]*100)
 }
 
 func limitStringList(items []string, limit int) []string {

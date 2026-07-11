@@ -62,6 +62,22 @@ func TestCheckDataHealthOKValidOpenOrder(t *testing.T) {
 	}
 }
 
+func TestCheckDataHealthUsesCurrentDailyOpenWhenCloseIsFuture(t *testing.T) {
+	now := time.Unix(1700000000, 0)
+	cfg := healthConfig()
+	analysis := agent1.MarketAnalysis{Timestamp: now.Add(-time.Hour), ActionPermission: agent1.Allowed}
+	plan := agent2.Plan{Timestamp: now.Add(-time.Hour), State: agent2.StateWatch}
+	candles := healthCandles(now)
+	candles[len(candles)-1].OpenTime = now.Add(-2 * time.Hour)
+	candles[len(candles)-1].CloseTime = now.Add(22 * time.Hour)
+	assets := map[string][]market.Candle{"ETHUSDT": candles}
+
+	got := CheckDataHealth(cfg, analysis, plan, assets, nil, nil, now)
+	if got.Status != DataHealthOK {
+		t.Fatalf("expected DATA_HEALTH_OK using current daily open for in-progress candle, got status=%s blockers=%v warnings=%v", got.Status, got.Blockers, got.Warnings)
+	}
+}
+
 func healthConfig() config.Config {
 	var cfg config.Config
 	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}

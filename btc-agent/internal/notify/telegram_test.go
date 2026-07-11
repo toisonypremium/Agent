@@ -150,6 +150,30 @@ func TestTelegramEditNon2XXDoesNotLeakToken(t *testing.T) {
 	}
 }
 
+func TestTelegramGetUpdatesParsesReadOnlyMessages(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/getUpdates") {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("offset"); got != "42" {
+			t.Fatalf("offset=%q want 42", got)
+		}
+		_, _ = w.Write([]byte(`{"ok":true,"result":[{"update_id":42,"message":{"message_id":7,"text":"/status","chat":{"id":123},"from":{"id":123,"username":"u"}}}]}`))
+	}))
+	defer srv.Close()
+	oldBase := telegramAPIBaseURL
+	telegramAPIBaseURL = srv.URL
+	defer func() { telegramAPIBaseURL = oldBase }()
+
+	updates, err := TelegramGetUpdates(context.Background(), "token", 42)
+	if err != nil {
+		t.Fatalf("get updates: %v", err)
+	}
+	if len(updates) != 1 || updates[0].UpdateID != 42 || updates[0].Message.Text != "/status" || updates[0].Message.Chat.ID != 123 {
+		t.Fatalf("unexpected updates: %+v", updates)
+	}
+}
+
 func TestTelegramChunksPreferLineBoundaries(t *testing.T) {
 	text := strings.Repeat("a", telegramMaxMessageLen-8) + "\n" + strings.Repeat("b", 20)
 	chunks := telegramChunks(text)

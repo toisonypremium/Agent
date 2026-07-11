@@ -49,8 +49,8 @@ func TestBuildStrategyIntelligenceReportsSpecificGaps(t *testing.T) {
 func TestBuildResearchSizingSuggestionCappedAndNonActiveNoAuthority(t *testing.T) {
 	cfg := testConfig()
 	cfg.Live.Enabled = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 5
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 5
 	cfg.Live.MaxOrderNotionalUSDT = 10
 	asset := AssetPlan{Symbol: "ETHUSDT", State: StateScout, SetupScore: 0.80, LiquidityQuality: liquidity.Quality{Enabled: true, Score: 75, Grade: liquidity.GradeB, Pass: true}}
 	got := BuildResearchSizingSuggestion(cfg, asset, agent1.Armed)
@@ -58,7 +58,7 @@ func TestBuildResearchSizingSuggestionCappedAndNonActiveNoAuthority(t *testing.T
 		t.Fatalf("sizing must be research-only with unchanged authority: %+v", got)
 	}
 	if got.CapUSDT > 5 {
-		t.Fatalf("cap must respect live canary context when live enabled: %+v", got)
+		t.Fatalf("cap must respect live auto context when live enabled: %+v", got)
 	}
 	if got.SuggestedNotionalUSDT > got.CapUSDT {
 		t.Fatalf("suggestion exceeds cap: %+v", got)

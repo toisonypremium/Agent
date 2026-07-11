@@ -54,8 +54,8 @@ if [ -f "$ENV_FILE" ]; then
 fi
 
 case "$MODE" in
-  paper|live-proof|live-canary-auto) ;;
-  *) fail "invalid BTC_AGENT_MODE=$MODE; use paper|live-proof|live-canary-auto" ;;
+  paper|live-proof|live-auto|live-canary-auto) ;;
+  *) fail "invalid BTC_AGENT_MODE=$MODE; use paper|live-proof|live-auto" ;;
 esac
 
 if [ -f "$LOCK_FILE" ]; then
@@ -83,9 +83,9 @@ case "$MODE" in
     rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
     run_with_rotating_log "$LOG_DIR/scheduler.log" ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now --dry-run
     ;;
-  live-canary-auto)
+  live-auto|live-canary-auto)
     if [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" != "true" ]; then
-      fail "live-canary-auto requires BTC_AGENT_ALLOW_AUTO_LIVE=true"
+      fail "live-auto requires BTC_AGENT_ALLOW_AUTO_LIVE=true"
     fi
     if ./bin/btc-agent live-doctor --config "$CONFIG_PATH" >> "$LOG_DIR/live-doctor.log" 2>&1; then
       if grep -q 'Status: DOCTOR_BLOCK' reports/live_doctor_latest.md 2>/dev/null; then

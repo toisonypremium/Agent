@@ -16,7 +16,7 @@
 - Current local config, redacted:
   - `app.mode=paper` (`config.yaml:2`).
   - Telegram enabled with token/chat redacted (`config.yaml:75-80`).
-  - `live.enabled=true`, OKX env names redacted, post-only/manual/proof/canary settings present (`config.yaml:103-138`).
+  - `live.enabled=true`, OKX env names redacted, post-only/manual/proof/live-auto settings present (`config.yaml:103-138`).
   - `execution.paper_trading=true`, `execution.real_trading_enabled=false` (`config.yaml:139-142`).
   - `live.auto_execute=false`, `live.auto_ladder_enabled=false`, `live.order_management_enabled=false`, `live.supervisor_enabled=false`, `live.proof_only=true` (`config.yaml:113-138`).
 - Verification commands run:
@@ -46,14 +46,14 @@
 - Whether real order can be placed now:
   - No. Local config blocks it: `execution.real_trading_enabled=false`, `live.proof_only=true`, `live.require_manual_confirm=true`, `live.auto_execute=false`, `live.order_management_enabled=false`, and no deterministic `ACTIVE_LIMIT` exists.
   - Manual execution additionally requires exact confirm phrase and inactive operator halt in `manualOrderBlockers` (`internal/liveguard/executor.go:151-213`).
-  - Auto execution additionally requires `BTC_AGENT_ALLOW_AUTO_LIVE=true`, `live.auto_execute=true`, `live.proof_only=false`, `execution.real_trading_enabled=true`, canary mode, no blockers (`main.go:800-823`, `internal/liveguard/executor.go:265-333`).
+  - Auto execution additionally requires `BTC_AGENT_ALLOW_AUTO_LIVE=true`, `live.auto_execute=true`, `live.proof_only=false`, `execution.real_trading_enabled=true`, live-auto mode, no blockers (`main.go:800-823`, `internal/liveguard/executor.go:265-333`).
 
 ## 2. Strengths
 
 - Safety-first config validation:
   - `Config.Validate` blocks unsafe risk flags if futures/leverage/market-order protections are off (`internal/config/config.go:317-319`).
   - Real trading cannot validate unless `live.enabled=true` and `live.proof_only=false` (`internal/config/config.go:204-207`).
-  - Auto execution requires manual confirm off and canary mode on (`internal/config/config.go:208-214`).
+  - Auto execution requires manual confirm off and live-auto mode on (`internal/config/config.go:208-214`).
   - Manual live execution requires manual confirm if auto execute is not enabled (`internal/config/config.go:215-217`).
 - Deterministic state authority:
   - Agent2 states are explicit: `NO_TRADE`, `WATCH`, `SCOUT`, `ARMED`, `ACTIVE_LIMIT` (`internal/agent2/planner.go:15-23`).
@@ -72,7 +72,7 @@
   - `runLiveProof` writes reports and Telegram, then prints `No real order was placed` (`main.go:825-873`).
 - OKX safety basics are correct:
   - Spot order uses `tdMode: cash` and `ordType: post_only` when post-only set (`internal/exchange/live/okx.go:78-93`).
-  - Instrument filters, tick/step rounding, min size, min notional, canary/max notional enforced in preflight (`internal/liveguard/preflight.go:31-95`).
+  - Instrument filters, tick/step rounding, min size, min notional, live-auto/max notional enforced in preflight (`internal/liveguard/preflight.go:31-95`).
   - OKX response/body redaction truncates and replaces secrets (`internal/exchange/live/okx.go:375-386`, `internal/liveguard/executor.go:224-250`).
 - Operator halt is fail-closed:
   - SQLite migration defaults `operator_settings halted=true` (`internal/storage/sqlite.go:40-54`).
@@ -109,7 +109,7 @@
   - Manual order flow can create OKX client before blocking on confirm/proof-only/real-trading flags (`main.go:1381-1396`). Safety still blocks before placing, but it can touch credential env unnecessarily.
 - Allocation logic:
   - Planner budget uses static portfolio allocation and max deployment (`internal/agent2/planner.go:259-263`), while live manager later says opportunity allocation follows setup score (`main.go:1249-1252`). This split is hard to reason about.
-  - `desiredLiquidityNotional` prioritizes live cap/canary cap over portfolio budget (`internal/agent2/planner.go:421-435`); useful for small live, but can understate liquidity needs relative to paper/backtest budget.
+  - `desiredLiquidityNotional` prioritizes live cap/live-auto cap over portfolio budget (`internal/agent2/planner.go:421-435`); useful for small live, but can understate liquidity needs relative to paper/backtest budget.
 - Order lifecycle:
   - Paper orders are persisted as `OPEN` but no normal paper lifecycle updates to FILLED/EXPIRED/CANCELLED in `OpenPaperOrders`/`SaveOrders` path (`internal/storage/sqlite.go:195-223`). Backtest sim has lifecycle, production paper storage does not.
   - `OrdersFromPlan` ID uses timestamp seconds and symbol/layer (`internal/agent2/paper_trading.go:19-30`). Multiple plan runs within one second can produce same ID and `INSERT OR REPLACE` old rows (`internal/storage/sqlite.go:195-203`).
@@ -192,7 +192,7 @@
 - Function: docs.
 - Exact issue: top safety says `No real order executor in phase 1`, but code has manual execution, auto proof, auto ladder, managed live order, cancel-all commands.
 - Risk: operator misunderstands current code capabilities.
-- Suggested fix: update top safety to say real execution code exists but is disabled by default and fail-closed behind proof/manual/canary/env/operator gates.
+- Suggested fix: update top safety to say real execution code exists but is disabled by default and fail-closed behind proof/manual/live-auto/env/operator gates.
 
 ## 5. Upgrade Proposal
 
@@ -250,7 +250,7 @@ Add/standardize live order state machine:
   - `live.auto_execute=true` for auto manager.
   - `live.order_management_enabled=true`.
   - `BTC_AGENT_ALLOW_AUTO_LIVE=true`.
-  - `live.canary_mode=true` during rollout.
+  - `live.live_auto_mode=true` during rollout.
   - operator halt inactive.
 - Spot limit only, no futures, no leverage.
 - Pre-reserve client order IDs in DB before network submit; update to SUBMITTED/REJECTED after response.
@@ -272,7 +272,7 @@ Improve decision quality without giving AI authority.
   - Convert Opportunity Audit into per-symbol closest-unlock report with threshold gap numbers.
   - Add exit planner for take-profit/time-stop research first; no live TP until tested.
 - Adaptive sizing:
-  - Keep static max caps, but compute suggested paper/live canary notional from setup score, liquidity, regime, history quality.
+  - Keep static max caps, but compute suggested paper/live auto notional from setup score, liquidity, regime, history quality.
   - Never increase above configured caps.
 
 ### Phase 5: Monitoring + Telegram
@@ -359,7 +359,7 @@ Workdir: /data/data/com.termux/files/home/.openclaw/workspace/btc-agent
 
 Design and implement disabled-by-default live order state machine. Do not enable real trading in config. Do not place real orders. Use fake OKX tests only.
 
-Add states PLANNED, SUBMITTED, PARTIAL_FILL, FILLED, CANCELLED, EXPIRED, REJECTED. Pre-reserve client order IDs in SQLite before network submit. Make submit/reconcile/cancel idempotent. Preserve spot-limit-only, post-only, cash mode, no futures, no leverage. Keep gates: real_trading_enabled, proof_only=false, auto_execute, order_management_enabled, BTC_AGENT_ALLOW_AUTO_LIVE, canary_mode, operator halt inactive.
+Add states PLANNED, SUBMITTED, PARTIAL_FILL, FILLED, CANCELLED, EXPIRED, REJECTED. Pre-reserve client order IDs in SQLite before network submit. Make submit/reconcile/cancel idempotent. Preserve spot-limit-only, post-only, cash mode, no futures, no leverage. Keep gates: real_trading_enabled, proof_only=false, auto_execute, order_management_enabled, BTC_AGENT_ALLOW_AUTO_LIVE, live_auto_mode, operator halt inactive.
 
 Add fake OKX tests for submit success, reject, partial fill, full fill, cancel, duplicate retry after crash. Run full verification. No real exchange order.
 ```

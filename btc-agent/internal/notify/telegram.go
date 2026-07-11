@@ -24,6 +24,22 @@ type SendResult struct {
 	MessageID int
 }
 
+type TelegramUpdate struct {
+	UpdateID int `json:"update_id"`
+	Message  struct {
+		MessageID int    `json:"message_id"`
+		Date      int64  `json:"date"`
+		Text      string `json:"text"`
+		Chat      struct {
+			ID int64 `json:"id"`
+		} `json:"chat"`
+		From struct {
+			ID       int64  `json:"id"`
+			Username string `json:"username"`
+		} `json:"from"`
+	} `json:"message"`
+}
+
 // Telegram sends a new message and returns the message_id.
 func Telegram(ctx context.Context, token, chatID, text string) error {
 	_, err := TelegramSend(ctx, token, chatID, text)
@@ -159,6 +175,35 @@ func telegramRedact(text, token string) string {
 		text = text[:500] + "..."
 	}
 	return text
+}
+
+func TelegramGetUpdates(ctx context.Context, token string, offset int) ([]TelegramUpdate, error) {
+	if strings.TrimSpace(token) == "" {
+		return nil, fmt.Errorf("%w: missing telegram token", ErrTelegramConfig)
+	}
+	url := fmt.Sprintf("%s/bot%s/getUpdates?timeout=0", telegramAPIBaseURL, token)
+	if offset > 0 {
+		url += fmt.Sprintf("&offset=%d", offset)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, data, err := doWithRetry(req, token)
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("telegram getUpdates http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
+	}
+	var raw struct {
+		OK     bool             `json:"ok"`
+		Result []TelegramUpdate `json:"result"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, err
+	}
+	return raw.Result, nil
 }
 
 // TelegramDelete deletes a previously sent message. Errors are non-fatal (message may already be gone).

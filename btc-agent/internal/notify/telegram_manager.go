@@ -29,12 +29,12 @@ func (RealTelegramAPI) Delete(ctx context.Context, token, chatID string, message
 }
 
 type TelegramManager struct {
-	ReportDir            string
-	API                  TelegramAPI
-	RateLimitWindow      time.Duration
-	LastSentCache        map[string]time.Time
-	LastTextCache        map[string]string
-	mu                   sync.Mutex
+	ReportDir       string
+	API             TelegramAPI
+	RateLimitWindow time.Duration
+	LastSentCache   map[string]time.Time
+	LastTextCache   map[string]string
+	mu              sync.Mutex
 }
 
 func NewTelegramManager(reportDir string, api TelegramAPI) *TelegramManager {

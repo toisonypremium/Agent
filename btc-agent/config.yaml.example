@@ -111,8 +111,8 @@ live:
   require_post_only: true
   require_manual_confirm: true
   auto_execute: false
-  canary_mode: false
-  canary_max_notional_usdt: 2.0
+  live_auto_mode: false
+  live_auto_max_notional_usdt: 2.0
   supervisor_enabled: false
   management_interval_minutes: 15
   heartbeat_interval_minutes: 360

@@ -17,6 +17,25 @@ import (
 	"btc-agent/internal/storage"
 )
 
+func TestEnvFileConflictWarningsDetectsModeAndAllowMismatch(t *testing.T) {
+	files := []liveguard.EnvFileStatus{
+		{Path: filepath.Join(t.TempDir(), "btc-agent.env"), Exists: true, Mode: "live-auto", AutoLiveAllow: "true", OKXKeyPresent: true, OKXSecretPresent: true, OKXPassphrasePresent: true},
+		{Path: filepath.Join(t.TempDir(), ".env"), Exists: true, Mode: "paper", AutoLiveAllow: "false", OKXKeyPresent: true, OKXSecretPresent: true, OKXPassphrasePresent: true},
+	}
+	warnings := envFileConflictWarnings(files)
+	joined := strings.Join(warnings, "\n")
+	for _, want := range []string{"BTC_AGENT_MODE differs", "BTC_AGENT_ALLOW_AUTO_LIVE differs"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in warnings: %v", want, warnings)
+		}
+	}
+	for _, leak := range []string{"OKX_API_KEY=", "OKX_API_SECRET=", "OKX_API_PASSPHRASE="} {
+		if strings.Contains(joined, leak) {
+			t.Fatalf("warning leaked secret-like assignment %q: %s", leak, joined)
+		}
+	}
+}
+
 func TestPersistManagedCycleResultKeepsDesiredExpiry(t *testing.T) {
 	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
 	if err != nil {

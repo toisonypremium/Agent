@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange/live"
@@ -92,23 +93,26 @@ type ManagedCycleResult struct {
 }
 
 type ManagedCoinSummary struct {
-	Symbol          string                 `json:"symbol"`
-	State           agent2.State           `json:"state"`
-	ReadinessScore  float64                `json:"readiness_score,omitempty"`
-	DesiredLayers   int                    `json:"desired_layers"`
-	OpenOrders      int                    `json:"open_orders"`
-	Kept            int                    `json:"kept"`
-	Canceled        int                    `json:"canceled"`
-	Replaced        int                    `json:"replaced"`
-	Placed          int                    `json:"placed"`
-	Blocked         int                    `json:"blocked"`
-	PendingNotional float64                `json:"pending_notional"`
-	Actions         []ManagedOrderDecision `json:"actions,omitempty"`
-	Reasons         []string               `json:"reasons,omitempty"`
-	WhyNoOrder      []string               `json:"why_no_order,omitempty"`
-	HardBlockers    []string               `json:"hard_blockers,omitempty"`
-	SoftBlockers    []string               `json:"soft_blockers,omitempty"`
-	NextTrigger     string                 `json:"next_trigger,omitempty"`
+	Symbol              string                   `json:"symbol"`
+	State               agent2.State             `json:"state"`
+	ReadinessScore      float64                  `json:"readiness_score,omitempty"`
+	DesiredLayers       int                      `json:"desired_layers"`
+	OpenOrders          int                      `json:"open_orders"`
+	Kept                int                      `json:"kept"`
+	Canceled            int                      `json:"canceled"`
+	Replaced            int                      `json:"replaced"`
+	Placed              int                      `json:"placed"`
+	Blocked             int                      `json:"blocked"`
+	PendingNotional     float64                  `json:"pending_notional"`
+	Actions             []ManagedOrderDecision   `json:"actions,omitempty"`
+	Reasons             []string                 `json:"reasons,omitempty"`
+	WhyNoOrder          []string                 `json:"why_no_order,omitempty"`
+	HardBlockers        []string                 `json:"hard_blockers,omitempty"`
+	SoftBlockers        []string                 `json:"soft_blockers,omitempty"`
+	NextTrigger         string                   `json:"next_trigger,omitempty"`
+	FilterAttribution   agent2.FilterAttribution `json:"filter_attribution,omitempty"`
+	TopFilterBlocker    string                   `json:"top_filter_blocker,omitempty"`
+	TopFilterBlockerKey string                   `json:"top_filter_blocker_key,omitempty"`
 }
 
 func ManageLiveOrders(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader) ManagedCycleResult {
@@ -230,6 +234,13 @@ func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan a
 			continue
 		}
 		decision := ManagedOrderDecision{Action: "place", Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Desired: desiredOrder, Reason: "missing active accumulation layer order"}
+		mmGate := EvaluateMMExecutionGate(ctx, cfg, desiredOrder, orderBookProviderFromPlacer(placer))
+		if !mmGate.Pass {
+			decision.Action = "block"
+			decision.Reason = "MM execution gate blocked: " + strings.Join(mmGate.Reasons, "; ")
+			result.Blocked = append(result.Blocked, decision)
+			continue
+		}
 		if dryRun {
 			decision.Action = "would_place"
 			result.Placed = append(result.Placed, decision)
@@ -238,7 +249,7 @@ func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan a
 			openNotionalTotal += desiredOrder.Notional
 			continue
 		}
-		clientID := clientOrderID(desiredOrder.Symbol, cfg.Live.CanaryMode)
+		clientID := clientOrderID(desiredOrder.Symbol)
 		if recorder != nil {
 			if err := recorder.ReserveManagedLiveOrder(clientID, desiredOrder, decision.Reason); err != nil {
 				decision.Error = err.Error()
@@ -303,6 +314,7 @@ func BuildManagedCoinSummaries(cfg config.Config, plan agent2.Plan, openOrders [
 	hardBySymbol := map[string][]string{}
 	softBySymbol := map[string][]string{}
 	nextBySymbol := map[string]string{}
+	attributionBySymbol := map[string]agent2.FilterAttribution{}
 	for _, asset := range plan.Assets {
 		symbol := strings.ToUpper(asset.Symbol)
 		addSymbol(symbol)
@@ -311,6 +323,7 @@ func BuildManagedCoinSummaries(cfg config.Config, plan agent2.Plan, openOrders [
 		hardBySymbol[symbol] = appendUniqueStrings(hardBySymbol[symbol], asset.HardBlockers...)
 		softBySymbol[symbol] = appendUniqueStrings(softBySymbol[symbol], asset.SoftBlockers...)
 		nextBySymbol[symbol] = asset.NextTrigger
+		attributionBySymbol[symbol] = agent2.BuildFilterAttribution(asset)
 	}
 	watchBySymbol := map[string]agent2.WatchCandidate{}
 	for _, candidate := range plan.Watchlist.Candidates {
@@ -436,9 +449,20 @@ func BuildManagedCoinSummaries(cfg config.Config, plan agent2.Plan, openOrders [
 				s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, reason)
 			}
 			if len(s.WhyNoOrder) == 0 {
-				s.WhyNoOrder = append(s.WhyNoOrder, "chưa có ACTIVE_LIMIT/ARMED layer hợp lệ cho coin này")
+				s.WhyNoOrder = append(s.WhyNoOrder, "chưa có ACTIVE_LIMIT layer hợp lệ cho coin này")
 			}
 		}
+		if attr, ok := attributionBySymbol[symbol]; ok {
+			s.FilterAttribution = attr
+			s.TopFilterBlocker = attr.TopBlocker
+			s.TopFilterBlockerKey = attr.TopBlockerKey
+		}
+		if s.DesiredLayers > 0 && s.Placed == 0 && s.Kept == 0 && s.Blocked > 0 {
+			s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, s.HardBlockers...)
+			s.WhyNoOrder = appendUniqueStrings(s.WhyNoOrder, s.Reasons...)
+		}
+		s.WhyNoOrder = agent2.CompactReasons(s.WhyNoOrder, 6)
+		s.Reasons = agent2.CompactReasons(s.Reasons, 8)
 	}
 	order := map[string]int{}
 	for i, symbol := range cfg.Data.Symbols.Assets {
@@ -521,7 +545,7 @@ func appendUniqueStrings(items []string, values ...string) []string {
 func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []live.InstrumentFilter, positions []live.LivePosition, openOrders []live.OrderStatus) ([]ManagedDesiredOrder, []ManagedOrderDecision) {
 	desired := []ManagedDesiredOrder{}
 	blocked := []ManagedOrderDecision{}
-	if plan.State != agent2.StateActiveLimit && plan.State != agent2.StateArmed {
+	if plan.State != agent2.StateActiveLimit || plan.ActionPermission != agent1.Allowed {
 		return desired, blocked
 	}
 	qualityBySymbol := loadHistoryQualityScores("reports/live_manager_history_latest.json")
@@ -529,7 +553,7 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 	totalDesired := 0.0
 	for _, asset := range plan.Assets {
 		symbol := strings.ToUpper(asset.Symbol)
-		if asset.State != agent2.StateActiveLimit && asset.State != agent2.StateArmed {
+		if asset.State != agent2.StateActiveLimit {
 			continue
 		}
 		allocation := allocationBySymbol[symbol]
@@ -541,16 +565,13 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 		if allocation.Tier == OpportunityBlock || allocation.MaxLayers <= 0 || allocation.BudgetUSDT <= 0 {
 			reason := "live allocation blocked: " + allocation.Reason
 			if strings.EqualFold(allocation.QualityGrade, "D") {
-				reason = "canary quality filter blocked D-grade coin"
+				reason = "live quality filter blocked D-grade coin"
 			}
 			blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: reason})
 			continue
 		}
 		assetRemaining := allocation.BudgetUSDT
 		layers := asset.Layers
-		if asset.State == agent2.StateArmed && len(layers) > 1 {
-			layers = layers[:1]
-		}
 		if len(layers) > allocation.MaxLayers {
 			layers = layers[:allocation.MaxLayers]
 		}
@@ -635,7 +656,7 @@ func loadHistoryQualityScores(path string) map[string]historyQualityScore {
 }
 
 func shouldCancelOpenOrder(cfg config.Config, plan agent2.Plan, order live.OrderStatus, desired ManagedDesiredOrder) bool {
-	if cfg.Live.CancelIfPlanNotActive && plan.State != agent2.StateActiveLimit && plan.State != agent2.StateArmed {
+	if cfg.Live.CancelIfPlanNotActive && plan.State != agent2.StateActiveLimit {
 		return true
 	}
 	if desired.Symbol == "" {
@@ -654,8 +675,8 @@ func shouldCancelOpenOrder(cfg config.Config, plan agent2.Plan, order live.Order
 }
 
 func cancelReason(cfg config.Config, plan agent2.Plan, order live.OrderStatus, foundDesired bool) string {
-	if cfg.Live.CancelIfPlanNotActive && plan.State != agent2.StateActiveLimit && plan.State != agent2.StateArmed {
-		return "plan no longer ACTIVE_LIMIT/ARMED"
+	if cfg.Live.CancelIfPlanNotActive && plan.State != agent2.StateActiveLimit {
+		return "plan no longer ACTIVE_LIMIT"
 	}
 	if !foundDesired {
 		return "order no longer matches active asset/layer"

@@ -18,7 +18,6 @@ import (
 	"btc-agent/internal/aiagent"
 	"btc-agent/internal/aieval"
 	"btc-agent/internal/backtest"
-	"btc-agent/internal/canarydrill"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/exchange/live"
@@ -140,17 +139,19 @@ func run(ctx context.Context, args []string) error {
 		return runReconcileLiveOrders(ctx, cfg, db)
 	case "live-positions":
 		return runLivePositions(cfg, db)
+	case "telegram-commands":
+		return runTelegramCommands(ctx, cfg, db)
+	case "scheduler-heartbeat-check":
+		minutes, err := intArgValue(args, "--max-age-minutes")
+		if err != nil {
+			return err
+		}
+		return runSchedulerHeartbeatCheck(ctx, cfg, time.Duration(minutes)*time.Minute)
 	case "live-supervisor":
 		_, err := runLiveSupervisorCycle(ctx, cfg, db, &liveSupervisorState{}, hasFlag(args, "--dry-run"))
 		return err
 	case "maintenance":
 		return runMaintenance(cfg, db)
-	case "canary-drill":
-		cycles, err := intArgValue(args, "--cycles")
-		if err != nil {
-			return err
-		}
-		return runCanaryDrill(cfg, cycles)
 	case "scheduler":
 		return runScheduler(ctx, cfg, db, hasFlag(args, "--run-now"), hasFlag(args, "--dry-run"))
 	default:
@@ -159,7 +160,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|maintenance|canary-drill|status|scheduler> --config config.yaml [--run-now|--dry-run|--cycles <n>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|export-training|eval-ai|live-proof|live-readiness|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
 }
 
 func fetch(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -402,7 +403,7 @@ func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, 
 		if err := requireAutoLiveRuntime(cfg); err != nil {
 			log.Printf("Automatic live order blocked: %v", err)
 		} else {
-			log.Println("Active limit state reached in daily run (supervisor disabled). Executing automatic canary live order placement...")
+			log.Println("Active limit state reached in daily run (supervisor disabled). Executing automatic live order placement...")
 			if err := runAutoLiveOrder(ctx, cfg, db, false); err != nil {
 				log.Printf("Automatic live order placement error: %v", err)
 			}
@@ -531,6 +532,12 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 		result.Agent2OpportunityAudit = backtest.Agent2OpportunityAuditResult{Enabled: false, Summary: err.Error()}
 	} else {
 		result.Agent2OpportunityAudit = opportunityAudit
+	}
+	filterValueAudit, err := backtest.RunFilterValueAudit(cfg, btc, assets, backtest.FilterValueAuditConfig{})
+	if err != nil {
+		result.FilterValueAudit = backtest.FilterValueAuditResult{Enabled: false, Summary: err.Error()}
+	} else {
+		result.FilterValueAudit = filterValueAudit
 	}
 	audit, err := backtest.RunLayerAudit(cfg, btc, assets, backtest.LayerAuditConfig{})
 	if err != nil {
@@ -935,8 +942,8 @@ type liveReadinessReport struct {
 	LiveEnabled                    bool                            `json:"live_enabled"`
 	RealTradingEnabled             bool                            `json:"real_trading_enabled"`
 	AutoExecute                    bool                            `json:"auto_execute"`
-	CanaryMode                     bool                            `json:"canary_mode"`
-	CanaryMaxNotional              float64                         `json:"canary_max_notional_usdt"`
+	LiveAutoMode                   bool                            `json:"live_auto_mode"`
+	LiveAutoMaxNotional            float64                         `json:"live_auto_max_notional_usdt"`
 	AutoLadderEnabled              bool                            `json:"auto_ladder_enabled"`
 	MaxAutoLayersPerCycle          int                             `json:"max_auto_layers_per_cycle"`
 	MaxOpenLiveOrders              int                             `json:"max_open_live_orders"`
@@ -966,6 +973,7 @@ type liveReadinessReport struct {
 	DataSanity                     liveguard.DataSanityResult      `json:"data_sanity"`
 	ReconcileSafety                liveguard.ReconcileSafetyResult `json:"reconcile_safety"`
 	RiskGovernor                   liveguard.RiskGovernorResult    `json:"risk_governor"`
+	ManagedCoinSummaries           []liveguard.ManagedCoinSummary  `json:"managed_coin_summaries,omitempty"`
 	AutoLiveBlockers               []string                        `json:"auto_live_blockers"`
 	Summary                        string                          `json:"summary"`
 }
@@ -1009,14 +1017,15 @@ func runLiveReadiness(ctx context.Context, cfg config.Config, db *storage.DB) er
 	}
 	proof := liveguard.BuildProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
 	ladderProof := liveguard.BuildLadderProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
+	managedSummaries := liveguard.BuildManagedCoinSummaries(cfg, p, open, liveguard.ManagedCycleResult{PlanState: p.State, Desired: []liveguard.ManagedDesiredOrder{}, DataHealth: dataHealth, ReconcileSafety: reconcileSafety, RiskGovernor: riskGovernor})
 	report := liveReadinessReport{
 		GeneratedAt:                    time.Now(),
 		Mode:                           os.Getenv("BTC_AGENT_MODE"),
 		LiveEnabled:                    cfg.Live.Enabled,
 		RealTradingEnabled:             cfg.Execution.RealTradingEnabled,
 		AutoExecute:                    cfg.Live.AutoExecute,
-		CanaryMode:                     cfg.Live.CanaryMode,
-		CanaryMaxNotional:              cfg.Live.CanaryMaxNotionalUSDT,
+		LiveAutoMode:                   config.LiveAutoMode(cfg),
+		LiveAutoMaxNotional:            config.LiveAutoMaxNotionalUSDT(cfg),
 		AutoLadderEnabled:              cfg.Live.AutoLadderEnabled,
 		MaxAutoLayersPerCycle:          cfg.Live.MaxAutoLayersPerCycle,
 		MaxOpenLiveOrders:              cfg.Live.MaxOpenLiveOrders,
@@ -1045,6 +1054,7 @@ func runLiveReadiness(ctx context.Context, cfg config.Config, db *storage.DB) er
 		DataHealth:                     dataHealth,
 		ReconcileSafety:                reconcileSafety,
 		RiskGovernor:                   riskGovernor,
+		ManagedCoinSummaries:           managedSummaries,
 	}
 	if err := requireAutoLiveRuntime(cfg); err != nil {
 		report.AutoLiveBlockers = append(report.AutoLiveBlockers, err.Error())
@@ -1091,6 +1101,91 @@ func liveCredentialEnvPresent(cfg config.Config) map[string]bool {
 	return out
 }
 
+func inspectRuntimeEnvFiles() []liveguard.EnvFileStatus {
+	paths := []string{}
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		paths = append(paths, filepath.Join(home, "btc-agent.env"))
+	}
+	if cwd, err := os.Getwd(); err == nil && cwd != "" {
+		paths = append(paths, filepath.Join(cwd, ".env"))
+	}
+	seen := map[string]bool{}
+	out := []liveguard.EnvFileStatus{}
+	for _, path := range paths {
+		if path == "" || seen[path] {
+			continue
+		}
+		seen[path] = true
+		status := liveguard.EnvFileStatus{Path: path}
+		b, err := os.ReadFile(path)
+		if err != nil {
+			out = append(out, status)
+			continue
+		}
+		status.Exists = true
+		values := parseEnvRuntimeValues(string(b))
+		status.Mode = values["BTC_AGENT_MODE"]
+		status.AutoLiveAllow = values["BTC_AGENT_ALLOW_AUTO_LIVE"]
+		status.OKXKeyPresent = values["OKX_API_KEY"] != ""
+		status.OKXSecretPresent = values["OKX_API_SECRET"] != ""
+		status.OKXPassphrasePresent = values["OKX_API_PASSPHRASE"] != ""
+		out = append(out, status)
+	}
+	return out
+}
+
+func parseEnvRuntimeValues(text string) map[string]string {
+	out := map[string]string{}
+	for _, raw := range strings.Split(text, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") || !strings.Contains(line, "=") {
+			continue
+		}
+		parts := strings.SplitN(line, "=", 2)
+		key := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(parts[0]), "export "))
+		value := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+		switch key {
+		case "BTC_AGENT_MODE", "BTC_AGENT_ALLOW_AUTO_LIVE", "OKX_API_KEY", "OKX_API_SECRET", "OKX_API_PASSPHRASE":
+			out[key] = value
+		}
+	}
+	return out
+}
+
+func envFileConflictWarnings(files []liveguard.EnvFileStatus) []string {
+	warnings := []string{}
+	existing := []liveguard.EnvFileStatus{}
+	for _, file := range files {
+		if file.Exists {
+			existing = append(existing, file)
+		}
+	}
+	if len(existing) < 2 {
+		return warnings
+	}
+	firstMode := existing[0].Mode
+	firstAllow := existing[0].AutoLiveAllow
+	for _, file := range existing[1:] {
+		if file.Mode != firstMode {
+			warnings = append(warnings, fmt.Sprintf("env file BTC_AGENT_MODE differs: %s=%s vs %s=%s", existing[0].Path, emptyDefault(firstMode, "unset"), file.Path, emptyDefault(file.Mode, "unset")))
+		}
+		if file.AutoLiveAllow != firstAllow {
+			warnings = append(warnings, fmt.Sprintf("env file BTC_AGENT_ALLOW_AUTO_LIVE differs: %s=%s vs %s=%s", existing[0].Path, emptyDefault(firstAllow, "unset"), file.Path, emptyDefault(file.AutoLiveAllow, "unset")))
+		}
+	}
+	for _, file := range existing {
+		if strings.HasSuffix(file.Path, string(filepath.Separator)+"btc-agent.env") {
+			if mode := os.Getenv("BTC_AGENT_MODE"); mode != "" && file.Mode != "" && mode != file.Mode {
+				warnings = append(warnings, fmt.Sprintf("loaded BTC_AGENT_MODE=%s differs from %s=%s", mode, file.Path, file.Mode))
+			}
+			if allow := os.Getenv("BTC_AGENT_ALLOW_AUTO_LIVE"); allow != "" && file.AutoLiveAllow != "" && allow != file.AutoLiveAllow {
+				warnings = append(warnings, fmt.Sprintf("loaded BTC_AGENT_ALLOW_AUTO_LIVE=%s differs from %s=%s", allow, file.Path, file.AutoLiveAllow))
+			}
+		}
+	}
+	return warnings
+}
+
 func runLiveDoctor(ctx context.Context, cfg config.Config, db *storage.DB) (liveguard.RuntimeDoctorResult, error) {
 	result := buildLiveDoctorResult(ctx, cfg, db)
 	if err := writeLiveDoctorResult(result); err != nil {
@@ -1113,7 +1208,9 @@ func writeLiveDoctorResult(result liveguard.RuntimeDoctorResult) error {
 }
 
 func buildLiveDoctorResult(ctx context.Context, cfg config.Config, db *storage.DB) liveguard.RuntimeDoctorResult {
-	result := liveguard.RuntimeDoctorResult{GeneratedAt: time.Now(), CredentialEnvPresent: liveCredentialEnvPresent(cfg), AutoLiveEnv: os.Getenv("BTC_AGENT_ALLOW_AUTO_LIVE") == "true", TelegramTokenPresent: firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")) != "", TelegramChatPresent: firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")) != ""}
+	envFiles := inspectRuntimeEnvFiles()
+	result := liveguard.RuntimeDoctorResult{GeneratedAt: time.Now(), CredentialEnvPresent: liveCredentialEnvPresent(cfg), EnvFiles: envFiles, AutoLiveEnv: os.Getenv("BTC_AGENT_ALLOW_AUTO_LIVE") == "true", TelegramTokenPresent: firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")) != "", TelegramChatPresent: firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")) != ""}
+	result.Warnings = append(result.Warnings, envFileConflictWarnings(envFiles)...)
 	if !result.AutoLiveEnv && cfg.Live.Enabled && cfg.Live.AutoExecute {
 		result.Blockers = append(result.Blockers, "BTC_AGENT_ALLOW_AUTO_LIVE=true required for auto live execution")
 	}
@@ -1209,6 +1306,12 @@ func liveDoctorMarkdown(result liveguard.RuntimeDoctorResult) string {
 		}
 	}
 	md += fmt.Sprintf("Telegram env/config present: token=%v chat=%v\n", result.TelegramTokenPresent, result.TelegramChatPresent)
+	if len(result.EnvFiles) > 0 {
+		md += "Env files:\n"
+		for _, file := range result.EnvFiles {
+			md += fmt.Sprintf("- %s: exists=%v mode=%s allow_auto_live=%s okx_key=%v okx_secret=%v okx_passphrase=%v\n", file.Path, file.Exists, emptyDefault(file.Mode, "unset"), emptyDefault(file.AutoLiveAllow, "unset"), file.OKXKeyPresent, file.OKXSecretPresent, file.OKXPassphrasePresent)
+		}
+	}
 	md += fmt.Sprintf("Operator halt: %v\n", result.OperatorHalted)
 	md += fmt.Sprintf("Open live orders: %d\n", result.OpenLiveOrders)
 	md += fmt.Sprintf("Plan state: %s\n", result.PlanState)
@@ -1262,8 +1365,8 @@ func liveReadinessTelegramView(r liveReadinessReport) telegramreport.LiveReadine
 		LiveEnabled:                   r.LiveEnabled,
 		RealTradingEnabled:            r.RealTradingEnabled,
 		AutoExecute:                   r.AutoExecute,
-		CanaryMode:                    r.CanaryMode,
-		CanaryMaxNotional:             r.CanaryMaxNotional,
+		LiveAutoMode:                  r.LiveAutoMode,
+		LiveAutoMaxNotional:           r.LiveAutoMaxNotional,
 		RequireManualConfirm:          r.RequireManualConfirm,
 		ProofOnly:                     r.ProofOnly,
 		AutoLadderEnabled:             r.AutoLadderEnabled,
@@ -1282,12 +1385,13 @@ func liveReadinessTelegramView(r liveReadinessReport) telegramreport.LiveReadine
 		ReplaceIfPriceDriftPct:        r.ReplaceIfPriceDriftPct,
 		CancelStaleAfterMinutes:       r.CancelStaleAfterMinutes,
 		LadderProof:                   r.LadderProof,
+		ManagedCoinSummaries:          r.ManagedCoinSummaries,
 	}
 }
 
 func liveReadinessSummary(r liveReadinessReport) string {
 	if len(r.AutoLiveBlockers) == 0 && r.Proof.Status == liveguard.ReadyForManualLiveProofOrder {
-		return "LIVE_READY_FOR_CANARY_AUTO"
+		return "LIVE_READY_FOR_AUTO"
 	}
 	if r.Proof.Status == liveguard.ReadyForManualLiveProofOrder {
 		return fmt.Sprintf("LIVE_READY_FOR_MANUAL; auto_blockers=%d", len(r.AutoLiveBlockers))
@@ -1298,12 +1402,13 @@ func liveReadinessSummary(r liveReadinessReport) string {
 func liveReadinessMarkdown(r liveReadinessReport) string {
 	md := fmt.Sprintf("LIVE READINESS REPORT\n\nGenerated: %s\nSummary: %s\n\n", r.GeneratedAt.Format("2006-01-02T15:04:05Z07:00"), r.Summary)
 	md += fmt.Sprintf("Mode: %s | auto env: %v\n", emptyDefault(r.Mode, "unset"), r.AutoLiveEnv)
-	md += fmt.Sprintf("Config: live=%v real=%v auto=%v canary=%v canary_max=%.2f manual_confirm=%v proof_only=%v\n", r.LiveEnabled, r.RealTradingEnabled, r.AutoExecute, r.CanaryMode, r.CanaryMaxNotional, r.RequireManualConfirm, r.ProofOnly)
+	md += fmt.Sprintf("Config: live=%v real=%v auto_execute=%v manual_confirm=%v proof_only=%v\n", r.LiveEnabled, r.RealTradingEnabled, r.AutoExecute, r.RequireManualConfirm, r.ProofOnly)
+	md += fmt.Sprintf("Optional live-auto cap: enabled=%v max=%.2f USDT\n", r.LiveAutoMode, r.LiveAutoMaxNotional)
 	md += fmt.Sprintf("Legacy auto ladder: enabled=%v max_layers_per_cycle=%d max_open_orders_legacy=%d max_notional=%.2f proof=%s candidates=%d total=%.2f\n", r.AutoLadderEnabled, r.MaxAutoLayersPerCycle, r.MaxOpenLiveOrders, r.AutoLadderMaxNotionalUSDT, r.LadderProof.Status, len(r.LadderProof.Candidates), r.LadderProof.TotalNotional)
 	md += fmt.Sprintf("Managed order engine: enabled=%v max_layers_per_asset=%d max_open_per_asset=%d max_open_total=%d\n", r.OrderManagementEnabled, r.MaxAutoLayersPerAsset, r.MaxOpenLiveOrdersPerAsset, r.MaxOpenLiveOrdersTotal)
 	md += fmt.Sprintf("Managed notional caps: per_order=%.2f per_asset=%.2f total=%.2f USDT\n", r.MaxLiveNotionalPerOrderUSDT, r.MaxLiveNotionalPerAssetUSDT, r.MaxLiveNotionalTotalUSDT)
 	md += fmt.Sprintf("Managed cancel/replace: cancel_plan_inactive=%v cancel_price_above_discount=%.2f%% replace_drift=%.2f%% stale_after=%dm\n", r.CancelIfPlanNotActive, r.CancelIfPriceAboveDiscountZone*100, r.ReplaceIfPriceDriftPct*100, r.CancelStaleAfterMinutes)
-	if r.CanaryMode && r.OrderManagementEnabled {
+	if r.LiveAutoMode && r.OrderManagementEnabled {
 		md += "Risk sizing: BTC permission controls budget multiplier; hard safety still blocks dangerous actions.\n"
 		md += "Opportunity allocation: live capital follows current setup score, not fixed portfolio percentages.\n"
 		md += "Quality multiplier: A/B full, C reduced, NO_SAMPLE/missing probe, D blocked.\n"
@@ -1338,7 +1443,7 @@ func liveReadinessMarkdown(r liveReadinessReport) string {
 		}
 	}
 	if r.Proof.Candidate.Symbol != "" {
-		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f canary=%v\n", r.Proof.Candidate.Side, r.Proof.Candidate.Symbol, r.Proof.Candidate.Price, r.Proof.Candidate.Quantity, r.Proof.Candidate.Notional, r.Proof.Candidate.Canary)
+		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f\n", r.Proof.Candidate.Side, r.Proof.Candidate.Symbol, r.Proof.Candidate.Price, r.Proof.Candidate.Quantity, r.Proof.Candidate.Notional)
 	}
 	if r.Proof.Preflight.Enabled {
 		md += fmt.Sprintf("Preflight: pass=%v inst_id=%s notional=%.2f reasons=%v\n", r.Proof.Preflight.Pass, r.Proof.Preflight.InstID, r.Proof.Preflight.Notional, r.Proof.Preflight.Reasons)
@@ -1349,8 +1454,32 @@ func liveReadinessMarkdown(r liveReadinessReport) string {
 			md += "- " + reason + "\n"
 		}
 	}
+	if len(r.ManagedCoinSummaries) > 0 && (r.Proof.Candidate.Symbol == "" || r.PlanState != agent2.StateActiveLimit) {
+		md += "\nWhy no auto order:\n"
+		for _, coin := range r.ManagedCoinSummaries {
+			if coin.DesiredLayers > 0 || coin.Placed > 0 || coin.Kept > 0 {
+				continue
+			}
+			reasons := firstStrings(coin.WhyNoOrder, 4)
+			line := fmt.Sprintf("- %s: state=%s desired_layers=%d", coin.Symbol, coin.State, coin.DesiredLayers)
+			if len(reasons) > 0 {
+				line += " | " + strings.Join(reasons, "; ")
+			}
+			if coin.NextTrigger != "" {
+				line += " | next=" + coin.NextTrigger
+			}
+			md += line + "\n"
+		}
+	}
 	md += "\nNo order was placed.\n"
 	return md
+}
+
+func firstStrings(items []string, limit int) []string {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
 }
 
 func emptyDefault(value, fallback string) string {
@@ -1752,13 +1881,13 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.Reasons = append(result.Reasons, "reconcile after doctor block: "+err.Error())
 		}
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
+		return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if !cfg.Live.SupervisorEnabled {
 		result.Action = liveguard.SupervisorActionSkipped
 		result.Summary = "SUPERVISOR_OK: action=skipped | live supervisor disabled"
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, false)
+		return result, writeLiveSupervisorResult(ctx, cfg, db, result, false)
 	}
 	halted, err := db.IsHalted()
 	if err != nil {
@@ -1766,7 +1895,7 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		result.ConsecutiveErrors = state.ConsecutiveErrors
 		result.Reasons = append(result.Reasons, "read operator halt: "+err.Error())
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
+		return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if halted {
 		result.Action = liveguard.SupervisorActionReconcileOnly
@@ -1780,7 +1909,7 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.ConsecutiveErrors = 0
 		}
 		result.RefreshSummary()
-		return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
+		return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if dryRun {
 		result.Action = liveguard.SupervisorActionHeartbeat
@@ -1817,7 +1946,7 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		}
 	}
 	result.RefreshSummary()
-	return result, writeLiveSupervisorResult(ctx, cfg, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
+	return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 }
 
 func loadLatestManagedCycleReport() (liveguard.ManagedCycleResult, bool) {
@@ -1832,19 +1961,42 @@ func loadLatestManagedCycleReport() (liveguard.ManagedCycleResult, bool) {
 	return result, true
 }
 
-func writeLiveSupervisorResult(ctx context.Context, cfg config.Config, result liveguard.SupervisorResult, notifyTelegram bool) error {
+func writeLiveSupervisorResult(ctx context.Context, cfg config.Config, db *storage.DB, result liveguard.SupervisorResult, notifyTelegram bool) error {
 	if err := saveJSONFile("reports", "live_supervisor_latest.json", result); err != nil {
 		return err
 	}
+	var scenario ScenarioReport
+	scenarioOK := false
+	if result.Managed == nil || !result.Managed.DryRun {
+		if _, nextScenario, err := writeBotStateAndScenario(cfg, db, result); err != nil {
+			log.Printf("bot state/scenario report warning: %v", err)
+		} else {
+			scenario = nextScenario
+			scenarioOK = true
+		}
+	}
 	md := liveSupervisorMarkdown(result)
+	if scenarioOK {
+		md += "\n" + scenarioMarkdown(scenario)
+	}
 	if err := os.MkdirAll("reports", 0700); err != nil {
 		return err
 	}
 	if err := os.WriteFile(filepath.Join("reports", "live_supervisor_latest.md"), []byte(md), 0600); err != nil {
 		return err
 	}
+	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && scenarioOK && shouldSendNearTriggerAlert(scenario) {
+		sendTelegram(ctx, cfg, "near-trigger", nearTriggerTelegram(scenario))
+		if err := saveTelegramScenarioState(scenario); err != nil {
+			log.Printf("telegram scenario state warning: %v", err)
+		}
+	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
-		sendTelegram(ctx, cfg, "live-supervisor", telegramreport.LiveSupervisorHumanText(result))
+		text := telegramreport.LiveSupervisorHumanText(result)
+		if scenarioOK {
+			text = liveSupervisorScenarioTelegram(scenario, result)
+		}
+		sendTelegram(ctx, cfg, "live-supervisor", text)
 	}
 	fmt.Println(md)
 	return nil
@@ -1918,6 +2070,9 @@ func writeAutoLiveManagementResult(ctx context.Context, cfg config.Config, db *s
 	}
 	if err := os.WriteFile(filepath.Join("reports", "auto_live_ladder_latest.md"), []byte(md), 0600); err != nil {
 		return err
+	}
+	if err := writeFilterAttributionReportFromManaged(result); err != nil {
+		log.Printf("filter attribution report warning: %v", err)
 	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
 		sendTelegram(ctx, cfg, "auto-live-management", telegramreport.LiveOrderManagementHumanText(result))
@@ -2067,7 +2222,7 @@ func autoLiveLadderMarkdown(result liveguard.LadderExecutionResult) string {
 	if len(result.Candidates) > 0 {
 		md += "Candidates:\n"
 		for i, candidate := range result.Candidates {
-			md += fmt.Sprintf("- #%d %s %s limit %.8f qty %.8f notional %.2f canary=%v\n", i+1, candidate.Side, candidate.Symbol, candidate.Price, candidate.Quantity, candidate.Notional, candidate.Canary)
+			md += fmt.Sprintf("- #%d %s %s limit %.8f qty %.8f notional %.2f\n", i+1, candidate.Side, candidate.Symbol, candidate.Price, candidate.Quantity, candidate.Notional)
 		}
 	}
 	if len(result.Orders) > 0 {
@@ -2089,11 +2244,7 @@ func liveOrderAttemptText(proof liveguard.Proof) string {
 }
 
 func autoLiveOrderMarkdown(result liveguard.ExecutionResult) string {
-	canaryStr := ""
-	if result.Candidate.Canary {
-		canaryStr = " [CANARY MODE]"
-	}
-	md := fmt.Sprintf("AUTO LIVE ORDER%s\n\nStatus: %s\nSummary: %s\nProof status: %s\n", canaryStr, result.Status, result.Summary, result.ProofStatus)
+	md := fmt.Sprintf("AUTO LIVE ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
 	if result.Candidate.Symbol != "" {
 		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f post_only=%v\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Quantity, result.Candidate.Notional, result.Candidate.PostOnly)
 	}
@@ -2112,11 +2263,7 @@ func autoLiveOrderMarkdown(result liveguard.ExecutionResult) string {
 }
 
 func liveOrderMarkdown(result liveguard.ExecutionResult) string {
-	canaryStr := ""
-	if result.Candidate.Canary {
-		canaryStr = " [CANARY MODE]"
-	}
-	md := fmt.Sprintf("MANUAL LIVE PROOF ORDER%s\n\nStatus: %s\nSummary: %s\nProof status: %s\n", canaryStr, result.Status, result.Summary, result.ProofStatus)
+	md := fmt.Sprintf("MANUAL LIVE PROOF ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
 	if result.Candidate.Symbol != "" {
 		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f post_only=%v\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Quantity, result.Candidate.Notional, result.Candidate.PostOnly)
 	}
@@ -2743,35 +2890,5 @@ func runOperatorStatus(db *storage.DB) error {
 		status = "ACTIVE (trading halted)"
 	}
 	fmt.Printf("Operator halt: %s\n", status)
-	return nil
-}
-
-func runCanaryDrill(cfg config.Config, cycles int) error {
-	report, err := canarydrill.Run(cfg, cycles)
-	if err != nil {
-		return fmt.Errorf("canary drill: %w", err)
-	}
-	const dir = "reports"
-	if err := reportio.WriteJSON(dir, "canary_drill_latest.json", report); err != nil {
-		return fmt.Errorf("canary drill write json: %w", err)
-	}
-	md := canarydrill.RenderMarkdown(report)
-	if err := reportio.WriteMarkdown(dir, "canary_drill_latest.md", md); err != nil {
-		return fmt.Errorf("canary drill write md: %w", err)
-	}
-	drillStatus := "PASS_SIMULATION_ONLY"
-	if !report.Passed {
-		drillStatus = "FAIL_SIMULATION_ONLY"
-	}
-	fmt.Printf("CANARY DRILL REPORT\nStatus: %s\nCycles: %d\nNo real order was placed.\nReport: %s\n",
-		drillStatus, report.Cycles, filepath.Join(dir, "canary_drill_latest.md"))
-	if !report.Passed {
-		for _, c := range report.Checks {
-			if !c.Passed {
-				fmt.Printf("  FAIL [%s]: %s\n", c.Name, c.Detail)
-			}
-		}
-		return fmt.Errorf("canary drill failed")
-	}
 	return nil
 }

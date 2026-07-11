@@ -28,8 +28,8 @@ fail() {
 }
 
 case "$MODE" in
-  paper|live-proof|live-canary-auto) ;;
-  *) fail "invalid BTC_AGENT_MODE=$MODE; use paper|live-proof|live-canary-auto" ;;
+  paper|live-proof|live-auto|live-canary-auto) ;;
+  *) fail "invalid BTC_AGENT_MODE=$MODE; use paper|live-proof|live-auto" ;;
 esac
 
 if [ -f "$LOCK_FILE" ]; then
@@ -56,11 +56,11 @@ allow_live_command() {
       return 1
       ;;
     auto-live-order)
-      [ "$MODE" = "live-canary-auto" ] && [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" = "true" ]
+      ([ "$MODE" = "live-auto" ] || [ "$MODE" = "live-canary-auto" ]) && [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" = "true" ]
       return $?
       ;;
     live-proof|live-readiness|reconcile-live-orders|live-positions|operator-status)
-      [ "$MODE" = "live-proof" ] || [ "$MODE" = "live-canary-auto" ]
+      [ "$MODE" = "live-proof" ] || [ "$MODE" = "live-auto" ] || [ "$MODE" = "live-canary-auto" ]
       return $?
       ;;
   esac
@@ -135,15 +135,15 @@ run_live_readiness_stack() {
   run_btc_agent live-positions >> "$LOG_DIR/live-positions.log" 2>&1 || log "live positions failed"
 }
 
-run_canary_auto_attempt() {
-  if [ "$MODE" != "live-canary-auto" ]; then
+run_live_auto_attempt() {
+  if [ "$MODE" != "live-auto" ] && [ "$MODE" != "live-canary-auto" ]; then
     return 0
   fi
   if [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" != "true" ]; then
     log "auto live skipped: BTC_AGENT_ALLOW_AUTO_LIVE=true not set"
     return 0
   fi
-  log "auto-live-order start canary mode"
+  log "auto-live-order start live auto mode"
   if run_btc_agent auto-live-order >> "$LOG_DIR/auto-live-order.log" 2>&1; then
     log "auto-live-order finished"
   else
@@ -166,7 +166,7 @@ while true; do
     00|15|30|45)
       marker="$LOG_DIR/.auto-live-$today-$hour-$minute"
       if [ ! -f "$marker" ]; then
-        run_canary_auto_attempt
+        run_live_auto_attempt
         touch "$marker"
       fi
       ;;

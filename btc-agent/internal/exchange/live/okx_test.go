@@ -127,6 +127,59 @@ func TestRedact(t *testing.T) {
 	}
 }
 
+func TestParseOrderBook(t *testing.T) {
+	data := []byte(`{"code":"0","msg":"","data":[{"asks":[["100","2"],["101","1"],["103","9"]],"bids":[["99.9","3"],["99","2"],["97","9"]]}]}`)
+	got, err := parseOrderBook(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BestBid != 99.9 || got.BestAsk != 100 {
+		t.Fatalf("bad best bid/ask: %+v", got)
+	}
+	if got.BidDepth1PctUSDT <= 0 || got.AskDepth1PctUSDT <= 0 {
+		t.Fatalf("expected depth: %+v", got)
+	}
+	if got.BidDepth1PctUSDT >= 99.9*3+99*2+97*9 {
+		t.Fatalf("bid depth should exclude levels outside 1%%: %+v", got)
+	}
+	if got.AskDepth1PctUSDT >= 100*2+101*1+103*9 {
+		t.Fatalf("ask depth should exclude levels outside 1%%: %+v", got)
+	}
+}
+
+func TestOrderBookFetchesPublicBooks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RequestURI() != "/api/v5/market/books?instId=ETH-USDT&sz=20" {
+			t.Fatalf("path=%s", r.URL.RequestURI())
+		}
+		_, _ = w.Write([]byte(`{"code":"0","msg":"","data":[{"asks":[["100","2"]],"bids":[["99.9","3"]]}]}`))
+	}))
+	defer server.Close()
+	client := &OKXClient{baseURL: server.URL, key: "key", secret: "secret", passphrase: "pass", http: server.Client()}
+	got, err := client.OrderBook(context.Background(), "ETH-USDT")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.BestBid != 99.9 || got.BestAsk != 100 {
+		t.Fatalf("bad book: %+v", got)
+	}
+}
+
+func TestOrderBookHTTPErrorDoesNotLeakSecrets(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "bad secret", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	client := &OKXClient{baseURL: server.URL, key: "key", secret: "secret", passphrase: "pass", http: server.Client()}
+	_, err := client.OrderBook(context.Background(), "ETH-USDT")
+	if err == nil || !strings.Contains(err.Error(), "okx order book http 502") {
+		t.Fatalf("expected http error: %v", err)
+	}
+	if strings.Contains(err.Error(), "secret") || strings.Contains(err.Error(), "key") || strings.Contains(err.Error(), "pass") {
+		t.Fatalf("secret leaked: %v", err)
+	}
+}
+
 func TestParseOKXOrderStatus(t *testing.T) {
 	data := []byte(`{"code":"0","msg":"","data":[
 		{"instId":"ETH-USDT","ordId":"1","clOrdId":"c1","state":"live","side":"buy","ordType":"limit","px":"2000.5","sz":"0.01","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000000"},
@@ -280,7 +333,7 @@ func TestSanitizeClientOrderID(t *testing.T) {
 		want string
 	}{
 		{"btcagentethusdt1a2b3c", "btcagentethusdt1a2b3c"},
-		{"canary-test-1783489330", "canarytest1783489330"},
+		{"live-auto-test-1783489330", "liveautotest1783489330"},
 		{"has spaces and-dashes", "hasspacesanddashes"},
 		{"abc!@#$%^&*()", "abc"},
 		{"", ""},

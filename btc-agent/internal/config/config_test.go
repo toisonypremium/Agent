@@ -23,8 +23,8 @@ func TestValidateAutoLiveTradingRequiresAutoConfirmShape(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.RequireManualConfirm = false
 	cfg.Live.AutoExecute = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
@@ -38,16 +38,16 @@ func TestValidateAutoLiveTradingRejectsManualConfirm(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.RequireManualConfirm = true
 	cfg.Live.AutoExecute = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("expected auto/manual confirm conflict")
 	}
 }
 
-func TestValidateAutoLiveTradingRequiresCanaryMode(t *testing.T) {
-	// Canary mode is no longer required for auto live execution.
-	// Auto live with canary_mode=false is now valid.
+func TestValidateAutoLiveTradingDoesNotRequireLiveAutoMode(t *testing.T) {
+	// Live auto mode is not required for auto live execution.
+	// Auto live with live_auto_mode=false is now valid.
 	cfg := validTestConfig()
 	cfg.Execution.RealTradingEnabled = true
 	cfg.Execution.PaperTrading = false
@@ -55,9 +55,9 @@ func TestValidateAutoLiveTradingRequiresCanaryMode(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.RequireManualConfirm = false
 	cfg.Live.AutoExecute = true
-	cfg.Live.CanaryMode = false
+	cfg.Live.LiveAutoMode = false
 	if err := cfg.Validate(); err != nil {
-		t.Fatalf("auto live without canary_mode should now be valid: %v", err)
+		t.Fatalf("auto live without live_auto_mode should be valid: %v", err)
 	}
 }
 
@@ -69,8 +69,8 @@ func TestValidateAutoLadderRequiresAutoExecute(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.RequireManualConfirm = true
 	cfg.Live.AutoExecute = false
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	cfg.Live.AutoLadderEnabled = true
 	cfg.Live.MaxAutoLayersPerCycle = 1
 	cfg.Live.MaxOpenLiveOrders = 1
@@ -88,8 +88,8 @@ func TestValidateAutoLadderBounds(t *testing.T) {
 	base.Live.ProofOnly = false
 	base.Live.RequireManualConfirm = false
 	base.Live.AutoExecute = true
-	base.Live.CanaryMode = true
-	base.Live.CanaryMaxNotionalUSDT = 2
+	base.Live.LiveAutoMode = true
+	base.Live.LiveAutoMaxNotionalUSDT = 2
 	base.Live.AutoLadderEnabled = true
 	base.Live.MaxAutoLayersPerCycle = 1
 	base.Live.MaxOpenLiveOrders = 1
@@ -128,41 +128,41 @@ func TestValidateLiveEnabledRejectsOversizedOrderCap(t *testing.T) {
 	}
 }
 
-func TestValidateCanaryModeValid(t *testing.T) {
+func TestValidateLiveAutoModeValid(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2.0
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2.0
 	cfg.Live.MaxOrderNotionalUSDT = 10.0
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
 }
 
-func TestValidateCanaryModeRejectsZeroOrNegativeMaxNotional(t *testing.T) {
+func TestValidateLiveAutoModeRejectsZeroOrNegativeMaxNotional(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true
-	cfg.Live.CanaryMode = true
+	cfg.Live.LiveAutoMode = true
 
-	cfg.Live.CanaryMaxNotionalUSDT = 0
+	cfg.Live.LiveAutoMaxNotionalUSDT = 0
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected validation error for zero canary max notional")
+		t.Fatal("expected validation error for zero live auto max notional")
 	}
 
-	cfg.Live.CanaryMaxNotionalUSDT = -1.0
+	cfg.Live.LiveAutoMaxNotionalUSDT = -1.0
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected validation error for negative canary max notional")
+		t.Fatal("expected validation error for negative live auto max notional")
 	}
 }
 
-func TestValidateCanaryModeRejectsExceedingMaxOrderNotional(t *testing.T) {
+func TestValidateLiveAutoModeRejectsExceedingMaxOrderNotional(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 15.0
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 15.0
 	cfg.Live.MaxOrderNotionalUSDT = 10.0
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected validation error when canary max exceeds max order notional")
+		t.Fatal("expected validation error when live auto max exceeds max order notional")
 	}
 }
 
@@ -261,8 +261,8 @@ func TestValidateOrderManagementBounds(t *testing.T) {
 	base.Live.ProofOnly = false
 	base.Live.RequireManualConfirm = false
 	base.Live.AutoExecute = true
-	base.Live.CanaryMode = true
-	base.Live.CanaryMaxNotionalUSDT = 2
+	base.Live.LiveAutoMode = true
+	base.Live.LiveAutoMaxNotionalUSDT = 2
 	base.Live.OrderManagementEnabled = true
 	base.Live.MaxAutoLayersPerAsset = 3
 	base.Live.MaxOpenLiveOrdersPerAsset = 3
@@ -309,8 +309,8 @@ func TestValidateSupervisorRequiresManagedLiveShape(t *testing.T) {
 	base.Live.ProofOnly = false
 	base.Live.RequireManualConfirm = false
 	base.Live.AutoExecute = true
-	base.Live.CanaryMode = true
-	base.Live.CanaryMaxNotionalUSDT = 2
+	base.Live.LiveAutoMode = true
+	base.Live.LiveAutoMaxNotionalUSDT = 2
 	base.Live.OrderManagementEnabled = true
 	base.Live.MaxAutoLayersPerAsset = 3
 	base.Live.MaxOpenLiveOrdersPerAsset = 3

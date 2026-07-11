@@ -33,7 +33,7 @@ func TestWriteSchedulerHeartbeat(t *testing.T) {
 		PID:                     123,
 		Status:                  "running",
 		Timezone:                "Asia/Ho_Chi_Minh",
-		Mode:                    "live-canary-auto",
+		Mode:                    "live-auto",
 		LiveEnabled:             true,
 		LiveSupervisorEnabled:   true,
 		NextDailyRun:            "2026-07-10T01:00:00Z",

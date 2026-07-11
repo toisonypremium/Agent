@@ -49,4 +49,21 @@ fi
 nohup ./scripts/btc-agent-scheduler.sh >> "$LOG_DIR/scheduler-wrapper.log" 2>&1 &
 new_pid="$!"
 log "restart launched wrapper pid=$new_pid"
+
+sleep 3
+new_scheduler_pids="$(pgrep -f './bin/btc-agent scheduler --config' 2>/dev/null || true)"
+if [ -n "$new_scheduler_pids" ]; then
+  set -- $new_scheduler_pids
+  scheduler_count="$#"
+else
+  scheduler_count="0"
+fi
+if [ "$scheduler_count" -gt 1 ]; then
+  log "ERROR: multiple scheduler instances after restart: $new_scheduler_pids"
+  kill $new_scheduler_pids 2>/dev/null || true
+  rm -f "$LOCK_FILE"
+  echo "ERROR: multiple scheduler instances after restart; stopped them fail-safe" >&2
+  exit 1
+fi
+log "scheduler instance count after restart: $scheduler_count pids=$new_scheduler_pids"
 echo "scheduler wrapper pid=$new_pid"

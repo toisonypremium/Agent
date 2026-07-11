@@ -122,18 +122,18 @@ func TestBuildProofReadyCapsNotional(t *testing.T) {
 	}
 }
 
-func TestBuildProofReadyCanaryModeScalesNotional(t *testing.T) {
+func TestBuildProofReadyLiveAutoModeScalesNotional(t *testing.T) {
 	cfg := liveTestConfig(t)
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2.0
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2.0
 	cfg.Live.MaxOrderNotionalUSDT = 10.0
 	plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 50, Quantity: 0.5}}}}}
 	got := BuildProof(cfg, plan)
 	if got.Status != ReadyForManualLiveProofOrder {
 		t.Fatalf("unexpected proof status: %+v", got)
 	}
-	if got.Candidate.Notional != 2.0 || got.Candidate.Quantity != 0.02 || !got.Candidate.Canary {
-		t.Fatalf("canary scaling failed in BuildProof: %+v", got.Candidate)
+	if got.Candidate.Notional != 2.0 || got.Candidate.Quantity != 0.02 {
+		t.Fatalf("live auto scaling failed in BuildProof: %+v", got.Candidate)
 	}
 }
 
@@ -143,8 +143,8 @@ func TestBuildLadderProofWithChecksReady(t *testing.T) {
 	cfg.Live.ProofOnly = false
 	cfg.Live.AutoExecute = true
 	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.CanaryMode = true
-	cfg.Live.CanaryMaxNotionalUSDT = 2
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	cfg.Live.AutoLadderMaxNotionalUSDT = 4
 	cfg.Live.MaxAutoLayersPerCycle = 2
 	plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 2, Quantity: 0.02}, {Index: 2, Price: 90, Notional: 2, Quantity: 0.022222}}}}}

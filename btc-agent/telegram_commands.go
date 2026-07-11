@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/notify"
@@ -84,7 +85,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/status", "/why", "/coins", "/filters", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/help":
+	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/help":
 		return cmd
 	default:
 		return ""
@@ -119,6 +120,36 @@ func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
 			return "Chưa có filter attribution report. Chờ live supervisor chạy một chu kỳ.", true
 		}
 		return telegramCommandFilters(filterReport), true
+	case "/scorecard":
+		report, ok := loadTechnicalScorecardReportFile()
+		if !ok {
+			return "Chưa có technical scorecard report. Chờ live supervisor chạy một chu kỳ.", true
+		}
+		return telegramCommandScorecard(report), true
+	case "/allocation", "/capital":
+		report, ok := loadCapitalPlanResearchReportFile()
+		if !ok {
+			return "Chưa có capital plan research report. Chờ live supervisor chạy một chu kỳ.", true
+		}
+		return telegramCommandAllocation(report), true
+	case "/universe":
+		report, ok := loadUniverseResearchReportFile()
+		if !ok {
+			return "Chưa có universe research report. Chạy universe-research hoặc chờ report được tạo.", true
+		}
+		return telegramCommandUniverse(report), true
+	case "/dashboard":
+		report, ok := loadDecisionDashboardReportFile()
+		if !ok {
+			return "Chưa có decision dashboard report. Chờ live supervisor chạy một chu kỳ.", true
+		}
+		return telegramCommandDashboard(report), true
+	case "/trigger":
+		report, ok := loadDecisionDashboardReportFile()
+		if !ok {
+			return "Chưa có decision dashboard report. Chờ live supervisor chạy một chu kỳ.", true
+		}
+		return telegramCommandTrigger(report), true
 	case "/orders":
 		if !snapshotOK || !scenarioOK {
 			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
@@ -161,6 +192,12 @@ func telegramCommandsHelp() string {
 /why — vì sao chưa đặt lệnh
 /coins — từng coin
 /filters — bộ lọc đang chặn gì
+/scorecard — bảng điểm kỹ thuật
+/allocation — phân bổ vốn nghiên cứu
+/capital — tóm tắt vốn nghiên cứu
+/universe — universe research coin
+/dashboard — bảng điều khiển quyết định
+/trigger — trigger tiếp theo
 /orders — lệnh đang mở và desired
 /positions — vị thế live đang ghi nhận
 /doctor — live doctor
@@ -244,6 +281,76 @@ func telegramCommandFilters(r FilterAttributionReport) string {
 		b.WriteString(fmt.Sprintf("Near-actionable research: %d\n", len(r.NearActionable)))
 	}
 	b.WriteString("Read-only: filter report không đổi threshold, không bypass ACTIVE_LIMIT.\n")
+	return b.String()
+}
+
+func telegramCommandScorecard(r TechnicalScorecardReport) string {
+	var b strings.Builder
+	b.WriteString("BTC Agent — Scorecard\n")
+	b.WriteString(r.Summary + "\n")
+	for _, coin := range firstTechnicalScorecardCoins(r.Coins, 3) {
+		b.WriteString(fmt.Sprintf("- %s %s score=%.0f%% verdict=%s RR=%.2f top=%s\n", coin.Symbol, coin.State, coin.TechnicalScore*100, coin.Verdict, coin.RewardRisk, emptyStringDefault(coin.TopBlockerKey, "none")))
+		if coin.NextTrigger != "" {
+			b.WriteString("  Next: " + coin.NextTrigger + "\n")
+		}
+	}
+	b.WriteString("Read-only: scorecard không đặt lệnh, không bypass ACTIVE_LIMIT.\n")
+	return b.String()
+}
+
+func telegramCommandAllocation(r CapitalPlanResearchReport) string {
+	var b strings.Builder
+	b.WriteString("BTC Agent — Capital Research\n")
+	b.WriteString(r.Summary + "\n")
+	for _, coin := range firstCapitalPlanCoins(r.Coins, 3) {
+		b.WriteString(fmt.Sprintf("- %s %s current=%.1f%% suggested=%.1f%% max=%.2f score=%.1f verdict=%s layers=%d\n", coin.Symbol, coin.State, coin.CurrentConfigAllocation*100, coin.SuggestedResearchAllocation*100, coin.MaxResearchNotional, coin.OpportunityScore, coin.OpportunityVerdict, coin.SuggestedLayers))
+	}
+	b.WriteString("Research-only: Telegram không sửa config allocation, không bypass ACTIVE_LIMIT.\n")
+	return b.String()
+}
+
+func telegramCommandUniverse(r agent2.UniverseResearchReport) string {
+	var b strings.Builder
+	b.WriteString("BTC Agent — Universe Research\n")
+	b.WriteString(r.Summary + "\n")
+	for _, row := range firstUniverseRows(r.TopCandidates, 5) {
+		b.WriteString(fmt.Sprintf("- %s score=%.1f verdict=%s state=%s production=%v data=%s\n", row.Symbol, row.OpportunityScore, row.OpportunityVerdict, row.State, row.InProduction, row.DataStatus))
+	}
+	b.WriteString("Research-only: universe không tự thay production assets, không đặt lệnh.\n")
+	return b.String()
+}
+
+func telegramCommandDashboard(r DecisionDashboardReport) string {
+	var b strings.Builder
+	b.WriteString("BTC Agent — Dashboard\n")
+	b.WriteString(fmt.Sprintf("Bot ready=%v | Market ready=%v | can_submit=%v\n", r.BotReady, r.MarketReady, r.CanSubmitNow))
+	b.WriteString(fmt.Sprintf("Plan=%s | BTC=%s\n", r.PlanState, r.BTCPermission))
+	b.WriteString(fmt.Sprintf("Best production=%s | universe=%s\n", emptyStringDefault(r.BestProductionCoin, "n/a"), emptyStringDefault(r.BestUniverseCoin, "n/a")))
+	b.WriteString("Next: " + emptyStringDefault(r.NextTrigger, "n/a") + "\n")
+	for _, blocker := range firstStrings(r.Blockers, 4) {
+		b.WriteString("- " + blocker + "\n")
+	}
+	b.WriteString("Read-only: dashboard không đặt lệnh, không bypass ACTIVE_LIMIT.\n")
+	return b.String()
+}
+
+func telegramCommandTrigger(r DecisionDashboardReport) string {
+	var b strings.Builder
+	b.WriteString("BTC Agent — Trigger tiếp theo\n")
+	b.WriteString("Next: " + emptyStringDefault(r.NextTrigger, "n/a") + "\n")
+	if len(r.Blockers) > 0 {
+		b.WriteString("Blockers:\n")
+		for _, blocker := range firstStrings(r.Blockers, 5) {
+			b.WriteString("- " + blocker + "\n")
+		}
+	}
+	if len(r.Actions) > 0 {
+		b.WriteString("Actions:\n")
+		for _, action := range firstStrings(r.Actions, 4) {
+			b.WriteString("- " + action + "\n")
+		}
+	}
+	b.WriteString("Read-only: trigger không đặt lệnh, không bypass ACTIVE_LIMIT.\n")
 	return b.String()
 }
 
@@ -370,6 +477,42 @@ func loadFilterAttributionReportFile() (FilterAttributionReport, bool) {
 	return out, true
 }
 
+func loadTechnicalScorecardReportFile() (TechnicalScorecardReport, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "technical_scorecard_latest.json"))
+	if err != nil {
+		return TechnicalScorecardReport{}, false
+	}
+	var out TechnicalScorecardReport
+	if err := json.Unmarshal(b, &out); err != nil {
+		return TechnicalScorecardReport{}, false
+	}
+	return out, true
+}
+
+func loadCapitalPlanResearchReportFile() (CapitalPlanResearchReport, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "capital_plan_research_latest.json"))
+	if err != nil {
+		return CapitalPlanResearchReport{}, false
+	}
+	var out CapitalPlanResearchReport
+	if err := json.Unmarshal(b, &out); err != nil {
+		return CapitalPlanResearchReport{}, false
+	}
+	return out, true
+}
+
+func loadDecisionDashboardReportFile() (DecisionDashboardReport, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "decision_dashboard_latest.json"))
+	if err != nil {
+		return DecisionDashboardReport{}, false
+	}
+	var out DecisionDashboardReport
+	if err := json.Unmarshal(b, &out); err != nil {
+		return DecisionDashboardReport{}, false
+	}
+	return out, true
+}
+
 func loadLivePositionReportFile() (liveguard.LiveLedgerReport, bool) {
 	b, err := os.ReadFile(filepath.Join("reports", "live_position_latest.json"))
 	if err != nil {
@@ -380,6 +523,20 @@ func loadLivePositionReportFile() (liveguard.LiveLedgerReport, bool) {
 		return liveguard.LiveLedgerReport{}, false
 	}
 	return out, true
+}
+
+func firstTechnicalScorecardCoins(items []TechnicalScorecardCoin, limit int) []TechnicalScorecardCoin {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
+}
+
+func firstCapitalPlanCoins(items []CapitalPlanResearchCoin, limit int) []CapitalPlanResearchCoin {
+	if limit <= 0 || len(items) <= limit {
+		return items
+	}
+	return items[:limit]
 }
 
 func firstFilterAggregateRows(items []FilterAttributionAggregateRow, limit int) []FilterAttributionAggregateRow {

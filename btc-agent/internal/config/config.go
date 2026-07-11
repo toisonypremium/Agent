@@ -64,8 +64,9 @@ type Config struct {
 	Data struct {
 		BinanceBaseURL string `yaml:"binance_base_url"`
 		Symbols        struct {
-			BTC    string   `yaml:"btc"`
-			Assets []string `yaml:"assets"`
+			BTC              string   `yaml:"btc"`
+			Assets           []string `yaml:"assets"`
+			ResearchUniverse []string `yaml:"research_universe"`
 		} `yaml:"symbols"`
 		Intervals   []string `yaml:"intervals"`
 		CandleLimit int      `yaml:"candle_limit"`
@@ -370,6 +371,20 @@ func (c Config) Validate() error {
 		if allocation[sym] <= 0 {
 			return fmt.Errorf("missing or zero allocation for %s", sym)
 		}
+	}
+	researchSet := map[string]bool{}
+	for _, s := range c.Data.Symbols.ResearchUniverse {
+		sym := strings.ToUpper(strings.TrimSpace(s))
+		if sym == "" {
+			return errors.New("research universe symbol cannot be empty")
+		}
+		if sym == btcSymbol {
+			return errors.New("BTC symbol must not be included in research universe")
+		}
+		if researchSet[sym] {
+			return fmt.Errorf("duplicate research universe symbol %s", s)
+		}
+		researchSet[sym] = true
 	}
 	sum := 0.0
 	for sym, v := range allocation {

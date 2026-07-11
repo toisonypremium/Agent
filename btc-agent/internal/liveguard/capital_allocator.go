@@ -138,10 +138,11 @@ func allocationDecisionForAsset(cfg config.Config, plan agent2.Plan, asset agent
 		decision.Reason = appendAllocationReason(decision.Reason, "asset not ACTIVE_LIMIT")
 		return decision
 	}
-	if plan.State != agent2.StateActiveLimit && btcMult < 1 {
-		decision.Tier = OpportunityProbe
-		decision.MaxLayers = minInt(maxLayers, 1)
-		decision.Reason = appendAllocationReason(decision.Reason, "BTC permission reduced to probe risk budget")
+	if plan.State != agent2.StateActiveLimit {
+		decision.Tier = OpportunityWatch
+		decision.MaxLayers = 0
+		decision.Reason = appendAllocationReason(decision.Reason, "plan not ACTIVE_LIMIT")
+		return decision
 	}
 	if btcMult <= 0 {
 		decision.Tier = OpportunityBlock
@@ -204,7 +205,7 @@ func btcRiskMultiplier(permission agent1.Permission) float64 {
 	case agent1.Allowed:
 		return 1
 	case agent1.Armed:
-		return 0.35
+		return 0
 	case agent1.Watch:
 		return 0
 	default:

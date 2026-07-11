@@ -126,7 +126,6 @@ func managedConfig() config.Config {
 	var cfg config.Config
 	cfg.Live.Enabled = true
 	cfg.Live.AutoExecute = true
-	cfg.Live.AutoLadderEnabled = true
 	cfg.Live.OrderManagementEnabled = true
 	cfg.Live.LiveAutoMode = true
 	cfg.Live.LiveAutoMaxNotionalUSDT = 2
@@ -423,6 +422,12 @@ func TestOpportunityScoreUsesCompositeInsideActiveLimitGuard(t *testing.T) {
 	blocked.SetupGates = []agent2.SetupGateResult{{Name: agent2.EntryCheckData, Pass: false, Severity: agent2.SetupGateHard, Reason: "chưa đủ dữ liệu 1D"}}
 	if got := opportunityScore(blocked, historyQualityScore{Score: 100, Grade: "A"}); got != 0 {
 		t.Fatalf("blocked composite score should be 0, got %.2f", got)
+	}
+}
+
+func TestBTCRiskMultiplierBlocksArmedInLiveAllocator(t *testing.T) {
+	if got := btcRiskMultiplier(agent1.Armed); got != 0 {
+		t.Fatalf("ARMED must have zero live allocator risk budget, got %.2f", got)
 	}
 }
 

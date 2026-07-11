@@ -271,7 +271,7 @@ func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []mar
 		return ap
 	}
 	ap.State = StateActiveLimit
-	ap.Reason = "đủ setup score/gates, discount zone và reward/risk; tạo paper limit layers"
+	ap.Reason = "đủ setup gates, discount zone và reward/risk; tạo paper limit layers"
 	ap.NextTrigger = "Layer hợp lệ; live manager kiểm tra preflight/caps trước khi đặt post-only."
 	return ap
 }

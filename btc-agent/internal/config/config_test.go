@@ -61,64 +61,6 @@ func TestValidateAutoLiveTradingDoesNotRequireLiveAutoMode(t *testing.T) {
 	}
 }
 
-func TestValidateAutoLadderRequiresAutoExecute(t *testing.T) {
-	cfg := validTestConfig()
-	cfg.Execution.RealTradingEnabled = true
-	cfg.Execution.PaperTrading = false
-	cfg.Live.Enabled = true
-	cfg.Live.ProofOnly = false
-	cfg.Live.RequireManualConfirm = true
-	cfg.Live.AutoExecute = false
-	cfg.Live.LiveAutoMode = true
-	cfg.Live.LiveAutoMaxNotionalUSDT = 2
-	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.MaxAutoLayersPerCycle = 1
-	cfg.Live.MaxOpenLiveOrders = 1
-	cfg.Live.AutoLadderMaxNotionalUSDT = 2
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected auto ladder to require auto execute")
-	}
-}
-
-func TestValidateAutoLadderBounds(t *testing.T) {
-	base := validTestConfig()
-	base.Execution.RealTradingEnabled = true
-	base.Execution.PaperTrading = false
-	base.Live.Enabled = true
-	base.Live.ProofOnly = false
-	base.Live.RequireManualConfirm = false
-	base.Live.AutoExecute = true
-	base.Live.LiveAutoMode = true
-	base.Live.LiveAutoMaxNotionalUSDT = 2
-	base.Live.AutoLadderEnabled = true
-	base.Live.MaxAutoLayersPerCycle = 1
-	base.Live.MaxOpenLiveOrders = 1
-	base.Live.AutoLadderMaxNotionalUSDT = 2
-	if err := base.Validate(); err != nil {
-		t.Fatalf("unexpected validation error: %v", err)
-	}
-	cases := []struct {
-		name string
-		set  func(*Config)
-	}{
-		{"zero layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerCycle = 0 }},
-		{"too many layers", func(cfg *Config) { cfg.Live.MaxAutoLayersPerCycle = 4 }},
-		{"zero open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 0 }},
-		{"too many open orders", func(cfg *Config) { cfg.Live.MaxOpenLiveOrders = 11 }},
-		{"zero notional", func(cfg *Config) { cfg.Live.AutoLadderMaxNotionalUSDT = 0 }},
-		{"too much notional", func(cfg *Config) { cfg.Live.AutoLadderMaxNotionalUSDT = 11 }},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := base
-			tc.set(&cfg)
-			if err := cfg.Validate(); err == nil {
-				t.Fatal("expected validation error")
-			}
-		})
-	}
-}
-
 func TestValidateLiveEnabledRejectsOversizedOrderCap(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true
@@ -128,7 +70,7 @@ func TestValidateLiveEnabledRejectsOversizedOrderCap(t *testing.T) {
 	}
 }
 
-func TestValidateLiveAutoModeValid(t *testing.T) {
+func TestLiveAutoModeUsesOnlyCurrentFlag(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.Live.Enabled = true
 	cfg.Live.LiveAutoMode = true
@@ -136,6 +78,10 @@ func TestValidateLiveAutoModeValid(t *testing.T) {
 	cfg.Live.MaxOrderNotionalUSDT = 10.0
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
+	}
+	cfg.Live.LiveAutoMode = false
+	if LiveAutoMode(cfg) {
+		t.Fatal("live-auto mode must follow only current flag")
 	}
 }
 

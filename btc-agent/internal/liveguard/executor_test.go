@@ -257,63 +257,6 @@ func TestExecuteAutoProofOrderBlocksWhenHaltReaderErrorsOrNil(t *testing.T) {
 	}
 }
 
-func TestExecuteAutoLadderProofOrderSubmits(t *testing.T) {
-	cfg, _ := autoExecutableConfigAndProof()
-	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.MaxAutoLayersPerCycle = 2
-	cfg.Live.MaxOpenLiveOrders = 2
-	cfg.Live.AutoLadderMaxNotionalUSDT = 4
-	proof := LadderProof{
-		Status:  ReadyForManualLiveProofOrder,
-		Account: AccountCheck{Enabled: true, AuthOK: true, BalanceOK: true, FreeUSDT: 20},
-		Candidates: []CandidateOrder{
-			{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true, LiveAuto: true},
-			{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 90, Quantity: 0.02222222, Notional: 2, PostOnly: true, LiveAuto: true},
-		},
-		Preflights:    []PreflightResult{{Enabled: true, Pass: true, Symbol: "ETHUSDT", InstID: "ETH-USDT"}, {Enabled: true, Pass: true, Symbol: "ETHUSDT", InstID: "ETH-USDT"}},
-		TotalNotional: 4,
-	}
-	placer := &fakeOrderPlacer{result: live.OrderResult{InstID: "ETH-USDT", OrderID: "123", ClientOrderID: "abc", Submitted: true}}
-	got := ExecuteAutoLadderProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
-	if got.Status != LiveOrderSubmitted || placer.calls != 2 {
-		t.Fatalf("unexpected result: %+v calls=%d", got, placer.calls)
-	}
-}
-
-func TestExecuteAutoLadderProofOrderBlocksOpenLimit(t *testing.T) {
-	cfg, _ := autoExecutableConfigAndProof()
-	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.MaxOpenLiveOrders = 1
-	cfg.Live.AutoLadderMaxNotionalUSDT = 2
-	proof := LadderProof{Status: ReadyForManualLiveProofOrder, Account: AccountCheck{AuthOK: true, BalanceOK: true}, Candidates: []CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true}}, Preflights: []PreflightResult{{Pass: true}}, TotalNotional: 2}
-	placer := &fakeOrderPlacer{}
-	open := []live.OrderStatus{{InstID: "ETH-USDT", Status: live.StatusLiveOpen}}
-	got := ExecuteAutoLadderProofOrder(context.Background(), cfg, proof, placer, open, nil, fakeHaltReader{halted: false})
-	if got.Status != LiveOrderBlocked || placer.called {
-		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
-	}
-}
-
-func TestExecuteAutoLadderProofOrderReportsZeroNotionalClearly(t *testing.T) {
-	cfg, _ := autoExecutableConfigAndProof()
-	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.MaxOpenLiveOrders = 1
-	cfg.Live.AutoLadderMaxNotionalUSDT = 2
-	proof := LadderProof{Status: NotReadyNoDeterministicOrder, Account: AccountCheck{AuthOK: true, BalanceOK: true}, TotalNotional: 0}
-	placer := &fakeOrderPlacer{}
-	got := ExecuteAutoLadderProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
-	joined := strings.Join(got.Reasons, " ")
-	if got.Status != LiveOrderBlocked || placer.called {
-		t.Fatalf("unexpected result: %+v called=%v", got, placer.called)
-	}
-	if strings.Contains(joined, "ladder total notional above max") {
-		t.Fatalf("zero notional reported as above max: %+v", got.Reasons)
-	}
-	if !strings.Contains(joined, "ladder total notional must be positive") {
-		t.Fatalf("missing zero-notional blocker: %+v", got.Reasons)
-	}
-}
-
 func TestClientOrderIDUniqueAndWithinOKXLimit(t *testing.T) {
 	seen := map[string]bool{}
 	for i := 0; i < 100; i++ {
@@ -351,24 +294,6 @@ func TestExecuteAutoProofOrderSanitizesExchangeError(t *testing.T) {
 	cfg.Live.APIKeyEnv = "OKX_API_KEY"
 	placer := &fakeOrderPlacer{err: fmt.Errorf("okx order failed apiKey=%s", secret)}
 	got := ExecuteAutoProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
-	joined := got.Summary + " " + strings.Join(got.Reasons, " ")
-	if got.Status != LiveOrderRejected || strings.Contains(joined, secret) {
-		t.Fatalf("exchange error not sanitized: %+v", got)
-	}
-}
-
-func TestExecuteAutoLadderProofOrderSanitizesExchangeError(t *testing.T) {
-	cfg, _ := autoExecutableConfigAndProof()
-	cfg.Live.AutoLadderEnabled = true
-	cfg.Live.MaxAutoLayersPerCycle = 1
-	cfg.Live.MaxOpenLiveOrders = 1
-	cfg.Live.AutoLadderMaxNotionalUSDT = 2
-	secret := "ladder-secret-value"
-	t.Setenv("OKX_API_PASSPHRASE", secret)
-	cfg.Live.APIPassphraseEnv = "OKX_API_PASSPHRASE"
-	proof := LadderProof{Status: ReadyForManualLiveProofOrder, Account: AccountCheck{AuthOK: true, BalanceOK: true}, Candidates: []CandidateOrder{{Symbol: "ETHUSDT", Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true}}, Preflights: []PreflightResult{{Pass: true, Symbol: "ETHUSDT", InstID: "ETH-USDT"}}, TotalNotional: 2}
-	placer := &fakeOrderPlacer{err: fmt.Errorf("okx ladder failed passphrase=%s", secret)}
-	got := ExecuteAutoLadderProofOrder(context.Background(), cfg, proof, placer, nil, nil, fakeHaltReader{halted: false})
 	joined := got.Summary + " " + strings.Join(got.Reasons, " ")
 	if got.Status != LiveOrderRejected || strings.Contains(joined, secret) {
 		t.Fatalf("exchange error not sanitized: %+v", got)

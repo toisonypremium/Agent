@@ -746,14 +746,14 @@ func normalizedMaxAutoLayersPerAsset(cfg config.Config) int {
 	if cfg.Live.MaxAutoLayersPerAsset > 0 {
 		return minInt(cfg.Live.MaxAutoLayersPerAsset, 3)
 	}
-	return normalizedMaxAutoLayers(cfg)
+	return 1
 }
 
 func normalizedMaxOpenLiveOrdersPerAsset(cfg config.Config) int {
 	if cfg.Live.MaxOpenLiveOrdersPerAsset > 0 {
 		return cfg.Live.MaxOpenLiveOrdersPerAsset
 	}
-	return normalizedMaxOpenLiveOrders(cfg)
+	return 1
 }
 
 func normalizedMaxOpenLiveOrdersTotal(cfg config.Config) int {
@@ -767,7 +767,7 @@ func normalizedMaxLiveNotionalPerOrder(cfg config.Config) float64 {
 	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
 		return cfg.Live.MaxLiveNotionalPerOrderUSDT
 	}
-	return normalizedAutoLadderMaxNotional(cfg)
+	return cfg.Live.MaxOrderNotionalUSDT
 }
 
 func normalizedMaxLiveNotionalPerAsset(cfg config.Config) float64 {

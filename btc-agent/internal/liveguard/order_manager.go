@@ -117,14 +117,18 @@ type ManagedCoinSummary struct {
 }
 
 func ManageLiveOrders(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader) ManagedCycleResult {
-	return ManageLiveOrdersWithRecorder(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, nil, false)
+	return ManageLiveOrdersWithRecorderAndContext(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, ManagedExecutionContext{}, nil, false)
 }
 
 func ManageLiveOrdersDryRun(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader, dryRun bool) ManagedCycleResult {
-	return ManageLiveOrdersWithRecorder(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, nil, dryRun)
+	return ManageLiveOrdersWithRecorderAndContext(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, ManagedExecutionContext{}, nil, dryRun)
 }
 
 func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
+	return ManageLiveOrdersWithRecorderAndContext(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, ManagedExecutionContext{}, recorder, dryRun)
+}
+
+func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader, execCtx ManagedExecutionContext, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
 	result := ManagedCycleResult{GeneratedAt: time.Now(), Status: ManagedCycleCompleted, PlanState: plan.State, Desired: []ManagedDesiredOrder{}, DryRun: dryRun}
 	if halted, err := haltedState(haltReader); err != nil || halted {
 		result.Reasons = append(result.Reasons, "operator halt active")
@@ -142,7 +146,7 @@ func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan a
 		result.Summary = managedSummary(result)
 		return result
 	}
-	desired, blocked := BuildManagedDesiredOrders(cfg, plan, filters, positions, openOrders)
+	desired, blocked := BuildManagedDesiredOrdersWithContext(cfg, plan, filters, positions, openOrders, execCtx)
 	result.Desired = desired
 	result.Blocked = append(result.Blocked, blocked...)
 	desiredByKey := map[string]ManagedDesiredOrder{}
@@ -235,8 +239,8 @@ func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan a
 			continue
 		}
 		decision := ManagedOrderDecision{Action: "place", Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Desired: desiredOrder, Reason: "missing active accumulation layer order"}
-		assertionBlockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desiredOrder, OpenNotionalTotal: openNotionalTotal, OpenNotionalBySymbol: openNotionalBySymbol, DryRun: dryRun})
-		decision.AuditTrail = FinalAssertionAudit(plan, desiredOrder, assertionBlockers)
+		assertionBlockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desiredOrder, OpenNotionalTotal: openNotionalTotal, OpenNotionalBySymbol: openNotionalBySymbol, DryRun: dryRun, ManagedExecutionContext: execCtx})
+		decision.AuditTrail = FinalAssertionAuditWithContext(execCtx, plan, desiredOrder, assertionBlockers)
 		if len(assertionBlockers) > 0 {
 			decision.Action = "block"
 			decision.Reason = "final execution assertion blocked: " + strings.Join(assertionBlockers, "; ")
@@ -553,6 +557,10 @@ func appendUniqueStrings(items []string, values ...string) []string {
 }
 
 func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []live.InstrumentFilter, positions []live.LivePosition, openOrders []live.OrderStatus) ([]ManagedDesiredOrder, []ManagedOrderDecision) {
+	return BuildManagedDesiredOrdersWithContext(cfg, plan, filters, positions, openOrders, ManagedExecutionContext{})
+}
+
+func BuildManagedDesiredOrdersWithContext(cfg config.Config, plan agent2.Plan, filters []live.InstrumentFilter, positions []live.LivePosition, openOrders []live.OrderStatus, execCtx ManagedExecutionContext) ([]ManagedDesiredOrder, []ManagedOrderDecision) {
 	desired := []ManagedDesiredOrder{}
 	blocked := []ManagedOrderDecision{}
 	if plan.State != agent2.StateActiveLimit || plan.ActionPermission != agent1.Allowed {
@@ -636,7 +644,7 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 		}
 		return desired[i].Symbol < desired[j].Symbol
 	})
-	if cfg.Live.FirstOrderQuarantineEnabled && firstOrderQuarantineApplies(openOrders, positions) && len(desired) > 0 {
+	if cfg.Live.FirstOrderQuarantineEnabled && firstOrderQuarantineAppliesWithContext(openOrders, positions, execCtx) && len(desired) > 0 {
 		first := desired[0]
 		if cfg.Live.FirstOrderMaxNotionalUSDT > 0 && first.Notional > cfg.Live.FirstOrderMaxNotionalUSDT {
 			first.Notional = cfg.Live.FirstOrderMaxNotionalUSDT
@@ -659,6 +667,13 @@ type historyQualityScore struct {
 }
 
 func firstOrderQuarantineApplies(openOrders []live.OrderStatus, positions []live.LivePosition) bool {
+	return firstOrderQuarantineAppliesWithContext(openOrders, positions, ManagedExecutionContext{})
+}
+
+func firstOrderQuarantineAppliesWithContext(openOrders []live.OrderStatus, positions []live.LivePosition, execCtx ManagedExecutionContext) bool {
+	if execCtx.ManagedOrderHistoryKnown {
+		return !execCtx.HasManagedRealOrderHistory
+	}
 	for _, order := range openOrders {
 		if live.NormalizeOrderStatus(order.Status) != "" {
 			return false

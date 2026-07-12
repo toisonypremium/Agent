@@ -542,6 +542,15 @@ func (d *DB) MarkManagedLiveOrderRejected(clientOrderID string, reason string) e
 	return nil
 }
 
+func (d *DB) HasManagedRealOrderSubmission() (bool, error) {
+	var count int
+	err := d.QueryRow(`SELECT COUNT(*) FROM live_orders WHERE status IN ('SUBMITTED', 'PARTIAL_FILL', 'LIVE_OPEN', 'PARTIALLY_FILLED', 'FILLED') AND (source LIKE 'deterministic_agent2_layer_%' OR last_management_action LIKE 'submitted%' OR last_management_action LIKE 'placed:%')`).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
 func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
 	return d.OpenLiveOrdersDetailed()
 }

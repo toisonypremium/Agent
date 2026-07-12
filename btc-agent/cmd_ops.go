@@ -93,10 +93,14 @@ func runOperationsPlan(cfg config.Config, db *storage.DB) error {
 }
 
 type marketWatchState struct {
-	Fingerprint         string    `json:"fingerprint"`
-	NotifiedFingerprint string    `json:"notified_fingerprint,omitempty"`
-	UpdatedAt           time.Time `json:"updated_at"`
-	LastCriticalAt      time.Time `json:"last_critical_at,omitempty"`
+	Fingerprint                   string    `json:"fingerprint"`
+	NotifiedFingerprint           string    `json:"notified_fingerprint,omitempty"`
+	MarketNotifiedFingerprint     string    `json:"market_notified_fingerprint,omitempty"`
+	CriticalNotifiedFingerprint   string    `json:"critical_notified_fingerprint,omitempty"`
+	NearUnlockNotifiedFingerprint string    `json:"near_unlock_notified_fingerprint,omitempty"`
+	RealReadyNotifiedFingerprint  string    `json:"real_ready_notified_fingerprint,omitempty"`
+	UpdatedAt                     time.Time `json:"updated_at"`
+	LastCriticalAt                time.Time `json:"last_critical_at,omitempty"`
 }
 
 func loadMarketWatchState() marketWatchState {
@@ -142,7 +146,8 @@ func runMarketWatch(ctx context.Context, cfg config.Config, db *storage.DB, noti
 
 	previous := loadMarketWatchState()
 	changed := previous.Fingerprint == "" || previous.Fingerprint != report.Fingerprint
-	notificationDue := previous.NotifiedFingerprint != report.Fingerprint
+	marketNotified := firstNonEmpty(previous.MarketNotifiedFingerprint, previous.NotifiedFingerprint)
+	notificationDue := marketNotified != report.Fingerprint
 	now := time.Now().UTC()
 	criticalDue := false
 	if report.Market.Urgency == opsplan.UrgencyRiskAlert && cfg.Monitoring.NotifyOnCritical {
@@ -155,12 +160,13 @@ func runMarketWatch(ctx context.Context, cfg config.Config, db *storage.DB, noti
 		case criticalDue:
 			sendTelegram(ctx, cfg, "market-critical", opsplan.CriticalTelegram(report))
 			previous.LastCriticalAt = now
-			previous.NotifiedFingerprint = report.Fingerprint
+			previous.CriticalNotifiedFingerprint = "critical:" + report.Fingerprint
+		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && liveAutoNearUnlockTelegram(report) != "" && previous.NearUnlockNotifiedFingerprint != liveAutoNearUnlockFingerprint(report):
+			sendTelegram(ctx, cfg, "live-auto-near-unlock", liveAutoNearUnlockTelegram(report))
+			previous.NearUnlockNotifiedFingerprint = liveAutoNearUnlockFingerprint(report)
 		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && notificationDue:
 			sendTelegram(ctx, cfg, "market-state", opsplan.TelegramDigest(report))
-			previous.NotifiedFingerprint = report.Fingerprint
-		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && liveAutoNearUnlockTelegram(report) != "":
-			sendTelegram(ctx, cfg, "live-auto-near-unlock", liveAutoNearUnlockTelegram(report))
+			previous.MarketNotifiedFingerprint = report.Fingerprint
 			previous.NotifiedFingerprint = report.Fingerprint
 		}
 	}

@@ -78,11 +78,12 @@ Milestone B adds report-only microstructure plumbing:
 Before autonomous real-order approval, live-auto now has extra production checks:
 
 - `live-auto-audit` writes `reports/live_auto_audit_latest.md/json` and returns `APPROVED_MONITORING`, `APPROVED_DRY_RUN`, `APPROVED_REAL_ORDER`, or `BLOCKED`.
+- Audit separates current market authority from forced synthetic simulation.
 - Managed order engine runs a final execution assertion immediately before `PlaceSpotLimitOrder`.
-- Final assertion blocks non-`ACTIVE_LIMIT`, non-`ALLOWED`, non-`BUY limit post-only`, unsafe config, wrong risk flags, invalid size, or cap overflow.
-- Forced `ACTIVE_LIMIT` simulation proves dry-run `would_place` behavior without exchange submission.
-- First-order quarantine can restrict first real live order to one small layer after dry-run audit.
-- `market-watch` emits near-unlock runtime events when BTC/plan approaches real-order readiness.
+- Final assertion blocks non-`ACTIVE_LIMIT`, non-`ALLOWED`, non-`ACCUMULATION_CONFIRMED`, non-`BUY limit post-only`, unsafe config, wrong risk flags, invalid size, missing first-order dry-run proof, or cap overflow.
+- Forced `ACTIVE_LIMIT` simulation proves dry-run `would_place` behavior with measured `exchange_calls=0`.
+- First-order quarantine can restrict first real live order to one small layer after dry-run audit; managed order history is preferred over open-order fallback.
+- `market-watch` emits deduped near-unlock runtime events when BTC/plan approaches dry-run readiness; real-order-ready remains audit-gated.
 
 ## Safety invariants
 
@@ -97,15 +98,15 @@ Before autonomous real-order approval, live-auto now has extra production checks
 
 ## Operator status target
 
-Current desired operating state:
+Current approved operating state:
 
 ```text
-scheduler=running
+scheduler=running in dry-run/monitoring
 mode=live-auto
-dry_run=false
-bot_ready=true
-market_ready=false until ACTIVE_LIMIT+ALLOWED
-can_submit=false until ACTIVE_LIMIT+ALLOWED
+dry_run=true until live-auto-audit APPROVED_REAL_ORDER
+bot_ready_for_monitoring=true
+bot_ready_for_dry_run=true
+bot_ready_for_real_order=false until ACTIVE_LIMIT+ALLOWED+ACCUMULATION_CONFIRMED and audit proof passes
 ```
 
 When market is not ready, expected managed cycle remains:

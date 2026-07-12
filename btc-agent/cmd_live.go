@@ -770,7 +770,24 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 	if !dryRun {
 		recorder = db
 	}
-	result := liveguard.ManageLiveOrdersWithRecorder(ctx, cfg, p, open, positions, filters, placer, canceler, db, recorder, dryRun)
+	hasHistory, historyErr := db.HasManagedRealOrderSubmission()
+	if historyErr != nil {
+		log.Printf("managed order history warning: %v", historyErr)
+	}
+	dryRunApproved := dryRun
+	if !dryRun {
+		approved, approvalReasons := loadFirstOrderDryRunApproval(filepath.Join("reports", "live_auto_audit_latest.json"), time.Now().UTC())
+		dryRunApproved = approved
+		if !approved {
+			log.Printf("first-order dry-run audit not approved: %s", strings.Join(approvalReasons, "; "))
+		}
+	}
+	execCtx := liveguard.ManagedExecutionContext{BTCAccumulationPhase: string(analysis.BTCAccumulation.Phase), FirstOrderDryRunApproved: dryRunApproved}
+	if historyErr == nil {
+		execCtx.ManagedOrderHistoryKnown = true
+		execCtx.HasManagedRealOrderHistory = hasHistory
+	}
+	result := liveguard.ManageLiveOrdersWithRecorderAndContext(ctx, cfg, p, open, positions, filters, placer, canceler, db, execCtx, recorder, dryRun)
 	result.DataHealth = dataHealth
 	result.ReconcileSafety = reconcileSafety
 	result.RiskGovernor = riskGovernor

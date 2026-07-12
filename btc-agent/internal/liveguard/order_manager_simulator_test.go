@@ -18,7 +18,7 @@ func TestManageLiveOrdersWithFakeOKXSubmitAndFill(t *testing.T) {
 	fake.SetFilter("ETH-USDT", live.InstrumentFilter{InstID: "ETH-USDT", MinNotional: 1, MinSize: 0.0001})
 	fake.SetFilter("SOL-USDT", live.InstrumentFilter{InstID: "SOL-USDT", MinNotional: 1, MinSize: 0.0001})
 
-	got := ManageLiveOrders(context.Background(), cfg, plan, nil, nil, nil, fake, fake, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, fake, fake, fakeHaltReader{halted: false})
 	if got.Status != ManagedCycleCompleted || len(got.Placed) != 4 {
 		t.Fatalf("expected 4 simulated submits, got %+v", got)
 	}
@@ -54,7 +54,7 @@ func TestManageLiveOrdersWithFakeOKXRejectsByFilter(t *testing.T) {
 	fake.SetFilter("ETH-USDT", live.InstrumentFilter{InstID: "ETH-USDT", MinNotional: 100, MinSize: 0.0001})
 	fake.SetFilter("SOL-USDT", live.InstrumentFilter{InstID: "SOL-USDT", MinNotional: 1, MinSize: 0.0001})
 
-	got := ManageLiveOrders(context.Background(), cfg, plan, nil, nil, nil, fake, fake, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, fake, fake, fakeHaltReader{halted: false})
 	if got.Status != ManagedCyclePartial || len(got.Blocked) == 0 {
 		t.Fatalf("expected simulator reject to block cycle, got %+v", got)
 	}
@@ -78,14 +78,14 @@ func TestManageLiveOrdersWithFakeOKXCancelsInactivePlan(t *testing.T) {
 	fake.SetFilter("ETH-USDT", live.InstrumentFilter{InstID: "ETH-USDT", MinNotional: 1, MinSize: 0.0001})
 	fake.SetFilter("SOL-USDT", live.InstrumentFilter{InstID: "SOL-USDT", MinNotional: 1, MinSize: 0.0001})
 
-	first := ManageLiveOrders(context.Background(), cfg, plan, nil, nil, nil, fake, fake, fakeHaltReader{halted: false})
+	first := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, fake, fake, fakeHaltReader{halted: false})
 	if first.Status != ManagedCycleCompleted || len(first.Placed) == 0 {
 		t.Fatalf("expected initial submits, got %+v", first)
 	}
 	open := []live.OrderStatus{{InstID: first.Placed[0].Desired.InstID, Symbol: first.Placed[0].Desired.Symbol, ClientOrderID: first.Placed[0].PlaceResult.ClientOrderID, OrderID: first.Placed[0].PlaceResult.OrderID, Status: live.StatusSubmitted, Price: first.Placed[0].Desired.Price, Quantity: first.Placed[0].Desired.Quantity, Notional: first.Placed[0].Desired.Notional, LayerIndex: first.Placed[0].Desired.LayerIndex}}
 	inactive := plan
 	inactive.State = agent2.StateWatch
-	got := ManageLiveOrders(context.Background(), cfg, inactive, open, nil, nil, fake, fake, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, inactive, open, nil, nil, fake, fake, fakeHaltReader{halted: false})
 	if got.Status != ManagedCycleCompleted || len(got.Canceled) != 1 {
 		t.Fatalf("expected one simulator cancel, got %+v", got)
 	}

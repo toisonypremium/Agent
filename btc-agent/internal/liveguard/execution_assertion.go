@@ -11,6 +11,13 @@ import (
 	"btc-agent/internal/exchange/live"
 )
 
+type ManagedExecutionContext struct {
+	BTCAccumulationPhase       string `json:"btc_accumulation_phase,omitempty"`
+	FirstOrderDryRunApproved   bool   `json:"first_order_dry_run_approved,omitempty"`
+	ManagedOrderHistoryKnown   bool   `json:"managed_order_history_known,omitempty"`
+	HasManagedRealOrderHistory bool   `json:"has_managed_real_order_history,omitempty"`
+}
+
 type ExecutionAssertionInput struct {
 	Config               config.Config
 	Plan                 agent2.Plan
@@ -18,6 +25,7 @@ type ExecutionAssertionInput struct {
 	OpenNotionalTotal    float64
 	OpenNotionalBySymbol map[string]float64
 	DryRun               bool
+	ManagedExecutionContext
 }
 
 func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
@@ -39,8 +47,8 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 	if !cfg.Execution.RealTradingEnabled {
 		reasons = append(reasons, "execution.real_trading_enabled=false")
 	}
-	if cfg.Live.FirstOrderRequireDryRun && !in.DryRun {
-		reasons = append(reasons, "live.first_order_require_dry_run=true; dry-run audit required before first real order")
+	if cfg.Live.FirstOrderRequireDryRun && !in.DryRun && !in.FirstOrderDryRunApproved {
+		reasons = append(reasons, "live.first_order_require_dry_run=true; approved dry-run audit required before first real order")
 	}
 	if !cfg.Risk.NoFutures || !cfg.Risk.NoLeverage || !cfg.Risk.SpotLimitOnly {
 		reasons = append(reasons, "risk flags must enforce no futures/no leverage/spot limit only")
@@ -50,6 +58,14 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 	}
 	if in.Plan.ActionPermission != agent1.Allowed {
 		reasons = append(reasons, "plan action permission must be ALLOWED")
+	}
+	phase := strings.ToUpper(strings.TrimSpace(in.BTCAccumulationPhase))
+	if phase == "" {
+		if !in.DryRun {
+			reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
+		}
+	} else if phase != "ACCUMULATION_CONFIRMED" {
+		reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
 	}
 	if strings.ToUpper(d.Side) != "BUY" {
 		reasons = append(reasons, "desired side must be BUY")
@@ -90,6 +106,10 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 }
 
 func FinalAssertionAudit(plan agent2.Plan, desired ManagedDesiredOrder, blockers []string) []string {
+	return FinalAssertionAuditWithContext(ManagedExecutionContext{}, plan, desired, blockers)
+}
+
+func FinalAssertionAuditWithContext(execCtx ManagedExecutionContext, plan agent2.Plan, desired ManagedDesiredOrder, blockers []string) []string {
 	out := []string{
 		"plan=" + string(plan.State),
 		"permission=" + string(plan.ActionPermission),
@@ -99,6 +119,8 @@ func FinalAssertionAudit(plan agent2.Plan, desired ManagedDesiredOrder, blockers
 		fmt.Sprintf("post_only=%v", desired.PostOnly),
 		fmt.Sprintf("notional=%.2f", desired.Notional),
 		fmt.Sprintf("layer=%d", desired.LayerIndex),
+		"btc_accumulation=" + emptyAuditValue(execCtx.BTCAccumulationPhase),
+		fmt.Sprintf("first_order_dry_run_approved=%v", execCtx.FirstOrderDryRunApproved),
 	}
 	if desired.AllocationTier != "" {
 		out = append(out, "allocation_tier="+desired.AllocationTier)
@@ -113,6 +135,14 @@ func FinalAssertionAudit(plan agent2.Plan, desired ManagedDesiredOrder, blockers
 		out = append(out, "assertion=PASS")
 	}
 	return uniqueStrings(out)
+}
+
+func emptyAuditValue(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "unknown"
+	}
+	return value
 }
 
 func positiveFinite(v float64) bool {

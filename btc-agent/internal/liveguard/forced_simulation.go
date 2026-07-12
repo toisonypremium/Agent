@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"btc-agent/internal/exchange/live"
+
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
@@ -26,13 +28,18 @@ type ForcedSimulationResult struct {
 
 func RunForcedActiveLimitSimulation(cfg config.Config) ForcedSimulationResult {
 	plan := forcedActiveLimitPlan(cfg)
-	result := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, nil, nil, fakeHaltFalse{}, nil, true)
-	out := ForcedSimulationResult{GeneratedAt: time.Now(), Status: "PASS", Managed: result, Desired: len(result.Desired), WouldPlace: len(result.Placed), Blocked: len(result.Blocked)}
+	exchange := &forcedSimulationExchange{}
+	execCtx := ManagedExecutionContext{BTCAccumulationPhase: "ACCUMULATION_CONFIRMED", FirstOrderDryRunApproved: true}
+	result := ManageLiveOrdersWithRecorderAndContext(context.Background(), cfg, plan, nil, nil, nil, exchange, exchange, fakeHaltFalse{}, execCtx, nil, true)
+	out := ForcedSimulationResult{GeneratedAt: time.Now(), Status: "PASS", Managed: result, Desired: len(result.Desired), WouldPlace: len(result.Placed), Blocked: len(result.Blocked), ExchangeCalls: exchange.calls}
 	if out.Desired == 0 {
 		out.Reasons = append(out.Reasons, "desired orders = 0")
 	}
 	if out.WouldPlace == 0 {
 		out.Reasons = append(out.Reasons, "would_place orders = 0")
+	}
+	if out.ExchangeCalls != 0 {
+		out.Reasons = append(out.Reasons, "exchange calls must be 0 in dry-run simulation")
 	}
 	for _, decision := range result.Placed {
 		if decision.Action != "would_place" {
@@ -55,6 +62,20 @@ func RunForcedActiveLimitSimulation(cfg config.Config) ForcedSimulationResult {
 		out.Summary = "forced ACTIVE_LIMIT simulation passed: dry-run produced would_place without exchange calls"
 	}
 	return out
+}
+
+type forcedSimulationExchange struct {
+	calls int
+}
+
+func (f *forcedSimulationExchange) PlaceSpotLimitOrder(ctx context.Context, req live.LimitOrderRequest) (live.OrderResult, error) {
+	f.calls++
+	return live.OrderResult{}, nil
+}
+
+func (f *forcedSimulationExchange) CancelOrder(ctx context.Context, req live.CancelOrderRequest) (live.CancelOrderResult, error) {
+	f.calls++
+	return live.CancelOrderResult{}, nil
 }
 
 type fakeHaltFalse struct{}

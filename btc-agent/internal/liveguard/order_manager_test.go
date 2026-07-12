@@ -47,6 +47,18 @@ func (f *fakeManagedExchange) OrderBook(ctx context.Context, instID string) (liq
 	return f.book, nil
 }
 
+func confirmedExecContext() ManagedExecutionContext {
+	return ManagedExecutionContext{BTCAccumulationPhase: "ACCUMULATION_CONFIRMED", FirstOrderDryRunApproved: true}
+}
+
+func manageLiveOrdersConfirmed(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader) ManagedCycleResult {
+	return ManageLiveOrdersWithRecorderAndContext(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, confirmedExecContext(), nil, false)
+}
+
+func manageLiveOrdersWithRecorderConfirmed(ctx context.Context, cfg config.Config, plan agent2.Plan, openOrders []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, canceler OrderCanceler, haltReader HaltReader, recorder ManagedOrderRecorder) ManagedCycleResult {
+	return ManageLiveOrdersWithRecorderAndContext(ctx, cfg, plan, openOrders, positions, filters, placer, canceler, haltReader, confirmedExecContext(), recorder, false)
+}
+
 type fakeManagedRecorder struct {
 	reserveErr   error
 	reserved     []string
@@ -79,7 +91,7 @@ func TestManageLiveOrdersAllowsMultipleAssetsAndLayers(t *testing.T) {
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{}
-	got := ManageLiveOrders(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false})
 	if got.Status != ManagedCycleCompleted {
 		t.Fatalf("status=%s summary=%s", got.Status, got.Summary)
 	}
@@ -94,7 +106,7 @@ func TestManageLiveOrdersCancelsWhenPlanNotActive(t *testing.T) {
 	plan.State = agent2.StateWatch
 	ex := &fakeManagedExchange{}
 	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1}}
-	got := ManageLiveOrders(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
 	if len(got.Canceled) != 1 || len(ex.canceled) != 1 {
 		t.Fatalf("expected cancel, got %+v", got)
 	}
@@ -105,7 +117,7 @@ func TestManageLiveOrdersKeepsMatchingOrder(t *testing.T) {
 	plan := managedPlan()
 	ex := &fakeManagedExchange{}
 	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1}}
-	got := ManageLiveOrders(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
 	if len(got.Kept) != 1 || len(got.Canceled) != 0 || len(ex.canceled) != 0 {
 		t.Fatalf("expected keep, got %+v", got)
 	}
@@ -116,7 +128,7 @@ func TestManageLiveOrdersCancelsWhenPlanArmed(t *testing.T) {
 	plan := agent2.Plan{State: agent2.StateArmed, ActionPermission: agent1.Armed, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateArmed, DiscountZone: market.Zone{Low: 90, High: 100}, Invalidation: 88, Reason: "armed", Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}}}}}
 	ex := &fakeManagedExchange{}
 	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1}}
-	got := ManageLiveOrders(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
 	if len(got.Desired) != 0 || len(got.Placed) != 0 || len(got.Kept) != 0 || len(got.Canceled) != 1 || len(ex.canceled) != 1 {
 		t.Fatalf("ARMED should cancel stale live order and not keep/place: %+v", got)
 	}
@@ -164,7 +176,7 @@ func TestManageLiveOrdersWithRecorderReservesBeforeSubmit(t *testing.T) {
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{}
 	rec := &fakeManagedRecorder{}
-	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if got.Status != ManagedCycleCompleted {
 		t.Fatalf("status=%s summary=%s", got.Status, got.Summary)
 	}
@@ -179,7 +191,7 @@ func TestManageLiveOrdersWithRecorderBlocksWhenReserveFails(t *testing.T) {
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{}
 	rec := &fakeManagedRecorder{reserveErr: fmt.Errorf("duplicate client id")}
-	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if got.Status != ManagedCyclePartial || len(ex.placed) != 0 || len(got.Blocked) == 0 {
 		t.Fatalf("reserve failure should block before exchange call: placed=%d result=%+v", len(ex.placed), got)
 	}
@@ -191,7 +203,7 @@ func TestManageLiveOrdersWithRecorderMarksRejectedOnSubmitError(t *testing.T) {
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{placeErr: fmt.Errorf("exchange rejected api_secret=bad")}
 	rec := &fakeManagedRecorder{}
-	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if got.Status != ManagedCyclePartial || len(rec.rejected) == 0 || len(got.Blocked) == 0 {
 		t.Fatalf("submit error should mark rejected: %+v recorder=%+v", got, rec)
 	}
@@ -216,7 +228,7 @@ func TestManageLiveOrdersBuildsPerCoinSummaries(t *testing.T) {
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{}
-	got := ManageLiveOrders(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false})
 	eth := managedCoinForTest(t, got.PerCoin, "ETHUSDT")
 	sol := managedCoinForTest(t, got.PerCoin, "SOLUSDT")
 	if eth.State != agent2.StateActiveLimit || eth.DesiredLayers != 2 || eth.Placed != 2 || eth.PendingNotional != 4 {
@@ -265,7 +277,7 @@ func TestManageLiveOrdersMMGateBlocksBeforeReserveAndSubmit(t *testing.T) {
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{book: liquidity.OrderBookSnapshot{BestBid: 99, BestAsk: 101, BidDepth1PctUSDT: 1000, AskDepth1PctUSDT: 1000}}
 	rec := &fakeManagedRecorder{}
-	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if len(got.Placed) != 0 || len(ex.placed) != 0 || len(rec.reserved) != 0 || len(got.Blocked) == 0 {
 		t.Fatalf("MM gate should block before reserve/submit: placed=%d exch=%d reserved=%d result=%+v", len(got.Placed), len(ex.placed), len(rec.reserved), got)
 	}
@@ -288,7 +300,7 @@ func TestManageLiveOrdersMMGateHealthyBookAllowsSubmit(t *testing.T) {
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
 	ex := &fakeManagedExchange{book: liquidity.OrderBookSnapshot{BestBid: 99.9, BestAsk: 100, BidDepth1PctUSDT: 1000, AskDepth1PctUSDT: 1000}}
 	rec := &fakeManagedRecorder{}
-	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if len(got.Placed) == 0 || len(ex.placed) == 0 || len(rec.reserved) == 0 {
 		t.Fatalf("healthy MM gate should allow submit: placed=%d exch=%d reserved=%d result=%+v", len(got.Placed), len(ex.placed), len(rec.reserved), got)
 	}
@@ -322,7 +334,7 @@ func TestAssertManagedExecutionAllowedBlocksUnsafeOrder(t *testing.T) {
 	cfg.Execution.RealTradingEnabled = true
 	plan := managedPlan()
 	d := ManagedDesiredOrder{Symbol: "ETHUSDT", InstID: "ETH-USDT", LayerIndex: 1, Side: "SELL", Type: "market", Price: 100, Quantity: 1, Notional: 2, PostOnly: false}
-	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: d, DryRun: true})
+	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: d, DryRun: true, ManagedExecutionContext: confirmedExecContext()})
 	joined := strings.Join(blockers, ";")
 	for _, want := range []string{"desired side must be BUY", "desired type must be limit", "desired order must be post-only"} {
 		if !strings.Contains(joined, want) {
@@ -339,7 +351,7 @@ func TestAssertManagedExecutionAllowedPassesValidDryRun(t *testing.T) {
 	if len(blocked) != 0 || len(desired) == 0 {
 		t.Fatalf("bad desired=%+v blocked=%+v", desired, blocked)
 	}
-	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desired[0], DryRun: true})
+	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desired[0], DryRun: true, ManagedExecutionContext: confirmedExecContext()})
 	if len(blockers) != 0 {
 		t.Fatalf("valid dry-run assertion should pass: %v", blockers)
 	}
@@ -352,7 +364,7 @@ func TestManageLiveOrdersFinalAssertionBlocksBeforeSubmit(t *testing.T) {
 	plan := managedPlan()
 	ex := &fakeManagedExchange{}
 	rec := &fakeManagedRecorder{}
-	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if len(ex.placed) != 0 || len(rec.submitted) != 0 || len(got.Blocked) == 0 {
 		t.Fatalf("final assertion should block before exchange submit: placed=%d submitted=%d result=%+v", len(ex.placed), len(rec.submitted), got)
 	}
@@ -586,6 +598,48 @@ func TestManagedCoinSummaryIncludesHardSoftBlockers(t *testing.T) {
 	eth := managedCoinForTest(t, got.PerCoin, "ETHUSDT")
 	if !containsManagedString(eth.HardBlockers, "BTC permission WATCH; không tạo probe") || !containsManagedString(eth.SoftBlockers, "asset flow chưa reclaim/absorption") || len(eth.WhyNoOrder) == 0 || eth.NextTrigger == "" {
 		t.Fatalf("missing blockers in summary: %+v", eth)
+	}
+}
+
+func TestAssertManagedExecutionAllowedBlocksMissingDryRunProofForRealOrder(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.FirstOrderRequireDryRun = true
+	plan := managedPlan()
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(blocked) != 0 || len(desired) == 0 {
+		t.Fatalf("bad desired=%+v blocked=%+v", desired, blocked)
+	}
+	ctx := confirmedExecContext()
+	ctx.FirstOrderDryRunApproved = false
+	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desired[0], DryRun: false, ManagedExecutionContext: ctx})
+	if !containsManagedString(blockers, "live.first_order_require_dry_run=true; approved dry-run audit required before first real order") {
+		t.Fatalf("missing dry-run proof blocker: %v", blockers)
+	}
+}
+
+func TestAssertManagedExecutionAllowedBlocksWrongBTCAccumulation(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(blocked) != 0 || len(desired) == 0 {
+		t.Fatalf("bad desired=%+v blocked=%+v", desired, blocked)
+	}
+	ctx := confirmedExecContext()
+	ctx.BTCAccumulationPhase = "MARKDOWN"
+	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desired[0], DryRun: false, ManagedExecutionContext: ctx})
+	if !containsManagedString(blockers, "BTC accumulation phase must be ACCUMULATION_CONFIRMED") {
+		t.Fatalf("missing BTC phase blocker: %v", blockers)
+	}
+}
+
+func TestManageLiveOrdersFinalAssertionBlocksMissingBTCPhaseBeforeSubmit(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	ex := &fakeManagedExchange{}
+	rec := &fakeManagedRecorder{}
+	got := ManageLiveOrdersWithRecorderAndContext(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, ManagedExecutionContext{}, rec, false)
+	if len(ex.placed) != 0 || len(rec.submitted) != 0 || len(got.Blocked) == 0 {
+		t.Fatalf("missing BTC phase should block before exchange submit: placed=%d submitted=%d result=%+v", len(ex.placed), len(rec.submitted), got)
 	}
 }
 

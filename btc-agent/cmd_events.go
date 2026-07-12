@@ -99,14 +99,14 @@ func saveMarketWatchRuntimeEvents(db *storage.DB, report opsplan.Report, changed
 	if changed {
 		saveRuntimeEventJSON(db, "market-watch", "MARKET_STATE_CHANGED", severity, report.Fingerprint, payload)
 	}
-	saveNearUnlockRuntimeEvents(db, report)
+	saveNearUnlockRuntimeEvents(db, report, changed)
 	if critical {
 		saveRuntimeEventJSON(db, "market-watch", "MARKET_CRITICAL", "critical", "critical:"+report.Fingerprint, payload)
 	}
 }
 
-func saveNearUnlockRuntimeEvents(db *storage.DB, report opsplan.Report) {
-	if db == nil {
+func saveNearUnlockRuntimeEvents(db *storage.DB, report opsplan.Report, changed bool) {
+	if db == nil || !changed {
 		return
 	}
 	payload := map[string]any{
@@ -116,25 +116,42 @@ func saveNearUnlockRuntimeEvents(db *storage.DB, report opsplan.Report) {
 		"executable_now_usdt": report.Capital.ExecutableNowUSDT,
 		"summary":             report.Summary,
 	}
-	eventType, severity, prefix := liveAutoNearUnlockEvent(report)
+	eventType, severity, _ := liveAutoNearUnlockEvent(report)
 	if eventType == "" {
 		return
 	}
-	fingerprint := fmt.Sprintf("%s:%s|%s|%s|%.2f", prefix, report.Market.Permission, report.Market.PlanState, report.Market.AccumulationPhase, report.Capital.ExecutableNowUSDT)
-	saveRuntimeEventJSON(db, "live-auto", eventType, severity, fingerprint, payload)
+	saveRuntimeEventJSON(db, "live-auto", eventType, severity, liveAutoNearUnlockFingerprint(report), payload)
 }
 
 func liveAutoNearUnlockEvent(report opsplan.Report) (eventType, severity, prefix string) {
-	if report.Market.PlanState == "ACTIVE_LIMIT" && report.Market.Permission == "ALLOWED" && report.Market.AccumulationPhase == "ACCUMULATION_CONFIRMED" && report.Capital.ExecutableNowUSDT > 0 {
-		return "LIVE_AUTO_REAL_ORDER_READY", "critical", "real-ready"
-	}
-	if report.Market.PlanState == "ACTIVE_LIMIT" || report.Capital.ExecutableNowUSDT > 0 {
+	planReady := report.Market.PlanState == "ACTIVE_LIMIT"
+	permissionReady := report.Market.Permission == "ALLOWED"
+	phaseReady := report.Market.AccumulationPhase == "ACCUMULATION_CONFIRMED"
+	if planReady && permissionReady && phaseReady && report.Capital.ExecutableNowUSDT > 0 {
 		return "LIVE_AUTO_READY_DRY_RUN_REQUIRED", "warning", "dry-run"
 	}
-	if report.Market.PlanState == "ARMED" || report.Market.Permission == "ARMED" || report.Market.Permission == "ALLOWED" || report.Market.AccumulationPhase == "RECLAIM" || report.Market.AccumulationPhase == "ACCUMULATION_CONFIRMED" {
+	near := 0
+	if report.Market.PlanState == "ARMED" || planReady {
+		near++
+	}
+	if report.Market.Permission == "ARMED" || permissionReady {
+		near++
+	}
+	if report.Market.AccumulationPhase == "RECLAIM" || phaseReady {
+		near++
+	}
+	if near >= 2 {
 		return "LIVE_AUTO_NEAR_UNLOCK", "warning", "near"
 	}
 	return "", "", ""
+}
+
+func liveAutoNearUnlockFingerprint(report opsplan.Report) string {
+	eventType, _, prefix := liveAutoNearUnlockEvent(report)
+	if eventType == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%s|%s|%s|%.2f", prefix, report.Market.Permission, report.Market.PlanState, report.Market.AccumulationPhase, report.Capital.ExecutableNowUSDT)
 }
 
 func liveAutoNearUnlockTelegram(report opsplan.Report) string {
@@ -142,7 +159,11 @@ func liveAutoNearUnlockTelegram(report opsplan.Report) string {
 	if eventType == "" {
 		return ""
 	}
-	return fmt.Sprintf("LIVE-AUTO ALERT\n%s\nBTC permission=%s accumulation=%s plan=%s executable=%.2f USDT\nDry-run audit required before any real order.", eventType, report.Market.Permission, report.Market.AccumulationPhase, report.Market.PlanState, report.Capital.ExecutableNowUSDT)
+	message := "Market gates near-ready; dry-run audit and live-auto-audit still required before real order."
+	if eventType == "LIVE_AUTO_READY_DRY_RUN_REQUIRED" {
+		message = "Market gates ready for dry-run proof; real order remains blocked until live-auto-audit APPROVED_REAL_ORDER."
+	}
+	return fmt.Sprintf("LIVE-AUTO ALERT\n%s\nBTC permission=%s accumulation=%s plan=%s executable=%.2f USDT\n%s", eventType, report.Market.Permission, report.Market.AccumulationPhase, report.Market.PlanState, report.Capital.ExecutableNowUSDT, message)
 }
 
 func saveLiveSupervisorRuntimeEvent(db *storage.DB, result liveguard.SupervisorResult) {

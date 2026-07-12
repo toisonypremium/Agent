@@ -247,6 +247,63 @@ func TestValidateSupervisorDefaultsDisabled(t *testing.T) {
 	}
 }
 
+func TestValidateFirstOrderQuarantineValid(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.Live.Enabled = true
+	cfg.Live.AutoExecute = true
+	cfg.Live.RequireManualConfirm = false
+	cfg.Live.ProofOnly = false
+	cfg.Live.OrderManagementEnabled = true
+	cfg.Live.MaxAutoLayersPerAsset = 2
+	cfg.Live.MaxOpenLiveOrdersPerAsset = 2
+	cfg.Live.MaxOpenLiveOrdersTotal = 6
+	cfg.Live.MaxOrderNotionalUSDT = 100
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 50
+	cfg.Live.MaxLiveNotionalPerAssetUSDT = 100
+	cfg.Live.MaxLiveNotionalTotalUSDT = 200
+	cfg.Live.FirstOrderQuarantineEnabled = true
+	cfg.Live.FirstOrderMaxNotionalUSDT = 25
+	cfg.Execution.PaperTrading = false
+	cfg.Execution.RealTradingEnabled = true
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("unexpected validation error: %v", err)
+	}
+}
+
+func TestValidateFirstOrderQuarantineRejectsInvalidValues(t *testing.T) {
+	base := validTestConfig()
+	base.Live.Enabled = true
+	base.Live.AutoExecute = true
+	base.Live.RequireManualConfirm = false
+	base.Live.ProofOnly = false
+	base.Live.OrderManagementEnabled = true
+	base.Live.MaxAutoLayersPerAsset = 2
+	base.Live.MaxOpenLiveOrdersPerAsset = 2
+	base.Live.MaxOpenLiveOrdersTotal = 6
+	base.Live.MaxOrderNotionalUSDT = 100
+	base.Live.MaxLiveNotionalPerOrderUSDT = 50
+	base.Live.MaxLiveNotionalPerAssetUSDT = 100
+	base.Live.MaxLiveNotionalTotalUSDT = 200
+	base.Live.FirstOrderQuarantineEnabled = true
+	base.Execution.PaperTrading = false
+	base.Execution.RealTradingEnabled = true
+	for _, tc := range []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"negative", func(cfg *Config) { cfg.Live.FirstOrderMaxNotionalUSDT = -1 }},
+		{"above per order cap", func(cfg *Config) { cfg.Live.FirstOrderMaxNotionalUSDT = 51 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := base
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
+	}
+}
+
 func TestValidateSupervisorRequiresManagedLiveShape(t *testing.T) {
 	base := validTestConfig()
 	base.Execution.RealTradingEnabled = true

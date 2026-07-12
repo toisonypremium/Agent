@@ -73,6 +73,17 @@ Milestone B adds report-only microstructure plumbing:
 - Futures data is observation-only. No futures execution, no leverage, no market order.
 - If `microstructure.require_fresh_for_active=true`, stale/missing microstructure can only reduce authority: BTC max `WATCH`, asset cannot stay `ACTIVE_LIMIT`.
 
+## Pre-live safety hardening
+
+Before autonomous real-order approval, live-auto now has extra production checks:
+
+- `live-auto-audit` writes `reports/live_auto_audit_latest.md/json` and returns `APPROVED_MONITORING`, `APPROVED_DRY_RUN`, `APPROVED_REAL_ORDER`, or `BLOCKED`.
+- Managed order engine runs a final execution assertion immediately before `PlaceSpotLimitOrder`.
+- Final assertion blocks non-`ACTIVE_LIMIT`, non-`ALLOWED`, non-`BUY limit post-only`, unsafe config, wrong risk flags, invalid size, or cap overflow.
+- Forced `ACTIVE_LIMIT` simulation proves dry-run `would_place` behavior without exchange submission.
+- First-order quarantine can restrict first real live order to one small layer after dry-run audit.
+- `market-watch` emits near-unlock runtime events when BTC/plan approaches real-order readiness.
+
 ## Safety invariants
 
 - `WATCH`, `SCOUT`, and `ARMED` are not order authority.

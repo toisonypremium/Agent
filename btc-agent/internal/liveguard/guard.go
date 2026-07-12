@@ -150,7 +150,7 @@ func candidateFromLayer(cfg config.Config, symbol string, layer agent2.Layer, no
 	if layer.Price <= 0 || qty <= 0 || notional <= 0 {
 		return CandidateOrder{}, false
 	}
-	return CandidateOrder{Symbol: symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: cfg.Live.RequirePostOnly, Source: fmt.Sprintf("deterministic_agent2_layer_%d", layer.Index), LiveAuto: cfg.Live.AutoExecute}, true
+	return CandidateOrder{Symbol: symbol, Side: "BUY", Type: "limit", Price: layer.Price, Quantity: qty, Notional: notional, PostOnly: true, Source: fmt.Sprintf("deterministic_agent2_layer_%d", layer.Index), LiveAuto: cfg.Live.AutoExecute}, true
 }
 
 func freeBalance(balances []live.Balance, asset string) float64 {

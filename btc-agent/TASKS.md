@@ -7,6 +7,7 @@
 - [ ] Use full verification gate before reporting implementation work done.
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
 - [x] Milestone B: add microstructure data sources (CVD/OI/funding/orderbook) with data-health stale blockers before considering live expansion.
+- [x] Add live-auto safety hardening before autonomous real order approval.
 - [ ] Milestone C: prove BTC accumulation false-positive/drawdown improvement in walk-forward before any live sizing change.
 
 ## Done
@@ -22,6 +23,7 @@
 - [x] Add auto-live market-watch monitoring and operations-plan report without changing live authority.
 - [x] Split overloaded command/scheduler code and add read-only runtime ops event queue without changing live authority.
 - [x] Add report-only microstructure data sources and stale blockers without changing live authority.
+- [x] Add pre-live safety hardening: final execution assertion, live-auto-audit, forced dry-run simulation, first-order quarantine, and near-unlock events.
 
 ## Verification commands
 

@@ -127,6 +127,7 @@ bin/
 ./bin/btc-agent universe-research --config config.yaml
 ./bin/btc-agent live-proof --config config.yaml
 ./bin/btc-agent live-readiness --config config.yaml
+./bin/btc-agent live-auto-audit --config config.yaml
 ./bin/btc-agent live-doctor --config config.yaml
 ./bin/btc-agent live-supervisor --config config.yaml --dry-run
 ./bin/btc-agent reconcile-live-orders --config config.yaml
@@ -195,6 +196,19 @@ SQLite microstructure_snapshots
 
 `microstructure-fetch` là report-only: đọc Binance public spot/futures observation (taker flow/CVD/orderbook/OI/funding/basis), ghi snapshot và report. Dữ liệu futures chỉ quan sát, không futures execution. Nếu `microstructure.require_fresh_for_active=true`, stale/missing microstructure chỉ được dùng để hạ quyền: BTC max `WATCH`, asset không lên `ACTIVE_LIMIT`.
 
+## Pre-live safety hardening
+
+`live-auto-audit` là command kiểm duyệt trước khi cho bot tự gửi lệnh thật. Nó ghi `reports/live_auto_audit_latest.md/json`, chạy forced `ACTIVE_LIMIT` dry-run simulation, kiểm doctor/data/reconcile/risk/microstructure/proof/final assertion, và luôn kết luận rõ:
+
+```text
+APPROVED_MONITORING
+APPROVED_DRY_RUN
+APPROVED_REAL_ORDER
+BLOCKED
+```
+
+Managed order engine có final execution assertion ngay trước `PlaceSpotLimitOrder`: chặn nếu config live không sạch, risk flags sai, plan không `ACTIVE_LIMIT`, permission không `ALLOWED`, lệnh không phải `BUY limit post-only`, hoặc vượt cap. First-order quarantine mặc định nên bật trước production: chỉ cho 1 layer nhỏ đầu tiên sau dry-run audit, giúp lần live order đầu được kiểm soát.
+
 ## Report-only survey và learning
 
 Flow khảo sát dữ liệu thật:
@@ -247,6 +261,7 @@ reports/auto_live_management_latest.md/json
 reports/live_supervisor_latest.md/json
 reports/live_doctor_latest.md/json
 reports/live_readiness_latest.md/json
+reports/live_auto_audit_latest.md/json
 reports/live_reconcile_latest.md/json
 reports/live_position_latest.md/json
 reports/real_data_survey_latest.md/json

@@ -139,6 +139,10 @@ func managedConfig() config.Config {
 	cfg.Live.MaxLiveNotionalTotalUSDT = 12
 	cfg.Live.CancelIfPlanNotActive = true
 	cfg.Live.ReplaceIfPriceDriftPct = 0.01
+	cfg.Execution.RealTradingEnabled = true
+	cfg.Risk.NoFutures = true
+	cfg.Risk.NoLeverage = true
+	cfg.Risk.SpotLimitOnly = true
 	cfg.Portfolio.TotalCapital = 1000
 	cfg.Portfolio.Allocation = map[string]float64{"ETHUSDT": 0.35, "SOLUSDT": 0.45}
 	cfg.Risk.MaxTotalDeploymentPerCycle = 0.70
@@ -310,6 +314,81 @@ func TestBuildManagedDesiredOrdersBlocksLiquidityFail(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing liquidity block: desired=%+v blocked=%+v", desired, blocked)
+	}
+}
+
+func TestAssertManagedExecutionAllowedBlocksUnsafeOrder(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Execution.RealTradingEnabled = true
+	plan := managedPlan()
+	d := ManagedDesiredOrder{Symbol: "ETHUSDT", InstID: "ETH-USDT", LayerIndex: 1, Side: "SELL", Type: "market", Price: 100, Quantity: 1, Notional: 2, PostOnly: false}
+	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: d, DryRun: true})
+	joined := strings.Join(blockers, ";")
+	for _, want := range []string{"desired side must be BUY", "desired type must be limit", "desired order must be post-only"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("missing %q in blockers %v", want, blockers)
+		}
+	}
+}
+
+func TestAssertManagedExecutionAllowedPassesValidDryRun(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Execution.RealTradingEnabled = true
+	plan := managedPlan()
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(blocked) != 0 || len(desired) == 0 {
+		t.Fatalf("bad desired=%+v blocked=%+v", desired, blocked)
+	}
+	blockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desired[0], DryRun: true})
+	if len(blockers) != 0 {
+		t.Fatalf("valid dry-run assertion should pass: %v", blockers)
+	}
+}
+
+func TestManageLiveOrdersFinalAssertionBlocksBeforeSubmit(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Execution.RealTradingEnabled = true
+	cfg.Risk.SpotLimitOnly = false
+	plan := managedPlan()
+	ex := &fakeManagedExchange{}
+	rec := &fakeManagedRecorder{}
+	got := ManageLiveOrdersWithRecorder(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec, false)
+	if len(ex.placed) != 0 || len(rec.submitted) != 0 || len(got.Blocked) == 0 {
+		t.Fatalf("final assertion should block before exchange submit: placed=%d submitted=%d result=%+v", len(ex.placed), len(rec.submitted), got)
+	}
+	found := false
+	for _, b := range got.Blocked {
+		if strings.Contains(b.Reason, "final execution assertion blocked") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing final assertion block: %+v", got.Blocked)
+	}
+}
+
+func TestFirstOrderQuarantineLimitsDesiredOrders(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.FirstOrderQuarantineEnabled = true
+	cfg.Live.FirstOrderMaxNotionalUSDT = 1
+	plan := managedPlan()
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(desired) != 1 || len(blocked) == 0 {
+		t.Fatalf("quarantine should keep one desired and block rest: desired=%d blocked=%d", len(desired), len(blocked))
+	}
+	if desired[0].Notional > 1+1e-9 {
+		t.Fatalf("quarantine cap not applied: %+v", desired[0])
+	}
+}
+
+func TestForcedActiveLimitSimulationDryRun(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Execution.RealTradingEnabled = true
+	cfg.Live.FirstOrderQuarantineEnabled = true
+	cfg.Live.FirstOrderMaxNotionalUSDT = 1
+	got := RunForcedActiveLimitSimulation(cfg)
+	if !got.Passed || got.Desired == 0 || got.WouldPlace == 0 {
+		t.Fatalf("forced simulation should pass: %+v", got)
 	}
 }
 

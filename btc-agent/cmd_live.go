@@ -981,6 +981,9 @@ func managementDecisionLine(d liveguard.ManagedOrderDecision) string {
 	if d.Error != "" {
 		out += " error=" + d.Error
 	}
+	if len(d.AuditTrail) > 0 {
+		out += " audit=" + strings.Join(d.AuditTrail, " | ")
+	}
 	return out
 }
 

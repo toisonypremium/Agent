@@ -145,6 +145,9 @@ type Config struct {
 		AutoExecute                       bool    `yaml:"auto_execute"`
 		LiveAutoMode                      bool    `yaml:"live_auto_mode"`
 		LiveAutoMaxNotionalUSDT           float64 `yaml:"live_auto_max_notional_usdt"`
+		FirstOrderQuarantineEnabled       bool    `yaml:"first_order_quarantine_enabled"`
+		FirstOrderMaxNotionalUSDT         float64 `yaml:"first_order_max_notional_usdt"`
+		FirstOrderRequireDryRun           bool    `yaml:"first_order_require_dry_run"`
 		OrderManagementEnabled            bool    `yaml:"order_management_enabled"`
 		MaxAutoLayersPerAsset             int     `yaml:"max_auto_layers_per_asset"`
 		MaxOpenLiveOrdersPerAsset         int     `yaml:"max_open_live_orders_per_asset"`
@@ -260,6 +263,12 @@ func (c Config) Validate() error {
 		if LiveAutoMaxNotionalUSDT(c) > c.Live.MaxOrderNotionalUSDT {
 			return fmt.Errorf("live live_auto_max_notional_usdt (%.2f) cannot exceed max_order_notional_usdt (%.2f)", LiveAutoMaxNotionalUSDT(c), c.Live.MaxOrderNotionalUSDT)
 		}
+	}
+	if c.Live.FirstOrderMaxNotionalUSDT < 0 {
+		return errors.New("live.first_order_max_notional_usdt cannot be negative")
+	}
+	if c.Live.FirstOrderQuarantineEnabled && c.Live.FirstOrderMaxNotionalUSDT > 0 && c.Live.MaxLiveNotionalPerOrderUSDT > 0 && c.Live.FirstOrderMaxNotionalUSDT > c.Live.MaxLiveNotionalPerOrderUSDT {
+		return errors.New("live.first_order_max_notional_usdt must be <= live.max_live_notional_per_order_usdt")
 	}
 	if c.Live.OrderManagementEnabled {
 		if !c.Live.AutoExecute {

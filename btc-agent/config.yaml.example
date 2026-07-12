@@ -138,6 +138,9 @@ live:
   auto_execute: false
   live_auto_mode: false
   live_auto_max_notional_usdt: 2.0
+  first_order_quarantine_enabled: true
+  first_order_max_notional_usdt: 1.0
+  first_order_require_dry_run: true
   order_management_enabled: false
   max_auto_layers_per_asset: 3
   max_open_live_orders_per_asset: 3

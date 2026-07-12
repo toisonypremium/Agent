@@ -71,6 +71,7 @@ type ManagedOrderDecision struct {
 	PlaceResult   live.OrderResult       `json:"place_result,omitempty"`
 	Error         string                 `json:"error,omitempty"`
 	ReplacedOrder bool                   `json:"replaced_order,omitempty"`
+	AuditTrail    []string               `json:"audit_trail,omitempty"`
 }
 
 type ManagedCycleResult struct {
@@ -234,6 +235,15 @@ func ManageLiveOrdersWithRecorder(ctx context.Context, cfg config.Config, plan a
 			continue
 		}
 		decision := ManagedOrderDecision{Action: "place", Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Desired: desiredOrder, Reason: "missing active accumulation layer order"}
+		assertionBlockers := AssertManagedExecutionAllowed(ExecutionAssertionInput{Config: cfg, Plan: plan, Desired: desiredOrder, OpenNotionalTotal: openNotionalTotal, OpenNotionalBySymbol: openNotionalBySymbol, DryRun: dryRun})
+		decision.AuditTrail = FinalAssertionAudit(plan, desiredOrder, assertionBlockers)
+		if len(assertionBlockers) > 0 {
+			decision.Action = "block"
+			decision.Reason = "final execution assertion blocked: " + strings.Join(assertionBlockers, "; ")
+			result.Blocked = append(result.Blocked, decision)
+			result.Status = ManagedCyclePartial
+			continue
+		}
 		mmGate := EvaluateMMExecutionGate(ctx, cfg, desiredOrder, orderBookProviderFromPlacer(placer))
 		if !mmGate.Pass {
 			decision.Action = "block"
@@ -626,12 +636,40 @@ func BuildManagedDesiredOrders(cfg config.Config, plan agent2.Plan, filters []li
 		}
 		return desired[i].Symbol < desired[j].Symbol
 	})
+	if cfg.Live.FirstOrderQuarantineEnabled && firstOrderQuarantineApplies(openOrders, positions) && len(desired) > 0 {
+		first := desired[0]
+		if cfg.Live.FirstOrderMaxNotionalUSDT > 0 && first.Notional > cfg.Live.FirstOrderMaxNotionalUSDT {
+			first.Notional = cfg.Live.FirstOrderMaxNotionalUSDT
+			if first.Price > 0 {
+				first.Quantity = first.Notional / first.Price
+			}
+		}
+		first.AllocationReason = strings.TrimSpace(first.AllocationReason + "; first-order quarantine: single smallest live layer only")
+		for _, extra := range desired[1:] {
+			blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: extra.Symbol, LayerIndex: extra.LayerIndex, Desired: extra, Reason: "first-order quarantine: only one live order allowed until first order is reviewed"})
+		}
+		desired = []ManagedDesiredOrder{first}
+	}
 	return desired, blocked
 }
 
 type historyQualityScore struct {
 	Score float64
 	Grade string
+}
+
+func firstOrderQuarantineApplies(openOrders []live.OrderStatus, positions []live.LivePosition) bool {
+	for _, order := range openOrders {
+		if live.NormalizeOrderStatus(order.Status) != "" {
+			return false
+		}
+	}
+	for _, position := range positions {
+		if position.Quantity > 0 || position.CostBasis > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 func loadHistoryQualityScores(path string) map[string]historyQualityScore {

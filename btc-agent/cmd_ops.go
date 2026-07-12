@@ -159,6 +159,9 @@ func runMarketWatch(ctx context.Context, cfg config.Config, db *storage.DB, noti
 		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && notificationDue:
 			sendTelegram(ctx, cfg, "market-state", opsplan.TelegramDigest(report))
 			previous.NotifiedFingerprint = report.Fingerprint
+		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && liveAutoNearUnlockTelegram(report) != "":
+			sendTelegram(ctx, cfg, "live-auto-near-unlock", liveAutoNearUnlockTelegram(report))
+			previous.NotifiedFingerprint = report.Fingerprint
 		}
 	}
 	previous.Fingerprint = report.Fingerprint

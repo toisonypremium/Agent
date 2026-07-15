@@ -138,6 +138,7 @@ type LivePosition struct {
 	FeeTotal      float64 `json:"fee_total"`
 	FeeCurrency   string  `json:"fee_currency"`
 	UpdatedAt     int64   `json:"updated_at"`
+	OpenedAt      int64   `json:"opened_at,omitempty"`
 }
 
 type LivePositionEvent struct {

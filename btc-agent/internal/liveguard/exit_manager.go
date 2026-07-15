@@ -130,7 +130,7 @@ func EvaluateExits(
 			}
 
 		// 3. Time stop: position too old and PnL not recovering
-		case cfg.Exit.TimeStopDays > 0 && pos.UpdatedAt > 0 && time.Unix(pos.UpdatedAt, 0).Before(now.AddDate(0, 0, -cfg.Exit.TimeStopDays)):
+		case cfg.Exit.TimeStopDays > 0 && pos.OpenedAt > 0 && time.Unix(pos.OpenedAt, 0).Before(now.AddDate(0, 0, -cfg.Exit.TimeStopDays)):
 			// Don't time-stop if deep in loss (let it recover) unless explicitly below min PnL floor
 			if cfg.Exit.MinPnLForTimeStop == 0 || pnlPct >= cfg.Exit.MinPnLForTimeStop {
 				decision.Action = ExitTimeStop

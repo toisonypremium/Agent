@@ -175,6 +175,7 @@ type Config struct {
 		CancelOnBTCPermissionNotAllowed   bool    `yaml:"cancel_on_btc_permission_not_allowed"`
 		SupervisorEnabled                 bool    `yaml:"supervisor_enabled"`
 		ManagementIntervalMinutes         int     `yaml:"management_interval_minutes"`
+		AuditIntervalMinutes              int     `yaml:"audit_interval_minutes"`
 		HeartbeatIntervalMinutes          int     `yaml:"heartbeat_interval_minutes"`
 		AutoHaltAfterErrors               int     `yaml:"auto_halt_after_errors"`
 		NotifyOnNoAction                  bool    `yaml:"notify_on_no_action"`

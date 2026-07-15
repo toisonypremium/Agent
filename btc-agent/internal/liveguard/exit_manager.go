@@ -108,6 +108,13 @@ func EvaluateExits(
 		}
 
 		switch {
+		// 0. Panic sell: loss exceeds threshold — exit entire position immediately
+		case cfg.Exit.PanicSellPnLThreshold < 0 && pnlPct <= cfg.Exit.PanicSellPnLThreshold:
+			decision.Action = ExitPanicSell
+			decision.SellQuantity = pos.Quantity
+			decision.Reason = fmt.Sprintf("panic-sell: pnl=%.2f%% <= threshold=%.2f%%",
+				pnlPct*100, cfg.Exit.PanicSellPnLThreshold*100)
+
 		// 1. Take-profit: reached target gain → partial sell
 		case cfg.Exit.TakeProfitPct > 0 && pnlPct >= cfg.Exit.TakeProfitPct:
 			sellQty := pos.Quantity

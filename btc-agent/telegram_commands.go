@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -46,9 +47,13 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 				text, ok := buildReadOnlyTelegramCommandReply(cmd)
 				if ok {
 					if err := notify.Telegram(ctx, token, chatID, usertext.TelegramVietnamese(text)); err != nil {
+						log.Printf("[TelegramCommands] reply error [%s]: %v", cmd, err)
 						advance = false
 						return err
 					}
+					log.Printf("[TelegramCommands] reply sent ok [%s]", cmd)
+				} else {
+					log.Printf("[TelegramCommands] command ignored [%s]", cmd)
 				}
 			}
 		}

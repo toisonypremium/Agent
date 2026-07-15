@@ -9,6 +9,18 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+
+// ExitConfig controls automatic take-profit, trailing stop, and time-stop behaviour.
+type ExitConfig struct {
+	Enabled             bool    `yaml:"enabled"`
+	TakeProfitPct       float64 `yaml:"take_profit_pct"`
+	PartialExitPct      float64 `yaml:"partial_exit_pct"`
+	TrailingActivatePct float64 `yaml:"trailing_activate_pct"`
+	TrailingDistancePct float64 `yaml:"trailing_distance_pct"`
+	TimeStopDays        int     `yaml:"time_stop_days"`
+	MinPnLForTimeStop   float64 `yaml:"min_pnl_for_time_stop"`
+}
+
 type Config struct {
 	App struct {
 		Mode                     string `yaml:"mode"`
@@ -175,6 +187,7 @@ type Config struct {
 		MMGateSamples                     int     `yaml:"mm_gate_samples"`
 		MMGateSampleDelayMs               int     `yaml:"mm_gate_sample_delay_ms"`
 	} `yaml:"live"`
+	Exit ExitConfig `yaml:"exit"`
 	Execution struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
 		RealTradingEnabled bool      `yaml:"real_trading_enabled"`

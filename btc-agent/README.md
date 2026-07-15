@@ -359,9 +359,17 @@ No real order was placed.
 - Done: CVD/volume delta.
 - Done: order book imbalance.
 - Done: open interest, funding, spot-perp basis.
+- Done: data stale blockers: stale microstructure => tối đa `WATCH`, không `ACTIVE_LIMIT`.
 - Planned: liquidation proxy.
 - Planned: anchored VWAP/volume profile.
-- Done: data stale blockers: stale microstructure => tối đa `WATCH`, không `ACTIVE_LIMIT`.
+
+### Milestone B+: exit manager
+
+- Done: `EvaluateExits` with TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL.
+- Done: `PeakTracker` persists across supervisor cycles.
+- Done: `OpenedAt` on `LivePosition` for accurate time-stop.
+- Done: Wired into supervisor cycle (report-only, `exit.enabled=false` default).
+- Done: `live-auto-audit` scheduled in scheduler loop (`audit_interval_minutes`).
 
 ### Milestone C: proof before sizing
 

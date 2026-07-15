@@ -103,10 +103,12 @@ Current approved operating state:
 ```text
 scheduler=running in dry-run/monitoring
 mode=live-auto
+operator_halt=INACTIVE (cleared 2026-07-15)
 dry_run=true until live-auto-audit APPROVED_REAL_ORDER
 bot_ready_for_monitoring=true
-bot_ready_for_dry_run=true
+bot_ready_for_dry_run=true (infrastructure approved)
 bot_ready_for_real_order=false until ACTIVE_LIMIT+ALLOWED+ACCUMULATION_CONFIRMED and audit proof passes
+current_market_blocker=BTC MARKDOWN phase + falling knife risk governor
 ```
 
 When market is not ready, expected managed cycle remains:
@@ -116,4 +118,31 @@ desired=0
 placed=0
 canceled=0 unless stale open order needs cleanup
 blocked may explain gates
+```
+
+## Exit manager status
+
+Exit automation added, report-only by default:
+
+```text
+ExitConfig.Enabled=false (default)
+EvaluateExits wired into supervisor cycle
+ExitActions: HOLD / TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL
+PlaceSellLimitOrder: exists, not auto-called (operator must enable and wire)
+OpenedAt tracked on LivePosition for accurate time-stop
+PeakTracker persists in-memory across supervisor cycles
+```
+
+To enable exit automation, set in config.yaml:
+
+```yaml
+exit:
+  enabled: false              # keep false until operator review
+  take_profit_pct: 0.30
+  partial_exit_pct: 0.50
+  trailing_activate_pct: 0.20
+  trailing_distance_pct: 0.08
+  time_stop_days: 90
+  min_pnl_for_time_stop: 0.0  # 0 = no floor; set >0 to require gain before time-stop
+  panic_sell_pnl_threshold: 0  # 0 = disabled; set e.g. -0.25 to sell all at -25% loss
 ```

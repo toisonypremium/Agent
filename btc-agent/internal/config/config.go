@@ -18,7 +18,8 @@ type ExitConfig struct {
 	TrailingActivatePct float64 `yaml:"trailing_activate_pct"`
 	TrailingDistancePct float64 `yaml:"trailing_distance_pct"`
 	TimeStopDays        int     `yaml:"time_stop_days"`
-	MinPnLForTimeStop   float64 `yaml:"min_pnl_for_time_stop"`
+	MinPnLForTimeStop     float64 `yaml:"min_pnl_for_time_stop"`
+	PanicSellPnLThreshold float64 `yaml:"panic_sell_pnl_threshold"` // negative threshold e.g. -0.25 = sell all when loss >= 25%; 0 = disabled
 }
 
 type Config struct {

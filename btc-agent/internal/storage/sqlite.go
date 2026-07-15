@@ -63,7 +63,7 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS live_orders(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, type TEXT, price REAL, quantity REAL, notional REAL, status TEXT, submitted_at INTEGER, updated_at INTEGER, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_order_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, status TEXT, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_fills(client_order_id TEXT PRIMARY KEY, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, filled_quantity REAL, avg_price REAL, fee REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
-		`CREATE TABLE IF NOT EXISTS live_positions(symbol TEXT PRIMARY KEY, inst_id TEXT, quantity REAL, avg_entry_price REAL, cost_basis REAL, fee_total REAL, fee_currency TEXT, updated_at INTEGER, payload_json TEXT);`,
+		`CREATE TABLE IF NOT EXISTS live_positions(symbol TEXT PRIMARY KEY, inst_id TEXT, quantity REAL, avg_entry_price REAL, cost_basis REAL, fee_total REAL, fee_currency TEXT, updated_at INTEGER, opened_at INTEGER NOT NULL DEFAULT 0, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS live_position_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER, client_order_id TEXT, order_id TEXT, inst_id TEXT, symbol TEXT, side TEXT, delta_quantity REAL, fill_price REAL, notional_delta REAL, fee_delta REAL, fee_currency TEXT, position_qty REAL, avg_entry_price REAL, status TEXT, payload_json TEXT);`,
 		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`,
 		`INSERT OR IGNORE INTO operator_settings(key, value) VALUES('halted', 'true');`}
@@ -86,6 +86,9 @@ func (d *DB) Migrate() error {
 		if err := d.ensureColumn("live_orders", col.name, col.def); err != nil {
 			return err
 		}
+	}
+	if err := d.ensureColumn("live_positions", "opened_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
 	}
 	return nil
 }
@@ -715,6 +718,11 @@ func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosi
 	}
 	if !found {
 		pos = live.LivePosition{Symbol: event.Symbol, InstID: event.InstID}
+		if event.Timestamp > 0 {
+			pos.OpenedAt = event.Timestamp
+		} else {
+			pos.OpenedAt = time.Now().Unix()
+		}
 	}
 	if pos.InstID == "" {
 		pos.InstID = event.InstID
@@ -755,7 +763,7 @@ func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosi
 	}
 
 	b, _ := json.Marshal(pos)
-	_, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, string(b))
+	_, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b))
 	if err != nil {
 		return live.LivePosition{}, err
 	}
@@ -771,7 +779,7 @@ func livePositionBySymbol(q interface {
 	QueryRow(string, ...any) *sql.Row
 }, symbol string) (live.LivePosition, bool, error) {
 	var pos live.LivePosition
-	err := q.QueryRow(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at FROM live_positions WHERE symbol=?`, symbol).Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt)
+	err := q.QueryRow(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at FROM live_positions WHERE symbol=?`, symbol).Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt)
 	if err == sql.ErrNoRows {
 		return live.LivePosition{}, false, nil
 	}
@@ -788,7 +796,7 @@ func (d *DB) SaveLivePositionEvent(event live.LivePositionEvent) error {
 }
 
 func (d *DB) LivePositions() ([]live.LivePosition, error) {
-	rows, err := d.Query(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at FROM live_positions ORDER BY symbol`)
+	rows, err := d.Query(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at FROM live_positions ORDER BY symbol`)
 	if err != nil {
 		return nil, err
 	}
@@ -796,7 +804,7 @@ func (d *DB) LivePositions() ([]live.LivePosition, error) {
 	out := []live.LivePosition{}
 	for rows.Next() {
 		var pos live.LivePosition
-		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt); err != nil {
+		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, pos)

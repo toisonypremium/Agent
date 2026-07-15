@@ -155,6 +155,7 @@ live:
   cancel_on_btc_permission_not_allowed: true
   supervisor_enabled: false
   management_interval_minutes: 15
+  audit_interval_minutes: 60      # how often live-auto-audit runs; 0 = only on --run-now
   heartbeat_interval_minutes: 360
   auto_halt_after_errors: 3
   notify_on_no_action: false

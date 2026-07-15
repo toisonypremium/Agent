@@ -85,7 +85,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/help":
+	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -181,6 +181,17 @@ func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
 			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
 		}
 		return telegramCommandRisk(snapshot, scenario), true
+	case "/hermes":
+		report, ok := loadHermesReportFile()
+		if !ok {
+			return "Chua co Hermes report. Cho Hermes cycle chay hoac dung: ./bin/btc-agent hermes-cycle --config config.yaml", true
+		}
+		return telegramCommandHermes(report), true
+	case "/exits":
+		snap := buildHermesSnapshotFromReports()
+		return telegramCommandExits(snap), true
+	case "/audit":
+		return telegramCommandAudit(), true
 	default:
 		return "", false
 	}
@@ -204,6 +215,9 @@ func telegramCommandsHelp() string {
 /supervisor — live supervisor
 /next — điều kiện kích hoạt tiếp theo
 /risk — risk governor và caps
+/hermes — Hermes AI analysis tổng hợp
+/exits — exit signals hiện tại
+/audit — live-auto-audit verdict
 
 Không có lệnh đặt mua/bán qua Telegram. Không bypass ACTIVE_LIMIT.`) + "\n"
 }

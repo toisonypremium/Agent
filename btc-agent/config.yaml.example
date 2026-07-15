@@ -92,6 +92,7 @@ ai:
   max_tokens: 6000
   temperature: 0
   telegram_enabled: true
+  hermes_interval_minutes: 60   # how often Hermes AI cycle runs; 0 = only on --run-now
 
 research:
   enabled: false

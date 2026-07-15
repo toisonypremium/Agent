@@ -112,7 +112,8 @@ type Config struct {
 		APIKeyEnv       string  `yaml:"api_key_env"`
 		MaxTokens       int     `yaml:"max_tokens"`
 		Temperature     float64 `yaml:"temperature"`
-		TelegramEnabled bool    `yaml:"telegram_enabled"`
+		TelegramEnabled       bool    `yaml:"telegram_enabled"`
+		HermesIntervalMinutes int     `yaml:"hermes_interval_minutes"`
 	} `yaml:"ai"`
 	Research struct {
 		Enabled               bool `yaml:"enabled"`

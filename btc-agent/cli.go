@@ -93,6 +93,8 @@ func run(ctx context.Context, args []string) error {
 		return runExportTraining(cfg, db)
 	case "run-ai-watch":
 		return runAIWatch(ctx, cfg, db)
+	case "hermes-cycle":
+		return runHermesCycle(ctx, cfg, db)
 	case "live-proof":
 		return runLiveProof(ctx, cfg, db)
 	case "live-readiness":

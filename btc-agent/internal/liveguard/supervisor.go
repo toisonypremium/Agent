@@ -28,6 +28,7 @@ type SupervisorResult struct {
 	Reasons           []string             `json:"reasons,omitempty"`
 	Managed           *ManagedCycleResult  `json:"managed,omitempty"`
 	Doctor            *RuntimeDoctorResult `json:"doctor,omitempty"`
+	Exits             []ExitDecision       `json:"exits,omitempty"`
 	Summary           string               `json:"summary"`
 }
 

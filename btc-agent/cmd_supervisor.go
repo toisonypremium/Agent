@@ -3,6 +3,7 @@ package main
 import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/market"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/telegramreport"
 	"context"
@@ -17,6 +18,7 @@ import (
 type liveSupervisorState struct {
 	ConsecutiveErrors int
 	LastHeartbeat     time.Time
+	PeakTracker       *liveguard.PeakTracker
 }
 
 func runLiveSupervisorCycle(ctx context.Context, cfg config.Config, db *storage.DB, state *liveSupervisorState, dryRun bool) (liveguard.SupervisorResult, error) {
@@ -101,6 +103,24 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			}
 		}
 	}
+	// Evaluate exit conditions if exit manager is enabled.
+	// EvaluateExits is report-only here — PlaceSellLimitOrder requires operator wire-up.
+	if cfg.Exit.Enabled {
+		if state.PeakTracker == nil {
+			state.PeakTracker = liveguard.NewPeakTracker()
+		}
+		if positions, posErr := db.LivePositions(); posErr == nil && len(positions) > 0 {
+			currentPrices := buildCurrentPricesFromDB(cfg, db)
+			exits := liveguard.EvaluateExits(cfg, positions, currentPrices, state.PeakTracker)
+			result.Exits = exits
+			for _, ex := range exits {
+				if ex.Action != liveguard.ExitHold {
+					result.Reasons = append(result.Reasons, "exit signal: "+ex.Symbol+" → "+string(ex.Action)+": "+ex.Reason)
+				}
+			}
+		}
+	}
+
 	if cfg.Live.AutoHaltAfterErrors > 0 && state.ConsecutiveErrors >= cfg.Live.AutoHaltAfterErrors {
 		if err := db.SetHaltStatus(true); err != nil {
 			result.Reasons = append(result.Reasons, "auto-halt failed: "+err.Error())
@@ -191,6 +211,17 @@ func liveSupervisorMarkdown(result liveguard.SupervisorResult) string {
 			md += fmt.Sprintf("Risk governor: %s | %s\n", m.RiskGovernor.Status, m.RiskGovernor.Summary)
 		}
 	}
+	if len(result.Exits) > 0 {
+		md += "\nExit Evaluation:\n"
+		for _, ex := range result.Exits {
+			if ex.Action == liveguard.ExitHold {
+				continue
+			}
+			md += fmt.Sprintf("  %s → %s pnl=%.2f%% qty=%.6f price=%.4f: %s\n",
+				ex.Symbol, ex.Action, ex.PnLPct*100, ex.SellQuantity, ex.SellPrice, ex.Reason)
+		}
+		md += "  NOTE: exit signals require operator review — PlaceSellLimitOrder not auto-called.\n"
+	}
 	md += "\nSafety: spot limit BUY post-only only; no futures, no leverage, no market order.\n"
 	return md
 }
@@ -214,4 +245,21 @@ func shouldNotifySupervisor(cfg config.Config, result liveguard.SupervisorResult
 		return true
 	}
 	return false
+}
+
+// buildCurrentPricesFromDB returns a symbol→lastClose price map from DB 4h candles.
+// Used by exit evaluation. Returns empty map on error; EvaluateExits skips missing prices.
+func buildCurrentPricesFromDB(cfg config.Config, db *storage.DB) map[string]float64 {
+	prices := map[string]float64{}
+	symbols := append([]string{cfg.Data.Symbols.BTC}, cfg.Data.Symbols.Assets...)
+	for _, sym := range symbols {
+		candles, err := db.LoadCandles(sym, "4h", 2)
+		if err != nil || len(candles) == 0 {
+			continue
+		}
+		if p := market.LastClose(candles); p > 0 {
+			prices[sym] = p
+		}
+	}
+	return prices
 }

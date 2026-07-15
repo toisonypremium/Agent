@@ -176,3 +176,12 @@ execution:
     - 0.25
     - 0.35
     - 0.40
+
+exit:
+  enabled: false
+  take_profit_pct: 0.30
+  partial_exit_pct: 0.50
+  trailing_activate_pct: 0.20
+  trailing_distance_pct: 0.08
+  time_stop_days: 90
+  min_pnl_for_time_stop: 0.0

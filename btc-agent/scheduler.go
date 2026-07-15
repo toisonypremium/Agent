@@ -19,6 +19,7 @@ const (
 	schedulerAIWatchTimeout    = 120 * time.Second
 	schedulerAITelegramTimeout = 90 * time.Second
 	schedulerAuditTimeout      = 60 * time.Second
+	schedulerHermesTimeout     = 90 * time.Second
 )
 
 func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow bool, dryRun bool) error {
@@ -69,6 +70,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	auditEnabled := cfg.Live.SupervisorEnabled
 	log.Printf("[Scheduler] Live auto-audit interval: %v (enabled: %v)", auditInterval, auditEnabled)
 
+	hermesInterval := 60 * time.Minute
+	if cfg.AI.HermesIntervalMinutes > 0 {
+		hermesInterval = time.Duration(cfg.AI.HermesIntervalMinutes) * time.Minute
+	}
+	hermesEnabled := cfg.AI.Enabled && cfg.Live.SupervisorEnabled
+	log.Printf("[Scheduler] Hermes cycle interval: %v (enabled: %v)", hermesInterval, hermesEnabled)
+
 	maintenanceEnabled := cfg.Maintenance.Enabled && cfg.Maintenance.SchedulerEnabled
 	maintenanceTime := cfg.Maintenance.SchedulerTime
 	if maintenanceTime == "" {
@@ -96,6 +104,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextReconcile time.Time
 	var nextSupervisor time.Time
 	var nextAudit time.Time
+	var nextHermes time.Time
 	var nextAlivePing time.Time
 	var nextTelegramCommands time.Time
 	var latestDoctor *liveguard.RuntimeDoctorResult
@@ -311,6 +320,20 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
 	}
 
+	if hermesEnabled {
+		nextHermes = time.Now().Add(hermesInterval)
+		if runNow {
+			log.Println("[Scheduler] Executing initial Hermes cycle (--run-now)...")
+			hermesCtx, cancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+			if err := runHermesCycle(hermesCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Initial Hermes cycle error: %v", err)
+				runNowNotes = append(runNowNotes, "hermes: "+err.Error())
+			}
+			cancel()
+		}
+		log.Printf("[Scheduler] Next Hermes cycle: %s", nextHermes.Format("2006-01-02 15:04:05 MST"))
+	}
+
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
 		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
@@ -335,6 +358,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 		if auditEnabled && nextAudit.Before(waitUntil) {
 			waitUntil = nextAudit
+		}
+		if hermesEnabled && nextHermes.Before(waitUntil) {
+			waitUntil = nextHermes
 		}
 		if alivePingEnabled && nextAlivePing.Before(waitUntil) {
 			waitUntil = nextAlivePing
@@ -481,6 +507,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextAudit = time.Now().Add(auditInterval)
 			log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live-auto-audit completed")
+		}
+
+		if hermesEnabled && !time.Now().Before(nextHermes) {
+			log.Println("[Scheduler] Triggering scheduled Hermes cycle...")
+			hermesCtx, cancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+			if err := runHermesCycle(hermesCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Hermes cycle error: %v", err)
+			}
+			cancel()
+			nextHermes = time.Now().Add(hermesInterval)
+			log.Printf("[Scheduler] Next Hermes cycle: %s", nextHermes.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("hermes cycle completed")
 		}
 
 		if alivePingEnabled && !time.Now().Before(nextAlivePing) {

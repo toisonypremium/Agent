@@ -18,6 +18,7 @@ const (
 	schedulerResearchTimeout   = 90 * time.Second
 	schedulerAIWatchTimeout    = 120 * time.Second
 	schedulerAITelegramTimeout = 90 * time.Second
+	schedulerAuditTimeout      = 60 * time.Second
 )
 
 func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow bool, dryRun bool) error {
@@ -61,6 +62,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 	log.Printf("[Scheduler] Live supervisor interval: %v (enabled: %v)", managementInterval, cfg.Live.SupervisorEnabled)
 
+	auditInterval := 60 * time.Minute
+	if cfg.Live.AuditIntervalMinutes > 0 {
+		auditInterval = time.Duration(cfg.Live.AuditIntervalMinutes) * time.Minute
+	}
+	auditEnabled := cfg.Live.SupervisorEnabled
+	log.Printf("[Scheduler] Live auto-audit interval: %v (enabled: %v)", auditInterval, auditEnabled)
+
 	maintenanceEnabled := cfg.Maintenance.Enabled && cfg.Maintenance.SchedulerEnabled
 	maintenanceTime := cfg.Maintenance.SchedulerTime
 	if maintenanceTime == "" {
@@ -87,6 +95,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextMarketWatch time.Time
 	var nextReconcile time.Time
 	var nextSupervisor time.Time
+	var nextAudit time.Time
 	var nextAlivePing time.Time
 	var nextTelegramCommands time.Time
 	var latestDoctor *liveguard.RuntimeDoctorResult
@@ -288,6 +297,20 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 	}
 
+	if auditEnabled {
+		nextAudit = time.Now().Add(auditInterval)
+		if runNow {
+			log.Println("[Scheduler] Executing initial live-auto-audit (--run-now)...")
+			auditCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAuditTimeout)
+			if err := runLiveAutoAudit(auditCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Initial live-auto-audit error: %v", err)
+				runNowNotes = append(runNowNotes, "live-auto-audit: "+err.Error())
+			}
+			cancel()
+		}
+		log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
+	}
+
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
 		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
@@ -309,6 +332,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 		if maintenanceEnabled && nextMaintenance.Before(waitUntil) {
 			waitUntil = nextMaintenance
+		}
+		if auditEnabled && nextAudit.Before(waitUntil) {
+			waitUntil = nextAudit
 		}
 		if alivePingEnabled && nextAlivePing.Before(waitUntil) {
 			waitUntil = nextAlivePing
@@ -443,6 +469,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextSupervisor = time.Now().Add(managementInterval)
 			log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live supervisor completed")
+		}
+
+		if auditEnabled && !time.Now().Before(nextAudit) {
+			log.Println("[Scheduler] Triggering scheduled live-auto-audit...")
+			auditCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAuditTimeout)
+			if err := runLiveAutoAudit(auditCtx, cfg, db); err != nil {
+				log.Printf("[Scheduler] Live-auto-audit error: %v", err)
+			}
+			cancel()
+			nextAudit = time.Now().Add(auditInterval)
+			log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("live-auto-audit completed")
 		}
 
 		if alivePingEnabled && !time.Now().Before(nextAlivePing) {

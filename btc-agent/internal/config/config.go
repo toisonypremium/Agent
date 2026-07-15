@@ -9,15 +9,14 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-
 // ExitConfig controls automatic take-profit, trailing stop, and time-stop behaviour.
 type ExitConfig struct {
-	Enabled             bool    `yaml:"enabled"`
-	TakeProfitPct       float64 `yaml:"take_profit_pct"`
-	PartialExitPct      float64 `yaml:"partial_exit_pct"`
-	TrailingActivatePct float64 `yaml:"trailing_activate_pct"`
-	TrailingDistancePct float64 `yaml:"trailing_distance_pct"`
-	TimeStopDays        int     `yaml:"time_stop_days"`
+	Enabled               bool    `yaml:"enabled"`
+	TakeProfitPct         float64 `yaml:"take_profit_pct"`
+	PartialExitPct        float64 `yaml:"partial_exit_pct"`
+	TrailingActivatePct   float64 `yaml:"trailing_activate_pct"`
+	TrailingDistancePct   float64 `yaml:"trailing_distance_pct"`
+	TimeStopDays          int     `yaml:"time_stop_days"`
 	MinPnLForTimeStop     float64 `yaml:"min_pnl_for_time_stop"`
 	PanicSellPnLThreshold float64 `yaml:"panic_sell_pnl_threshold"` // negative threshold e.g. -0.25 = sell all when loss >= 25%; 0 = disabled
 }
@@ -105,15 +104,19 @@ type Config struct {
 		NtfyTopic      string `yaml:"ntfy_topic"`
 	} `yaml:"notify"`
 	AI struct {
-		Enabled         bool    `yaml:"enabled"`
-		Provider        string  `yaml:"provider"`
-		Model           string  `yaml:"model"`
-		BaseURLEnv      string  `yaml:"base_url_env"`
-		APIKeyEnv       string  `yaml:"api_key_env"`
-		MaxTokens       int     `yaml:"max_tokens"`
-		Temperature     float64 `yaml:"temperature"`
-		TelegramEnabled       bool    `yaml:"telegram_enabled"`
-		HermesIntervalMinutes int     `yaml:"hermes_interval_minutes"`
+		Enabled                    bool    `yaml:"enabled"`
+		Provider                   string  `yaml:"provider"`
+		Model                      string  `yaml:"model"`
+		BaseURLEnv                 string  `yaml:"base_url_env"`
+		APIKeyEnv                  string  `yaml:"api_key_env"`
+		MaxTokens                  int     `yaml:"max_tokens"`
+		Temperature                float64 `yaml:"temperature"`
+		TelegramEnabled            bool    `yaml:"telegram_enabled"`
+		HermesIntervalMinutes      int     `yaml:"hermes_interval_minutes"`
+		HermesFreshAuditMaxMinutes int     `yaml:"hermes_fresh_audit_max_minutes"`
+		HermesMinAlertGapMinutes   int     `yaml:"hermes_min_alert_gap_minutes"`
+		HermesEventDrivenEnabled   bool    `yaml:"hermes_event_driven_enabled"`
+		HermesTelegramInteractive  bool    `yaml:"hermes_telegram_interactive"`
 	} `yaml:"ai"`
 	Research struct {
 		Enabled               bool `yaml:"enabled"`
@@ -190,7 +193,7 @@ type Config struct {
 		MMGateSamples                     int     `yaml:"mm_gate_samples"`
 		MMGateSampleDelayMs               int     `yaml:"mm_gate_sample_delay_ms"`
 	} `yaml:"live"`
-	Exit ExitConfig `yaml:"exit"`
+	Exit      ExitConfig `yaml:"exit"`
 	Execution struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
 		RealTradingEnabled bool      `yaml:"real_trading_enabled"`

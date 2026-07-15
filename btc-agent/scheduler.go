@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"btc-agent/internal/config"
+	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/storage"
 )
@@ -464,6 +465,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			}
 			log.Printf("[Scheduler] Next market watch: %s", nextMarketWatch.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("market watch completed")
+
 		}
 
 		if cfg.Live.SupervisorEnabled && !time.Now().Before(nextSupervisor) {
@@ -495,6 +497,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextSupervisor = time.Now().Add(managementInterval)
 			log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live supervisor completed")
+			if hermesEnabled && cfg.AI.HermesEventDrivenEnabled {
+				hermesCtx3, cancel3 := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+				_ = runHermesCycleWithTrigger(hermesCtx3, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "supervisor_completed", AllowNotify: true})
+				cancel3()
+			}
 		}
 
 		if auditEnabled && !time.Now().Before(nextAudit) {
@@ -507,6 +514,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextAudit = time.Now().Add(auditInterval)
 			log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live-auto-audit completed")
+			if hermesEnabled && cfg.AI.HermesEventDrivenEnabled {
+				hermesCtx4, cancel4 := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+				_ = runHermesCycleWithTrigger(hermesCtx4, cfg, db, hermesagent.HermesTrigger{Source: "audit", Reason: "audit_completed", AllowNotify: true})
+				cancel4()
+			}
 		}
 
 		if hermesEnabled && !time.Now().Before(nextHermes) {

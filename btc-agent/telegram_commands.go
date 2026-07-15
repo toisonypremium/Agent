@@ -1,10 +1,10 @@
 package main
 
 import (
-	"log"
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -43,6 +43,19 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 		advance := true
 		if telegramChatAllowed(chatID, update.Message.Chat.ID) {
 			cmd := normalizeTelegramCommand(update.Message.Text)
+			// Free-text Hermes question routing (before command check)
+			if cmd == "" {
+				if trigger, ok := parseTelegramHermesRequest(update.Message.Text); ok {
+					result := runHermesTelegramReply(context.Background(), cfg, db, trigger)
+					telegramToken := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
+					telegramChatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
+					if err := notify.Telegram(ctx, telegramToken, telegramChatID, usertext.TelegramVietnamese(result)); err != nil {
+						log.Printf("[TelegramCommands] hermes free-text reply error: %v", err)
+					} else {
+						log.Printf("[TelegramCommands] hermes free-text reply sent ok")
+					}
+				}
+			}
 			if cmd != "" {
 				text, ok := buildReadOnlyTelegramCommandReply(cmd)
 				if ok {
@@ -90,7 +103,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/exits", "/audit", "/help":
+	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -186,12 +199,10 @@ func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
 			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
 		}
 		return telegramCommandRisk(snapshot, scenario), true
-	case "/hermes":
-		report, ok := loadHermesReportFile()
-		if !ok {
-			return "Chua co Hermes report. Cho Hermes cycle chay hoac dung: ./bin/btc-agent hermes-cycle --config config.yaml", true
-		}
-		return telegramCommandHermes(report), true
+	case "/hermes", "/h":
+		return telegramCommandHermesFromLatest(), true
+	case "/ask":
+		return "Dung: /ask <cau hoi cua ban>, vi du: /ask tai sao bot chua vao lenh?", true
 	case "/exits":
 		snap := buildHermesSnapshotFromReports()
 		return telegramCommandExits(snap), true
@@ -221,6 +232,8 @@ func telegramCommandsHelp() string {
 /next — điều kiện kích hoạt tiếp theo
 /risk — risk governor và caps
 /hermes — Hermes AI analysis tổng hợp
+/h — tắt tắt /hermes
+/ask <câu hỏi> — Hermes trả lời câu hỏi trực tiếp
 /exits — exit signals hiện tại
 /audit — live-auto-audit verdict
 

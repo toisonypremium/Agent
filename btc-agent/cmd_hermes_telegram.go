@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 
 	"btc-agent/internal/config"
 	"btc-agent/internal/hermesagent"
+	"btc-agent/internal/storage"
 )
 
 func telegramCommandHermes(report hermesagent.HermesReport) string {
@@ -18,8 +20,7 @@ func telegramCommandHermes(report hermesagent.HermesReport) string {
 	if !report.GeneratedAt.IsZero() {
 		age = fmt.Sprintf(" (generated %s)", report.GeneratedAt.Format("15:04 MST"))
 	}
-	return fmt.Sprintf("HERMES BOT MANAGER%s\nGate: %s\nAssets: %s\nExits: %s\n%s",
-		age, report.GateSummary, report.AssetSummary, report.ExitSummary, report.ActionLine)
+	return fmt.Sprintf("HERMES BOT MANAGER%s\nGate: %s\nAssets: %s\nExits: %s\n%s", age, report.GateSummary, report.AssetSummary, report.ExitSummary, report.ActionLine)
 }
 
 func telegramCommandExits(snap hermesagent.HermesSnapshot) string {
@@ -48,8 +49,55 @@ func telegramCommandAudit() string {
 	return strings.Join(lines, "\n")
 }
 
-// buildHermesSnapshotFromReports builds a minimal snapshot from report files only (no cfg needed).
-// Used by Telegram command handlers that don't have cfg in scope.
+func parseTelegramHermesRequest(text string) (hermesagent.HermesTrigger, bool) {
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return hermesagent.HermesTrigger{}, false
+	}
+	lower := strings.ToLower(text)
+	if strings.HasPrefix(lower, "/hermes") || strings.HasPrefix(lower, "/h") {
+		parts := strings.Fields(text)
+		question := ""
+		if len(parts) > 1 {
+			question = strings.Join(parts[1:], " ")
+		}
+		return hermesagent.HermesTrigger{Source: "telegram", Reason: "command", UserText: question, ForceReply: true, AllowNotify: true}, true
+	}
+	if strings.HasPrefix(lower, "/ask") {
+		parts := strings.Fields(text)
+		question := ""
+		if len(parts) > 1 {
+			question = strings.Join(parts[1:], " ")
+		}
+		return hermesagent.HermesTrigger{Source: "telegram", Reason: "ask", UserText: question, ForceReply: true, AllowNotify: true}, true
+	}
+	if strings.Contains(lower, "hermes") && strings.Contains(text, "?") {
+		return hermesagent.HermesTrigger{Source: "telegram", Reason: "free-text", UserText: text, ForceReply: true, AllowNotify: true}, true
+	}
+	return hermesagent.HermesTrigger{}, false
+}
+
+func telegramCommandHermesFromLatest() string {
+	report, ok := loadHermesReportFile()
+	if !ok {
+		return "Chua co Hermes report. Chay Hermes cycle hoac dung /ask de lenh anh xa ngay."
+	}
+	return telegramCommandHermes(report)
+}
+
+// buildHermesSnapshotFromReports builds a minimal snapshot from report files only.
 func buildHermesSnapshotFromReports() hermesagent.HermesSnapshot {
 	return buildHermesSnapshot(config.Config{})
+}
+
+// runHermesTelegramReply runs a Hermes cycle for an interactive Telegram trigger and returns the reply text.
+func runHermesTelegramReply(ctx context.Context, cfg config.Config, db *storage.DB, trigger hermesagent.HermesTrigger) string {
+	if err := runHermesCycleWithTrigger(ctx, cfg, db, trigger); err != nil {
+		return fmt.Sprintf("Hermes cycle error: %v\nREAD_ONLY — no order placed.", err)
+	}
+	report, ok := loadHermesReportFile()
+	if !ok {
+		return "Hermes report unavailable.\nREAD_ONLY — no order placed."
+	}
+	return telegramCommandHermes(report)
 }

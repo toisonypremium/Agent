@@ -2,11 +2,11 @@
 
 ## Open
 
-- [ ] Keep scheduler running in real `live-auto` (`dry_run=false`) only after `live-auto-audit` returns `APPROVED_REAL_ORDER`.
-- [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED` appears.
+- [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` appears (BTC currently in MARKDOWN phase).
 - [ ] Use full verification gate before reporting implementation work done.
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
 - [ ] Milestone C: prove BTC accumulation false-positive/drawdown improvement in walk-forward before any live sizing change.
+- [ ] Wire `PlaceSellLimitOrder` when operator decides to enable auto exit execution (currently report-only).
 
 ## Done
 
@@ -25,6 +25,10 @@
 - [x] Add live-auto safety hardening before autonomous real order approval.
 - [x] Add pre-live safety hardening: final execution assertion, live-auto-audit, forced dry-run simulation, first-order quarantine, and near-unlock events.
 - [x] Fix live-auto safety-hardening logic deviations: dry-run proof gate, BTC phase final assertion, audit verdict separation, forced simulation exchange counter, and near-unlock alert lifecycle.
+- [x] Add exit manager: EvaluateExits, PeakTracker, ExitPanicSell, wire into supervisor cycle, tests (18 cases).
+- [x] Add OpenedAt to LivePosition for accurate time-stop tracking.
+- [x] Schedule live-auto-audit in scheduler loop (audit_interval_minutes, default 60 min).
+- [x] Clear operator halt; bot monitoring active, order gates BLOCKED pending ACCUMULATION_CONFIRMED.
 
 ## Verification commands
 

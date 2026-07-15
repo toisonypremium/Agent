@@ -17,56 +17,52 @@ type JSONCaller interface {
 type HermesSnapshot struct {
 	GeneratedAt time.Time `json:"generated_at"`
 
-	// Gate state (from live_auto_audit_latest.json)
-	AuditVerdict         string   `json:"audit_verdict"`
-	MarketAuthority      string   `json:"market_authority"`
-	CurrentDryRunApproved bool    `json:"current_dry_run_approved"`
-	ForcedSimPassed      bool     `json:"forced_sim_passed"`
-	AuditReasons         []string `json:"audit_reasons,omitempty"`
-	AuditAge             string   `json:"audit_age_minutes"`
+	TriggerSource string `json:"trigger_source,omitempty"`
+	TriggerReason string `json:"trigger_reason,omitempty"`
+	UserQuestion  string `json:"user_question,omitempty"`
 
-	// BTC + plan (from audit analysis/plan)
-	BTCPhase       string  `json:"btc_phase"`
-	BTCPermission  string  `json:"btc_permission"`
-	BTCRegime      string  `json:"btc_regime"`
-	BTCTrend       float64 `json:"btc_trend_score"`
-	PlanState      string  `json:"plan_state"`
-	DoctorStatus   string  `json:"doctor_status"`
+	AuditVerdict          string   `json:"audit_verdict"`
+	MarketAuthority       string   `json:"market_authority"`
+	CurrentDryRunApproved bool     `json:"current_dry_run_approved"`
+	ForcedSimPassed       bool     `json:"forced_sim_passed"`
+	AuditReasons          []string `json:"audit_reasons,omitempty"`
+	AuditAgeMinutes       int      `json:"audit_age_minutes,omitempty"`
+
+	BTCPhase       string   `json:"btc_phase"`
+	BTCPermission  string   `json:"btc_permission"`
+	BTCRegime      string   `json:"btc_regime"`
+	BTCTrend       float64  `json:"btc_trend_score"`
+	PlanState      string   `json:"plan_state"`
+	DoctorStatus   string   `json:"doctor_status"`
 	DoctorBlockers []string `json:"doctor_blockers,omitempty"`
 
-	// Assets (from supervisor/scenario)
-	Assets []HermesAsset `json:"assets,omitempty"`
-
-	// Exit state (from supervisor exits)
+	Assets      []HermesAsset `json:"assets,omitempty"`
 	ExitEnabled bool          `json:"exit_enabled"`
 	Exits       []HermesExit  `json:"exits,omitempty"`
 
-	// Positions
 	Positions []HermesPosition `json:"positions,omitempty"`
 
-	// Research brief summary
 	ResearchSummary string `json:"research_summary,omitempty"`
 
-	// Scheduler / ops
 	SchedulerRunning bool   `json:"scheduler_running"`
 	OperatorHalted   bool   `json:"operator_halted"`
 	LastSupervisorAt string `json:"last_supervisor_at,omitempty"`
 }
 
 type HermesAsset struct {
-	Symbol    string  `json:"symbol"`
-	State     string  `json:"state"`
-	Readiness float64 `json:"readiness_pct"`
-	RR        float64 `json:"reward_risk"`
-	OpenOrders int    `json:"open_orders"`
-	Why       string  `json:"why,omitempty"`
+	Symbol     string  `json:"symbol"`
+	State      string  `json:"state"`
+	Readiness  float64 `json:"readiness_pct"`
+	RR         float64 `json:"reward_risk"`
+	OpenOrders int     `json:"open_orders"`
+	Why        string  `json:"why,omitempty"`
 }
 
 type HermesExit struct {
-	Symbol   string  `json:"symbol"`
-	Action   string  `json:"action"`
-	PnLPct   float64 `json:"pnl_pct"`
-	Reason   string  `json:"reason,omitempty"`
+	Symbol string  `json:"symbol"`
+	Action string  `json:"action"`
+	PnLPct float64 `json:"pnl_pct"`
+	Reason string  `json:"reason,omitempty"`
 }
 
 type HermesPosition struct {
@@ -76,16 +72,31 @@ type HermesPosition struct {
 	OpenedAt      int64   `json:"opened_at,omitempty"`
 }
 
-// HermesReport is the LLM output.
 type HermesReport struct {
-	GeneratedAt   time.Time `json:"generated_at"`
-	GateSummary   string    `json:"gate_summary"`
-	AssetSummary  string    `json:"asset_summary"`
-	ExitSummary   string    `json:"exit_summary"`
-	ActionLine    string    `json:"action_line"`
-	Anomalies     []string  `json:"anomalies,omitempty"`
-	TelegramText  string    `json:"telegram_text"`
-	WorthyAlert   bool      `json:"worthy_alert"`
+	GeneratedAt  time.Time `json:"generated_at"`
+	GateSummary  string    `json:"gate_summary"`
+	AssetSummary string    `json:"asset_summary"`
+	ExitSummary  string    `json:"exit_summary"`
+	ActionLine   string    `json:"action_line"`
+	Anomalies    []string  `json:"anomalies,omitempty"`
+	TelegramText string    `json:"telegram_text"`
+	WorthyAlert  bool      `json:"worthy_alert"`
+}
+
+type HermesState struct {
+	LastSentFingerprint string    `json:"last_sent_fingerprint,omitempty"`
+	LastAuditVerdict    string    `json:"last_audit_verdict,omitempty"`
+	LastDoctorStatus    string    `json:"last_doctor_status,omitempty"`
+	LastExitFingerprint string    `json:"last_exit_fingerprint,omitempty"`
+	LastSentAt          time.Time `json:"last_sent_at,omitempty"`
+}
+
+type HermesTrigger struct {
+	Source      string `json:"source"`
+	Reason      string `json:"reason"`
+	UserText    string `json:"user_text,omitempty"`
+	ForceReply  bool   `json:"force_reply"`
+	AllowNotify bool   `json:"allow_notify"`
 }
 
 // Generate calls the LLM to produce a HermesReport.
@@ -100,23 +111,30 @@ func Generate(ctx context.Context, caller JSONCaller, snap HermesSnapshot) (Herm
 		return fallback(snap), err
 	}
 	report.GeneratedAt = snap.GeneratedAt
-	// Safety: Hermes must never claim order was placed
-	forbidden := []string{"đặt lệnh", "place order", "order placed", "buy order", "sell order", "cancel order"}
-	for _, f := range forbidden {
-		if strings.Contains(strings.ToLower(report.TelegramText), f) ||
-			strings.Contains(strings.ToLower(report.ActionLine), f) {
-			return fallback(snap), nil
-		}
-	}
 	if report.ActionLine == "" {
 		report.ActionLine = "READ_ONLY — no order placed."
 	}
 	if report.TelegramText == "" {
 		return fallback(snap), nil
 	}
-	// WorthyAlert: send Telegram only if there is an exit signal or audit change
+	if forbiddenExecution(report.TelegramText) || forbiddenExecution(report.ActionLine) {
+		return fallback(snap), nil
+	}
+	if strings.TrimSpace(report.ActionLine) != "READ_ONLY — no order placed." {
+		report.ActionLine = "READ_ONLY — no order placed."
+	}
 	report.WorthyAlert = hasExitSignal(snap) || snap.AuditVerdict == "APPROVED_DRY_RUN" || snap.AuditVerdict == "APPROVED_REAL_ORDER"
 	return report, nil
+}
+
+func forbiddenExecution(s string) bool {
+	lower := strings.ToLower(s)
+	for _, f := range []string{"đặt lệnh", "place order", "order placed", "buy order", "sell order", "cancel order", "execute sell", "thực thi"} {
+		if strings.Contains(lower, f) {
+			return true
+		}
+	}
+	return false
 }
 
 func hasExitSignal(snap HermesSnapshot) bool {
@@ -130,27 +148,30 @@ func hasExitSignal(snap HermesSnapshot) bool {
 
 func buildPrompt(snap HermesSnapshot) string {
 	payload, _ := json.MarshalIndent(snap, "", "  ")
-	return fmt.Sprintf(`Return exactly one valid JSON object matching this schema. No markdown, no explanation outside JSON.
-You are Hermes, read-only AI manager for a BTC-gated accumulation bot.
-The bot is a deterministic Go system. You ONLY read and report. You never place, cancel, or suggest orders.
-Write in Vietnamese. Max telegram_text 1400 chars.
+	return fmt.Sprintf(`Return exactly one valid JSON object. No markdown.
+You are Hermes, read-only AI manager for btc-agent.
+You must answer in Vietnamese.
+You never place, cancel, or modify orders.
+If UserQuestion is non-empty, answer that question directly, then give short bot summary.
+Always include action_line exactly as: "READ_ONLY — no order placed."
+Max telegram_text 1400 chars.
 
-JSON schema (all fields required):
+JSON schema:
 {
-  "gate_summary": "1-2 câu tóm tắt trạng thái gate: audit verdict, BTC phase, blocker chính",
-  "asset_summary": "1-2 câu tóm tắt từng asset: state, readiness, tại sao chưa vào lệnh",
-  "exit_summary": "1 câu: exit signals nếu có, NONE nếu không",
+  "gate_summary": "1-2 câu tóm tắt trạng thái gate",
+  "asset_summary": "1-2 câu tóm tắt asset",
+  "exit_summary": "1 câu tóm tắt exit signal hoặc NONE",
   "action_line": "READ_ONLY — no order placed.",
-  "anomalies": ["danh sách bất thường đáng chú ý, hoặc []"],
-  "telegram_text": "Hermes report đầy đủ cho Telegram, Vietnamese, max 1400 chars",
+  "anomalies": ["..."],
+  "telegram_text": "Telegram-ready Vietnamese text",
   "worthy_alert": false
 }
 
 Rules:
-- action_line MUST always be exactly: "READ_ONLY — no order placed."
-- worthy_alert = true only if exit signal non-HOLD OR audit = APPROVED_DRY_RUN/APPROVED_REAL_ORDER
+- worthy_alert = true only if exit signal non-HOLD OR audit = APPROVED_DRY_RUN/APPROVED_REAL_ORDER OR trigger asks for reply
 - Never suggest placing, canceling, or modifying any order
-- Never print API keys, secrets, or credentials
+- Never print secrets or credentials
+- Keep text concise and operational
 
 Snapshot:
 %s`, string(payload))
@@ -173,8 +194,8 @@ func fallback(snap HermesSnapshot) HermesReport {
 		assets = append(assets, fmt.Sprintf("%s=%s(%.0f%%)", a.Symbol, a.State, a.Readiness))
 	}
 	assetStr := strings.Join(assets, " ")
-	telegram := fmt.Sprintf("HERMES BOT MANAGER\n\n📊 Gate: %s\nAudit: %s\n\n📈 Assets: %s\n\n📉 Exits: %s\n\n✅ READ_ONLY — no order placed.",
-		gate, snap.AuditVerdict, assetStr, exits)
+	telegram := fmt.Sprintf("HERMES BOT MANAGER\n\n📊 Gate: %s\nAudit: %s\nBTC: %s | Permission: %s\n\n📈 Assets: %s\n\n📉 Exits: %s\n\n✅ READ_ONLY — no order placed.",
+		gate, snap.AuditVerdict, snap.BTCPhase, snap.BTCPermission, assetStr, exits)
 	if len(telegram) > 1400 {
 		telegram = telegram[:1397] + "..."
 	}

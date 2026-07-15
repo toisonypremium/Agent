@@ -15,31 +15,34 @@ import (
 	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/llm"
+	"btc-agent/internal/reportio"
 	"btc-agent/internal/storage"
 )
 
 const hermesReportDir = "reports"
+const hermesStateFile = "hermes_state.json"
 
-// runHermesCycle builds HermesSnapshot from report files, calls LLM, writes report, sends Telegram.
 func runHermesCycle(ctx context.Context, cfg config.Config, db *storage.DB) error {
-	snap := buildHermesSnapshot(cfg)
-	var caller hermesagent.JSONCaller
-	if cfg.AI.Enabled {
-		client, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
-		if err != nil {
-			log.Printf("[Hermes] LLM client warning: %v", err)
-		} else {
-			caller = client
-		}
+	return runHermesCycleWithTrigger(ctx, cfg, db, hermesagent.HermesTrigger{Source: "scheduled", Reason: "interval", AllowNotify: true})
+}
+
+func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *storage.DB, trigger hermesagent.HermesTrigger) error {
+	if err := ensureFreshHermesInputs(ctx, cfg, db, trigger); err != nil {
+		log.Printf("[Hermes] freshness warning: %v", err)
 	}
+	snap := buildHermesSnapshotWithTrigger(cfg, trigger)
+	caller := hermesCallerFromConfig(cfg)
 	report, err := hermesagent.Generate(ctx, caller, snap)
 	if err != nil {
 		log.Printf("[Hermes] LLM warning: %v", err)
 	}
+	if trigger.UserText != "" && !strings.Contains(strings.ToLower(report.TelegramText), strings.ToLower(trigger.UserText)) {
+		report.WorthyAlert = true
+	}
 	if err := saveJSONFile(hermesReportDir, "hermes_report_latest.json", report); err != nil {
 		return fmt.Errorf("hermes report save: %w", err)
 	}
-	md := buildHermesMarkdown(snap, report)
+	md := buildHermesMarkdown(snap, report, trigger)
 	if err := os.MkdirAll(hermesReportDir, 0700); err != nil {
 		return err
 	}
@@ -47,27 +50,93 @@ func runHermesCycle(ctx context.Context, cfg config.Config, db *storage.DB) erro
 		return err
 	}
 	fmt.Println(md)
-	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && report.WorthyAlert {
-		sendTelegram(ctx, cfg, "hermes-cycle", report.TelegramText)
+	state := loadHermesState()
+	shouldSend, fp := hermesShouldNotify(state, snap, report, trigger)
+	if shouldSend {
+		if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+			sendTelegram(ctx, cfg, "hermes-cycle", report.TelegramText)
+			state.LastSentFingerprint = fp
+			state.LastSentAt = time.Now().UTC()
+			state.LastAuditVerdict = snap.AuditVerdict
+			state.LastDoctorStatus = snap.DoctorStatus
+			state.LastExitFingerprint = exitFingerprint(snap)
+			_ = saveHermesState(state)
+		}
 	}
 	return nil
 }
 
-// buildHermesSnapshot assembles state from all available report files.
+func hermesCallerFromConfig(cfg config.Config) hermesagent.JSONCaller {
+	if !cfg.AI.Enabled {
+		return nil
+	}
+	client, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
+	if err != nil {
+		log.Printf("[Hermes] LLM client warning: %v", err)
+		return nil
+	}
+	return client
+}
+
+func ensureFreshHermesInputs(ctx context.Context, cfg config.Config, db *storage.DB, trigger hermesagent.HermesTrigger) error {
+	maxAge := cfg.AI.HermesFreshAuditMaxMinutes
+	if maxAge <= 0 {
+		maxAge = 30
+	}
+	stale, err := hermesAuditStale(maxAge)
+	if err != nil {
+		return err
+	}
+	if !stale {
+		return nil
+	}
+	if trigger.Source != "telegram" && trigger.Source != "scheduled" && trigger.Source != "audit" {
+		return nil
+	}
+	if err := runLiveAutoAudit(ctx, cfg, db); err != nil {
+		return fmt.Errorf("refresh live-auto-audit: %w", err)
+	}
+	return nil
+}
+
+func hermesAuditStale(maxAgeMinutes int) (bool, error) {
+	b, err := os.ReadFile(filepath.Join(hermesReportDir, "live_auto_audit_latest.json"))
+	if err != nil {
+		return true, nil
+	}
+	var report struct {
+		GeneratedAt time.Time `json:"generated_at"`
+	}
+	if err := json.Unmarshal(b, &report); err != nil {
+		return true, err
+	}
+	if report.GeneratedAt.IsZero() {
+		return true, nil
+	}
+	age := time.Since(report.GeneratedAt)
+	return age > time.Duration(maxAgeMinutes)*time.Minute, nil
+}
+
 func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
+	return buildHermesSnapshotWithTrigger(cfg, hermesagent.HermesTrigger{})
+}
+
+func buildHermesSnapshotWithTrigger(cfg config.Config, trigger hermesagent.HermesTrigger) hermesagent.HermesSnapshot {
 	snap := hermesagent.HermesSnapshot{
-		GeneratedAt: time.Now().UTC(),
+		GeneratedAt:   time.Now().UTC(),
+		TriggerSource: trigger.Source,
+		TriggerReason: trigger.Reason,
+		UserQuestion:  trigger.UserText,
 	}
 
-	// ── Audit report ──────────────────────────────────────────────
 	if b, err := os.ReadFile(filepath.Join(hermesReportDir, "live_auto_audit_latest.json")); err == nil {
 		var audit struct {
-			GeneratedAt          time.Time `json:"generated_at"`
-			Verdict              string    `json:"verdict"`
-			CurrentMarketAuth    string    `json:"current_market_authority"`
-			CurrentDryRunApproved bool     `json:"current_dry_run_approved"`
-			Reasons              []string  `json:"reasons"`
-			ForcedSimulation     struct {
+			GeneratedAt           time.Time `json:"generated_at"`
+			Verdict               string    `json:"verdict"`
+			CurrentMarketAuth     string    `json:"current_market_authority"`
+			CurrentDryRunApproved bool      `json:"current_dry_run_approved"`
+			Reasons               []string  `json:"reasons"`
+			ForcedSimulation      struct {
 				Passed bool `json:"passed"`
 			} `json:"forced_simulation"`
 			Doctor struct {
@@ -75,8 +144,8 @@ func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
 				Blockers []string `json:"blockers"`
 			} `json:"doctor"`
 			Analysis struct {
-				ActionPermission string `json:"action_permission"`
-				MarketRegime     string `json:"market_regime"`
+				ActionPermission string  `json:"action_permission"`
+				MarketRegime     string  `json:"market_regime"`
 				TrendScore       float64 `json:"trend_score"`
 				BTCAccumulation  struct {
 					Phase string `json:"phase"`
@@ -100,13 +169,11 @@ func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
 			snap.DoctorStatus = audit.Doctor.Status
 			snap.DoctorBlockers = audit.Doctor.Blockers
 			if !audit.GeneratedAt.IsZero() {
-				age := time.Since(audit.GeneratedAt)
-				snap.AuditAge = fmt.Sprintf("%.0f", math.Round(age.Minutes()))
+				snap.AuditAgeMinutes = int(math.Round(time.Since(audit.GeneratedAt).Minutes()))
 			}
 		}
 	}
 
-	// ── Supervisor report (exits + operator halt) ──────────────────
 	if b, err := os.ReadFile(filepath.Join(hermesReportDir, "live_supervisor_latest.json")); err == nil {
 		var sup liveguard.SupervisorResult
 		if json.Unmarshal(b, &sup) == nil {
@@ -114,17 +181,11 @@ func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
 			snap.ExitEnabled = len(sup.Exits) > 0
 			snap.LastSupervisorAt = sup.GeneratedAt.Format(time.RFC3339)
 			for _, ex := range sup.Exits {
-				snap.Exits = append(snap.Exits, hermesagent.HermesExit{
-					Symbol: ex.Symbol,
-					Action: string(ex.Action),
-					PnLPct: ex.PnLPct,
-					Reason: ex.Reason,
-				})
+				snap.Exits = append(snap.Exits, hermesagent.HermesExit{Symbol: ex.Symbol, Action: string(ex.Action), PnLPct: ex.PnLPct, Reason: ex.Reason})
 			}
 		}
 	}
 
-	// ── Scenario report (assets) ──────────────────────────────────
 	if scenario, ok := loadScenarioReportFile(); ok {
 		for _, coin := range scenario.Coins {
 			why := ""
@@ -145,19 +206,12 @@ func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
 		}
 	}
 
-	// ── Live positions ────────────────────────────────────────────
 	if posReport, ok := loadLivePositionReportFile(); ok {
 		for _, pos := range posReport.Positions {
-			snap.Positions = append(snap.Positions, hermesagent.HermesPosition{
-				Symbol:        pos.Symbol,
-				Quantity:      pos.Quantity,
-				AvgEntryPrice: pos.AvgEntryPrice,
-				OpenedAt:      pos.OpenedAt,
-			})
+			snap.Positions = append(snap.Positions, hermesagent.HermesPosition{Symbol: pos.Symbol, Quantity: pos.Quantity, AvgEntryPrice: pos.AvgEntryPrice, OpenedAt: pos.OpenedAt})
 		}
 	}
 
-	// ── Research brief ────────────────────────────────────────────
 	if b, err := os.ReadFile(filepath.Join(hermesReportDir, "research_brief_latest.json")); err == nil {
 		var brief struct {
 			Summary string `json:"summary"`
@@ -170,7 +224,6 @@ func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
 		}
 	}
 
-	// ── Scheduler heartbeat ───────────────────────────────────────
 	if b, err := os.ReadFile(filepath.Join(hermesReportDir, "scheduler_heartbeat.json")); err == nil {
 		var hb struct {
 			Status string `json:"status"`
@@ -179,68 +232,40 @@ func buildHermesSnapshot(cfg config.Config) hermesagent.HermesSnapshot {
 			snap.SchedulerRunning = hb.Status == "running"
 		}
 	}
-
 	return snap
 }
 
-func buildHermesMarkdown(snap hermesagent.HermesSnapshot, report hermesagent.HermesReport) string {
-	var b strings.Builder
-	b.WriteString("HERMES BOT MANAGER\n\n")
-	b.WriteString(fmt.Sprintf("Generated: %s\n", report.GeneratedAt.Format(time.RFC3339)))
-	b.WriteString(fmt.Sprintf("Audit age: %s min\n\n", snap.AuditAge))
-
-	b.WriteString("📊 STRATEGY\n")
-	b.WriteString(fmt.Sprintf("BTC Phase: %s | Permission: %s | Regime: %s | Trend: %.1f\n",
-		snap.BTCPhase, snap.BTCPermission, snap.BTCRegime, snap.BTCTrend))
-	b.WriteString(fmt.Sprintf("Audit: %s | Market authority: %s\n", snap.AuditVerdict, snap.MarketAuthority))
-	b.WriteString(fmt.Sprintf("Doctor: %s\n", snap.DoctorStatus))
-	if len(snap.DoctorBlockers) > 0 {
-		b.WriteString(fmt.Sprintf("Blockers: %s\n", strings.Join(snap.DoctorBlockers, "; ")))
+func hermesShouldNotify(state hermesagent.HermesState, snap hermesagent.HermesSnapshot, report hermesagent.HermesReport, trigger hermesagent.HermesTrigger) (bool, string) {
+	if trigger.ForceReply {
+		return true, fingerprintForHermes(snap, report, trigger)
 	}
-	b.WriteString("\n")
-
-	if len(snap.Assets) > 0 {
-		b.WriteString("📈 ASSETS\n")
-		for _, a := range snap.Assets {
-			b.WriteString(fmt.Sprintf("- %s: %s readiness=%.0f%% RR=%.2f orders=%d\n",
-				a.Symbol, a.State, a.Readiness, a.RR, a.OpenOrders))
+	fp := fingerprintForHermes(snap, report, trigger)
+	if state.LastSentFingerprint == fp {
+		if time.Since(state.LastSentAt) < 30*time.Minute {
+			return false, fp
 		}
-		b.WriteString("\n")
 	}
-
-	if len(snap.Exits) > 0 {
-		b.WriteString("📉 EXIT SIGNALS\n")
-		for _, ex := range snap.Exits {
-			b.WriteString(fmt.Sprintf("- %s → %s PnL=%.2f%%: %s\n",
-				ex.Symbol, ex.Action, ex.PnLPct*100, ex.Reason))
-		}
-		b.WriteString("⚠ Report-only — PlaceSellLimitOrder not auto-called.\n\n")
-	} else {
-		b.WriteString("📉 EXIT SIGNALS: NONE\n\n")
+	if state.LastAuditVerdict != snap.AuditVerdict || state.LastDoctorStatus != snap.DoctorStatus || state.LastExitFingerprint != exitFingerprint(snap) {
+		return true, fp
 	}
-
-	if len(snap.Positions) > 0 {
-		b.WriteString("💼 POSITIONS\n")
-		for _, p := range snap.Positions {
-			b.WriteString(fmt.Sprintf("- %s qty=%.6f avg=%.4f\n",
-				p.Symbol, p.Quantity, p.AvgEntryPrice))
-		}
-		b.WriteString("\n")
+	if report.WorthyAlert {
+		return true, fp
 	}
-
-	b.WriteString("🤖 HERMES ANALYSIS\n")
-	b.WriteString(fmt.Sprintf("Gate: %s\n", report.GateSummary))
-	b.WriteString(fmt.Sprintf("Assets: %s\n", report.AssetSummary))
-	b.WriteString(fmt.Sprintf("Exits: %s\n", report.ExitSummary))
-	if len(report.Anomalies) > 0 {
-		b.WriteString(fmt.Sprintf("⚠ Anomalies: %s\n", strings.Join(report.Anomalies, "; ")))
-	}
-	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("✅ %s\n", report.ActionLine))
-	return b.String()
+	return false, fp
 }
 
-// loadHermesReportFile loads the latest hermes report for Telegram command.
+func fingerprintForHermes(snap hermesagent.HermesSnapshot, report hermesagent.HermesReport, trigger hermesagent.HermesTrigger) string {
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%v|%s|%s", trigger.Source, trigger.Reason, snap.AuditVerdict, snap.DoctorStatus, snap.BTCPhase, snap.ExitEnabled, exitFingerprint(snap), report.ExitSummary)
+}
+
+func exitFingerprint(snap hermesagent.HermesSnapshot) string {
+	parts := make([]string, 0, len(snap.Exits))
+	for _, ex := range snap.Exits {
+		parts = append(parts, fmt.Sprintf("%s:%s:%.2f", ex.Symbol, ex.Action, ex.PnLPct))
+	}
+	return strings.Join(parts, "|")
+}
+
 func loadHermesReportFile() (hermesagent.HermesReport, bool) {
 	b, err := os.ReadFile(filepath.Join(hermesReportDir, "hermes_report_latest.json"))
 	if err != nil {
@@ -251,4 +276,72 @@ func loadHermesReportFile() (hermesagent.HermesReport, bool) {
 		return hermesagent.HermesReport{}, false
 	}
 	return out, true
+}
+
+func loadHermesState() hermesagent.HermesState {
+	var state hermesagent.HermesState
+	b, err := os.ReadFile(filepath.Join(hermesReportDir, hermesStateFile))
+	if err == nil {
+		_ = json.Unmarshal(b, &state)
+	}
+	return state
+}
+
+func saveHermesState(state hermesagent.HermesState) error {
+	if err := os.MkdirAll(hermesReportDir, 0700); err != nil {
+		return err
+	}
+	return reportio.WriteJSON(hermesReportDir, hermesStateFile, state)
+}
+
+func buildHermesMarkdown(snap hermesagent.HermesSnapshot, report hermesagent.HermesReport, trigger hermesagent.HermesTrigger) string {
+	var b strings.Builder
+	b.WriteString("HERMES BOT MANAGER\n\n")
+	b.WriteString(fmt.Sprintf("Generated: %s\n", report.GeneratedAt.Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("Trigger: %s/%s\n", trigger.Source, trigger.Reason))
+	if trigger.UserText != "" {
+		b.WriteString(fmt.Sprintf("User question: %s\n", trigger.UserText))
+	}
+	b.WriteString(fmt.Sprintf("Audit age: %d min\n\n", snap.AuditAgeMinutes))
+	b.WriteString("📊 STRATEGY\n")
+	b.WriteString(fmt.Sprintf("BTC Phase: %s | Permission: %s | Regime: %s | Trend: %.1f\n", snap.BTCPhase, snap.BTCPermission, snap.BTCRegime, snap.BTCTrend))
+	b.WriteString(fmt.Sprintf("Audit: %s | Market authority: %s\n", snap.AuditVerdict, snap.MarketAuthority))
+	b.WriteString(fmt.Sprintf("Doctor: %s\n", snap.DoctorStatus))
+	if len(snap.DoctorBlockers) > 0 {
+		b.WriteString(fmt.Sprintf("Blockers: %s\n", strings.Join(snap.DoctorBlockers, "; ")))
+	}
+	b.WriteString("\n")
+	if len(snap.Assets) > 0 {
+		b.WriteString("📈 ASSETS\n")
+		for _, a := range snap.Assets {
+			b.WriteString(fmt.Sprintf("- %s: %s readiness=%.0f%% RR=%.2f orders=%d\n", a.Symbol, a.State, a.Readiness, a.RR, a.OpenOrders))
+		}
+		b.WriteString("\n")
+	}
+	if len(snap.Exits) > 0 {
+		b.WriteString("📉 EXIT SIGNALS\n")
+		for _, ex := range snap.Exits {
+			b.WriteString(fmt.Sprintf("- %s → %s PnL=%.2f%%: %s\n", ex.Symbol, ex.Action, ex.PnLPct*100, ex.Reason))
+		}
+		b.WriteString("⚠ Report-only — PlaceSellLimitOrder not auto-called.\n\n")
+	} else {
+		b.WriteString("📉 EXIT SIGNALS: NONE\n\n")
+	}
+	if len(snap.Positions) > 0 {
+		b.WriteString("💼 POSITIONS\n")
+		for _, p := range snap.Positions {
+			b.WriteString(fmt.Sprintf("- %s qty=%.6f avg=%.4f\n", p.Symbol, p.Quantity, p.AvgEntryPrice))
+		}
+		b.WriteString("\n")
+	}
+	b.WriteString("🤖 HERMES ANALYSIS\n")
+	b.WriteString(fmt.Sprintf("Gate: %s\n", report.GateSummary))
+	b.WriteString(fmt.Sprintf("Assets: %s\n", report.AssetSummary))
+	b.WriteString(fmt.Sprintf("Exits: %s\n", report.ExitSummary))
+	if len(report.Anomalies) > 0 {
+		b.WriteString(fmt.Sprintf("⚠ Anomalies: %s\n", strings.Join(report.Anomalies, "; ")))
+	}
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("✅ %s\n", report.ActionLine))
+	return b.String()
 }

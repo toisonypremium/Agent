@@ -59,13 +59,13 @@ func validateSchedulerTelegramAI(text string) error {
 		return fmt.Errorf("contains URL")
 	}
 	if strings.Contains(lower, "watch") || strings.Contains(lower, "không đặt lệnh") || strings.Contains(lower, "khong dat lenh") {
-		if !strings.Contains(lower, "mm=") && !strings.Contains(lower, "mm footprint") {
+		if !strings.Contains(lower, "mm=") && !strings.Contains(lower, "mm footprint") && !strings.Contains(lower, "dòng tiền lớn") && !strings.Contains(lower, "dấu chân dòng tiền lớn") {
 			return fmt.Errorf("missing MM footprint detail")
 		}
-		if !strings.Contains(lower, "liq=") && !strings.Contains(lower, "liquidity") {
+		if !strings.Contains(lower, "liq=") && !strings.Contains(lower, "liquidity") && !strings.Contains(lower, "thanh khoản:") && !strings.Contains(lower, "thanh khoản hạng") {
 			return fmt.Errorf("missing liquidity detail")
 		}
-		if !strings.Contains(lower, "trigger") && !strings.Contains(lower, "điều kiện mở khóa") && !strings.Contains(lower, "cần:") && !strings.Contains(lower, "chờ btc") {
+		if !strings.Contains(lower, "điều kiện") && !strings.Contains(lower, "trigger") && !strings.Contains(lower, "điều kiện mở khóa") && !strings.Contains(lower, "cần:") && !strings.Contains(lower, "chờ btc") {
 			return fmt.Errorf("missing actionable trigger")
 		}
 	}
@@ -167,7 +167,7 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	- Phải có đủ 4 nhãn literal, đúng chữ, đúng thứ tự: I. II. III. IV.
 	- Không được bỏ mục III. Không được gộp Watchlist vào mục khác.
 	- Mỗi mục ngắn, tổng 1200-2400 ký tự.
-	- Trước khi trả lời, tự kiểm: output có chứa đủ "I.", "II.", "III.", "IV.", "MM=", "Liq=", "trigger", "không futures", "không leverage", "không market order".
+	- Trước khi trả lời, tự kiểm: output có chứa đủ "I.", "II.", "III.", "IV.", "Dòng tiền lớn", "Thanh khoản", "Điều kiện", "không futures", "không leverage", "không market order".
 
 	MẪU PHẢI BÁM SÁT, chỉ thay nội dung từ dữ liệu:
 	📊 BTC Agent — Tóm tắt chiến lược
@@ -175,21 +175,20 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 	<1-2 câu: có đặt lệnh không; blocker chính; mode; BTC price/trend/regime/plan>
 
 	II. BTC & KỊCH BẢN
-	Bias W/D/4H: <...> | Flow <...> | risk <...>
-	Vùng: active <...> | support <...> | invalid <...> | resist <...>
+	Xu hướng tuần/ngày/4 giờ: <...> | Dòng tiền <...> | rủi ro <...>
+	Vùng giá: vùng mua <...> | hỗ trợ <...> | mốc sai kịch bản <...> | vùng cản <...>
 	Kịch bản chính: <...>
 	Kịch bản mở khóa: <...>
 	Kịch bản vô hiệu: <...>
 	Cần: <tối đa 4 điều kiện cụ thể>
 
-	III. WATCHLIST MM/LIQ
-	- <COIN> <readiness>%% | MM=<case> <score>/100 (<top missing>) | Liq=<grade> <score>/100 (<top reason nếu có>) | gap <gap>%% RR <ratio> | trigger=<next trigger>
-	- <COIN> <readiness>%% | MM=<case> <score>/100 (<top missing>) | Liq=<grade> <score>/100 (<top reason nếu có>) | gap <gap>%% RR <ratio> | trigger=<next trigger>
-	- <COIN> <readiness>%% | MM=<case> <score>/100 (<top missing>) | Liq=<grade> <score>/100 (<top reason nếu có>) | gap <gap>%% RR <ratio> | trigger=<next trigger>
+	III. CƠ HỘI ĐANG THEO DÕI
+	- <COIN> sẵn sàng <readiness>%% | Dòng tiền lớn: <case> <score>/100 (còn thiếu gì) | Thanh khoản: hạng <grade> <score>/100 | cách vùng mua <gap>%% | lãi/rủi ro <ratio> lần | Điều kiện tiếp theo: <next trigger>
+	- Viết tương tự cho từng tài sản còn lại.
 
 	IV. BOT & SAFETY
-	Không ACTIVE_LIMIT: không đặt lệnh, không chase; chờ điều kiện mở khóa.
-	Runtime: desired=<...> placed=<...> canceled=<...> blocked=<...>.
+	Khi chưa đủ điều kiện đặt lệnh: không mua đuổi; tiếp tục chờ tín hiệu xác nhận.
+	Vận hành: dự kiến=<...>, đã đặt=<...>, đã hủy=<...>, bị chặn=<...>.
 	Research: <1 câu ngắn, context only>.
 	An toàn: spot limit BUY post-only only; không futures, không leverage, không market order.
 

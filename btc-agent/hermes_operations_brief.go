@@ -250,94 +250,132 @@ func briefZone(name string, lo, hi float64) string {
 	}
 	return fmt.Sprintf("%s $%.0f–%.0f", name, lo, hi)
 }
+func viTerm(v string) string {
+	u := strings.ToUpper(strings.TrimSpace(v))
+	labels := map[string]string{
+		"NO_TRADE": "chưa nên mở vị thế", "SCOUT": "đang thăm dò cơ hội", "WATCH": "tiếp tục quan sát", "HOLD": "giữ nguyên, chưa hành động",
+		"ACTIVE_LIMIT": "đủ điều kiện đặt lệnh giới hạn", "RANGE": "đi ngang", "MARKDOWN": "đang trong nhịp giảm",
+		"ACCUMULATION_CONFIRMED": "đã xác nhận tích lũy", "POSSIBLE_ACCUMULATION": "có dấu hiệu tích lũy", "DISTRIBUTION": "có dấu hiệu phân phối",
+		"NO_EDGE": "chưa có lợi thế rõ", "DOCTOR_OK": "hệ thống hoạt động tốt", "RECONCILE_CLEAN": "sổ lệnh khớp sạch",
+		"LOW": "thấp", "MEDIUM": "trung bình", "HIGH": "cao", "BULLISH": "tích cực", "BEARISH": "tiêu cực", "NEUTRAL": "trung tính",
+		"UP": "tăng", "DOWN": "giảm", "FLAT": "đi ngang", "EXTREME FEAR": "sợ hãi cực độ", "FEAR": "sợ hãi", "GREED": "tham lam", "EXTREME GREED": "tham lam cực độ",
+	}
+	if x, ok := labels[u]; ok {
+		return x
+	}
+	if v == "" {
+		return "chưa có dữ liệu"
+	}
+	return strings.ToLower(strings.ReplaceAll(v, "_", " "))
+}
+
+func yesNo(v bool) string {
+	if v {
+		return "có"
+	}
+	return "không"
+}
+
 func briefAction(b HermesOperationsBrief) string {
 	if b.Bot.OperatorHalt {
-		return "OPERATOR HALT — chỉ reconcile/quản trị rủi ro"
+		return "Bot đang dừng khẩn cấp; chỉ kiểm tra tài khoản và bảo vệ vốn."
 	}
 	if strings.Contains(strings.ToUpper(b.Bot.DataHealthStatus), "BLOCK") || strings.Contains(strings.ToUpper(b.Bot.ReconcileSafetyStatus), "BLOCK") {
-		return "SYSTEM BLOCK — không tăng exposure"
+		return "Hệ thống đang có vấn đề dữ liệu hoặc đối soát; Hermes không tăng vốn lúc này."
 	}
-	if b.HermesReport.ActionLine != "" {
+	if strings.TrimSpace(b.HermesReport.ActionLine) != "" && !strings.Contains(strings.ToUpper(b.HermesReport.ActionLine), "READ_ONLY") {
 		return b.HermesReport.ActionLine
 	}
-	return "Hermes tự đánh giá HOLD/PROBE/OPEN/SCALE theo confidence và safety"
+	return "Hermes chưa mở lệnh mới; tiếp tục chờ vùng giá và dòng tiền cho tỷ lệ lợi nhuận/rủi ro tốt hơn."
 }
 
 func renderHermesExecutive(b HermesOperationsBrief) string {
 	var x strings.Builder
-	fmt.Fprintf(&x, "HERMES INTELLIGENCE BRIEF\n%s | %s\n\nI. EXECUTIVE DECISION\n%s\nAutonomous | Plan %s | BTC %s | Doctor %s | Reconcile %s\n\n", b.LocalTime, strings.ToUpper(b.Kind), briefAction(b), b.Bot.PlanState, b.Bot.BTCPermission, b.Bot.DoctorStatus, b.Bot.ReconcileSafetyStatus)
-	fmt.Fprintf(&x, "II. GLOBAL & BTC REGIME\nGlobal cap $%.2fT | volume $%.1fB | BTC dom %.2f%%\nFear & Greed %d %s | EUR/USD %.4f\nBTC $%.0f %s trend %.1f/100 | W/D/4H %s/%s/%s\nFlow %s %.2f | phase %s %.0f | risk %s knife %s FOMO %s\n%s | %s | %s\n\n", b.Global.MarketCapUSD/1e12, b.Global.VolumeUSD/1e9, b.Global.BTCDominance, b.Global.FearGreed, b.Global.FearGreedLabel, b.Global.EURUSD, b.Bot.BTC.Price, b.Bot.BTC.Regime, b.Bot.BTC.TrendScore, b.Bot.BTC.WeeklyBias, b.Bot.BTC.DailyBias, b.Bot.BTC.FourHourBias, b.Bot.BTC.FlowBias, b.Bot.BTC.FlowScore, b.Bot.BTC.AccumulationPhase, b.Bot.BTC.AccumulationScore, b.Bot.BTC.RiskLevel, b.Bot.BTC.FallingKnifeRisk, b.Bot.BTC.FomoRisk, briefZone("Support", b.Bot.BTC.SupportZone.Low, b.Bot.BTC.SupportZone.High), briefZone("Resistance", b.Bot.BTC.ResistanceZone.Low, b.Bot.BTC.ResistanceZone.High), briefZone("Invalid", b.Bot.BTC.InvalidationZone.Low, b.Bot.BTC.InvalidationZone.High))
-	x.WriteString("III. MM / FLOW / LIQUIDITY\n")
+	fmt.Fprintf(&x, "BẢN PHÂN TÍCH VÀ KẾ HOẠCH CỦA HERMES\n%s | %s\n\n1. KẾT LUẬN NHANH\n%s\nKế hoạch: %s | Trạng thái BTC: %s\nHệ thống: %s | Đối soát tài khoản: %s\n\n", b.LocalTime, strings.ToUpper(b.Kind), briefAction(b), viTerm(string(b.Bot.PlanState)), viTerm(string(b.Bot.BTCPermission)), viTerm(b.Bot.DoctorStatus), viTerm(b.Bot.ReconcileSafetyStatus))
+	fmt.Fprintf(&x, "2. BỨC TRANH CHUNG\nTổng vốn hóa thị trường: %.2f nghìn tỷ USD | Khối lượng 24 giờ: %.1f tỷ USD\nTỷ trọng BTC: %.2f%% | Tâm lý: %d/100 — %s | EUR/USD: %.4f\nBTC: $%.0f — thị trường %s, sức mạnh xu hướng %.1f/100\nXu hướng tuần/ngày/4 giờ: %s / %s / %s\nDòng tiền: %s (%.2f) | Giai đoạn: %s (%.0f/100)\nRủi ro chung: %s | Nguy cơ bắt dao rơi: %s | Nguy cơ mua đuổi: %s\n%s | %s | %s\n\n", b.Global.MarketCapUSD/1e12, b.Global.VolumeUSD/1e9, b.Global.BTCDominance, b.Global.FearGreed, viTerm(b.Global.FearGreedLabel), b.Global.EURUSD, b.Bot.BTC.Price, viTerm(b.Bot.BTC.Regime), b.Bot.BTC.TrendScore, viTerm(b.Bot.BTC.WeeklyBias), viTerm(b.Bot.BTC.DailyBias), viTerm(b.Bot.BTC.FourHourBias), viTerm(b.Bot.BTC.FlowBias), b.Bot.BTC.FlowScore, viTerm(b.Bot.BTC.AccumulationPhase), b.Bot.BTC.AccumulationScore, viTerm(string(b.Bot.BTC.RiskLevel)), viTerm(string(b.Bot.BTC.FallingKnifeRisk)), viTerm(string(b.Bot.BTC.FomoRisk)), briefZone("Vùng hỗ trợ", b.Bot.BTC.SupportZone.Low, b.Bot.BTC.SupportZone.High), briefZone("Vùng cản", b.Bot.BTC.ResistanceZone.Low, b.Bot.BTC.ResistanceZone.High), briefZone("Mốc sai kịch bản", b.Bot.BTC.InvalidationZone.Low, b.Bot.BTC.InvalidationZone.High))
+	x.WriteString("3. DÒNG TIỀN LỚN VÀ THANH KHOẢN\n")
 	for _, m := range b.MM {
-		fmt.Fprintf(&x, "- %s %s %.0f/100 quality %.0f%% core=%d ask=%v | %s\n", m.Symbol, m.Verdict, m.Score*100, m.Quality*100, m.Core, m.AskPressure, briefCut(strings.Join(m.Reasons, "; "), 150))
+		fmt.Fprintf(&x, "- %s: %s, điểm %.0f/100; chất lượng dữ liệu %.0f%%; có %d tín hiệu chính; áp lực bán hiện tại: %s.\n  %s\n", m.Symbol, viTerm(m.Verdict), m.Score*100, m.Quality*100, m.Core, yesNo(m.AskPressure), briefCut(strings.Join(m.Reasons, "; "), 170))
 	}
-	x.WriteString("\nIV. ACCUMULATION / DISTRIBUTION MAP\n")
+	x.WriteString("\n4. VÙNG CÓ THỂ GOM VÀ VÙNG CẦN PHÂN PHỐI\n")
 	for _, z := range b.Zones {
 		if z.Score < 20 {
 			continue
 		}
-		fmt.Fprintf(&x, "- %s %s $%.4f–%.4f score %.0f confidence %.0f%%\n  Evidence: %s | Missing: %s\n  Confirm: %s | Invalid: %s\n", z.Symbol, z.Kind, z.Low, z.High, z.Score, z.Confidence*100, firstBrief(strings.Join(z.Evidence, ", "), "none"), firstBrief(strings.Join(z.Missing, ", "), "none"), briefCut(z.Trigger, 130), z.Invalidation)
-	}
-	fmt.Fprintf(&x, "\nV. CAPITAL ALLOCATION (%% VỐN)\nReserve %.1f%% | portfolio cap %.1f%%\n", b.ReservePct, b.PortfolioCapPct)
-	for _, a := range b.Allocations {
-		fmt.Fprintf(&x, "- %s ceiling %.1f%% | now %.1f%% | probe/open/scale %.1f/%.1f/%.1f%% | %s\n  Điều kiện: %s\n", a.Symbol, a.CeilingPct, a.CurrentPct, a.ProbePct, a.OpenPct, a.ScalePct, a.State, briefCut(a.Condition, 130))
-	}
-	x.WriteString("\nVI. ASSET PLAYBOOK\n")
-	for _, a := range b.Hermes.Assets {
-		fmt.Fprintf(&x, "- %s %s ready %.0f%% | entry $%.4f–%.4f | invalid $%.4f | target $%.4f | RR %.2f\n  MM %s %.0f | flow %s %.2f | Liq %s %.0f | trigger %s\n", a.Symbol, a.State, a.Readiness*100, a.EntryZoneLow, a.EntryZoneHigh, a.Invalidation, a.Target, a.RR, a.MMCase, a.MMScore, a.FlowBias, a.FlowScore, a.LiquidityGrade, a.LiquidityScore, briefCut(a.NextTrigger, 140))
-	}
-	fmt.Fprintf(&x, "\nVII. SCENARIO MATRIX\nBASE: %s\nBULL unlock: %s\nBEAR invalidation: %s\n\nVIII. MACRO / POLICY / NEWS\n%s\nResearch: %s\n\nIX. BOT & SAFETY\nOrders %d | positions %d | autonomous execution retained. Spot limit post-only; không futures, leverage, short, market order.\n\nX. DATA QUALITY\n", briefCut(b.Scenario.BTC.BaseCase, 220), briefCut(b.Scenario.BTC.BullUnlock, 220), briefCut(b.Scenario.BTC.BearInvalidation, 220), briefCut(firstBrief(b.MacroSummary, "Không có macro evidence fresh; không suy diễn."), 420), briefCut(firstBrief(b.ResearchSummary, "Không có research fresh."), 200), b.Bot.OpenLiveOrders, b.Bot.LivePositions)
-	for _, q := range b.Sources {
-		state := "fresh"
-		if !q.Fresh {
-			state = "STALE"
+		kind := "Vùng có thể gom"
+		if strings.Contains(z.Kind, "DISTRIBUTION") {
+			kind = "Vùng cần theo dõi phân phối/chốt giảm"
 		}
-		fmt.Fprintf(&x, "- %s %s age=%dm: %s\n", q.Name, state, q.AgeMinutes, q.Detail)
+		fmt.Fprintf(&x, "- %s — %s: $%.4f đến $%.4f | độ tin cậy %.0f%%\n  Điểm ủng hộ: %s. Còn thiếu: %s.\n  Chờ xác nhận: %s | Kịch bản sai khi: %s\n", z.Symbol, kind, z.Low, z.High, z.Confidence*100, firstBrief(strings.Join(z.Evidence, ", "), "chưa có"), firstBrief(strings.Join(z.Missing, ", "), "không"), briefCut(z.Trigger, 150), z.Invalidation)
+	}
+	fmt.Fprintf(&x, "\n5. KẾ HOẠCH PHÂN BỔ VỐN\nGiữ tiền dự phòng: %.1f%% | Tổng mức vốn tối đa được triển khai: %.1f%%\n", b.ReservePct, b.PortfolioCapPct)
+	for _, a := range b.Allocations {
+		fmt.Fprintf(&x, "- %s: tối đa %.1f%% vốn; hiện dùng %.1f%%.\n  Nếu tín hiệu cải thiện: thăm dò %.1f%% → mở vị thế %.1f%% → tăng thêm tối đa %.1f%%.\n  Hiện tại: %s. Điều kiện tiếp theo: %s\n", a.Symbol, a.CeilingPct, a.CurrentPct, a.ProbePct, a.OpenPct, a.ScalePct, viTerm(a.State), briefCut(a.Condition, 150))
+	}
+	x.WriteString("\n6. KẾ HOẠCH CHO TỪNG TÀI SẢN\n")
+	for _, a := range b.Hermes.Assets {
+		fmt.Fprintf(&x, "- %s: %s, mức sẵn sàng %.0f%%.\n  Vùng mua dự kiến $%.4f–$%.4f | Cắt kịch bản dưới $%.4f | Mục tiêu $%.4f | Lãi/rủi ro %.2f lần.\n  Dấu chân dòng tiền lớn: %s %.0f/100 | Dòng tiền %s %.2f | Thanh khoản hạng %s %.0f/100.\n  Cần chờ: %s\n", a.Symbol, viTerm(a.State), a.Readiness*100, a.EntryZoneLow, a.EntryZoneHigh, a.Invalidation, a.Target, a.RR, viTerm(a.MMCase), a.MMScore, viTerm(a.FlowBias), a.FlowScore, a.LiquidityGrade, a.LiquidityScore, briefCut(a.NextTrigger, 160))
+	}
+	fmt.Fprintf(&x, "\n7. BA KỊCH BẢN CẦN THEO DÕI\nKịch bản chính: %s\nKịch bản tốt lên: %s\nKịch bản xấu đi: %s\n\n8. VĨ MÔ, CHÍNH SÁCH VÀ TIN TỨC\n%s\nTổng hợp tin: %s\n\n9. TRẠNG THÁI BOT\nLệnh đang chờ: %d | Vị thế đang giữ: %d. Hermes vẫn tự vận hành và chỉ đặt lệnh giới hạn khi đủ điều kiện.\nAn toàn: chỉ mua giao ngay; không vay đòn bẩy, không bán khống, không dùng lệnh thị trường.\n\n10. ĐỘ TIN CẬY CỦA DỮ LIỆU\n", briefCut(b.Scenario.BTC.BaseCase, 240), briefCut(b.Scenario.BTC.BullUnlock, 240), briefCut(b.Scenario.BTC.BearInvalidation, 240), briefCut(firstBrief(b.MacroSummary, "Chưa có dữ liệu vĩ mô mới đủ tin cậy; Hermes không tự suy diễn."), 450), briefCut(firstBrief(b.ResearchSummary, "Chưa có bản tin mới."), 220), b.Bot.OpenLiveOrders, b.Bot.LivePositions)
+	for _, q := range b.Sources {
+		state := "còn mới"
+		if !q.Fresh {
+			state = "đã cũ"
+		}
+		fmt.Fprintf(&x, "- %s: %s, cập nhật cách đây %d phút (%s).\n", q.Name, state, q.AgeMinutes, q.Detail)
 	}
 	if len(b.Missing) > 0 {
-		fmt.Fprintf(&x, "Missing: %s. Không dùng nguồn thiếu để tăng confidence.\n", strings.Join(b.Missing, ", "))
+		fmt.Fprintf(&x, "Chưa có: %s. Hermes không dùng phần thiếu để nâng mức tin cậy.\n", strings.Join(b.Missing, ", "))
 	}
 	return x.String()
 }
 
 func renderHermesPlan(b HermesOperationsBrief) string {
 	var x strings.Builder
-	x.WriteString("HERMES — KẾ HOẠCH & PHÂN BỔ CHUYÊN NGHIỆP\n")
-	fmt.Fprintf(&x, "Reserve %.1f%% | portfolio cap %.1f%%\n", b.ReservePct, b.PortfolioCapPct)
+	x.WriteString("HERMES — KẾ HOẠCH PHÂN BỔ VỐN\n")
+	fmt.Fprintf(&x, "Giữ dự phòng %.1f%% vốn; tổng mức triển khai không vượt %.1f%%.\n", b.ReservePct, b.PortfolioCapPct)
 	for _, a := range b.Allocations {
-		fmt.Fprintf(&x, "\n%s %s — ceiling %.1f%% vốn\nProbe %.1f%% → Open %.1f%% → Scale %.1f%%\nĐiều kiện: %s\n", a.Symbol, a.State, a.CeilingPct, a.ProbePct, a.OpenPct, a.ScalePct, a.Condition)
+		fmt.Fprintf(&x, "\n%s — %s\nTỷ trọng tối đa %.1f%%; hiện dùng %.1f%%.\nKhi đủ tín hiệu: thăm dò %.1f%% → mở vị thế %.1f%% → tăng thêm tối đa %.1f%%.\nCần chờ: %s\n", a.Symbol, viTerm(a.State), a.CeilingPct, a.CurrentPct, a.ProbePct, a.OpenPct, a.ScalePct, a.Condition)
 	}
-	x.WriteString("\nVÙNG GOM / PHÂN PHỐI\n")
+	x.WriteString("\nCÁC VÙNG GIÁ QUAN TRỌNG\n")
 	for _, z := range b.Zones {
-		fmt.Fprintf(&x, "- %s %s $%.4f–%.4f score %.0f | %s\n", z.Symbol, z.Kind, z.Low, z.High, z.Score, briefCut(z.Trigger, 130))
+		kind := "có thể gom"
+		if strings.Contains(z.Kind, "DISTRIBUTION") {
+			kind = "có thể phân phối/chốt giảm"
+		}
+		fmt.Fprintf(&x, "- %s: vùng %s $%.4f–$%.4f, độ tin cậy %.0f%%. Chờ: %s\n", z.Symbol, kind, z.Low, z.High, z.Confidence*100, briefCut(z.Trigger, 150))
 	}
-	fmt.Fprintf(&x, "\nBase: %s\nBull: %s\nBear/invalid: %s\n", b.Scenario.BTC.BaseCase, b.Scenario.BTC.BullUnlock, b.Scenario.BTC.BearInvalidation)
+	fmt.Fprintf(&x, "\nKịch bản chính: %s\nNếu tốt lên: %s\nNếu xấu đi: %s\n", b.Scenario.BTC.BaseCase, b.Scenario.BTC.BullUnlock, b.Scenario.BTC.BearInvalidation)
 	return x.String()
 }
 
 func renderHermesWhy(b HermesOperationsBrief) string {
-	return fmt.Sprintf("HERMES — GIẢI THÍCH QUYẾT ĐỊNH\n\nHành động: %s\nGate: %s\nAssets: %s\nExit: %s\n\nBằng chứng thuận: BTC phase=%s trend=%.1f flow=%s %.2f; MM=%s\nBằng chứng nghịch/rủi ro: %s | falling knife=%s | FOMO=%s\nTrigger tiếp theo: %s\nVô hiệu: %s\n\nNO_TRADE/MARKDOWN là input sizing trong autonomous; operator halt/data/reconcile/exchange/caps mới là hard safety.\n", briefAction(b), b.HermesReport.GateSummary, b.HermesReport.AssetSummary, b.HermesReport.ExitSummary, b.Bot.BTC.AccumulationPhase, b.Bot.BTC.TrendScore, b.Bot.BTC.FlowBias, b.Bot.BTC.FlowScore, briefMMLine(b.MM), b.Bot.RiskGovernorSummary, b.Bot.BTC.FallingKnifeRisk, b.Bot.BTC.FomoRisk, b.Scenario.BTC.BullUnlock, b.Scenario.BTC.BearInvalidation)
+	return fmt.Sprintf("HERMES — VÌ SAO CHƯA HÀNH ĐỘNG?\n\nKết luận: %s\nBTC đang ở giai đoạn %s, sức mạnh xu hướng %.1f/100; dòng tiền %s (%.2f).\nDấu chân dòng tiền lớn trên BTC: %s.\nRủi ro đáng chú ý: %s; nguy cơ bắt dao rơi %s; mua đuổi %s.\n\nĐiều kiện để hành động: %s\nKịch bản không còn đúng khi: %s\n\nCác nhãn thị trường yếu chỉ làm Hermes giảm tỷ trọng. Bot chỉ bị khóa khi dữ liệu, tài khoản, sàn hoặc đối soát có lỗi.\n", briefAction(b), viTerm(b.Bot.BTC.AccumulationPhase), b.Bot.BTC.TrendScore, viTerm(b.Bot.BTC.FlowBias), b.Bot.BTC.FlowScore, briefMMLine(b.MM), b.Bot.RiskGovernorSummary, viTerm(string(b.Bot.BTC.FallingKnifeRisk)), viTerm(string(b.Bot.BTC.FomoRisk)), b.Scenario.BTC.BullUnlock, b.Scenario.BTC.BearInvalidation)
 }
+
 func briefMMLine(mm []HermesBriefMM) string {
 	for _, m := range mm {
 		if m.Symbol == "BTCUSDT" {
-			return fmt.Sprintf("%s %.0f%% core=%d quality=%.0f%%", m.Verdict, m.Score*100, m.Core, m.Quality*100)
+			return fmt.Sprintf("%s, điểm %.0f/100, %d tín hiệu chính, chất lượng dữ liệu %.0f%%", viTerm(m.Verdict), m.Score*100, m.Core, m.Quality*100)
 		}
 	}
-	return "missing"
+	return "chưa có dữ liệu"
 }
+
 func renderHermesRisk(b HermesOperationsBrief) string {
-	return fmt.Sprintf("HERMES — RISK & SAFETY\nOperator halt: %v\nDoctor: %s\nData: %s — %s\nReconcile: %s — %s\nRisk governor: %s — %s\nOpen orders=%d positions=%d\nCaps động theo %% vốn; probe/action/portfolio được final assertion kiểm tra.\nHard locks: halt, stale/bad data, mismatch/unknown position, exchange/filter failure, ownership/no-short, caps.\n", b.Bot.OperatorHalt, b.Bot.DoctorStatus, b.Bot.DataHealthStatus, b.Bot.DataHealthSummary, b.Bot.ReconcileSafetyStatus, b.Bot.ReconcileSafetySummary, b.Bot.RiskGovernorStatus, b.Bot.RiskGovernorSummary, b.Bot.OpenLiveOrders, b.Bot.LivePositions)
+	return fmt.Sprintf("HERMES — QUẢN TRỊ RỦI RO\nDừng khẩn cấp: %s\nSức khỏe hệ thống: %s\nDữ liệu: %s — %s\nĐối soát tài khoản: %s — %s\nGiới hạn rủi ro: %s — %s\nLệnh đang chờ: %d | Vị thế đang giữ: %d\n\nMọi mức vốn đều tính theo phần trăm tài sản hiện có. Bot chỉ bị chặn khi dữ liệu lỗi/cũ, tài khoản lệch, sàn không sẵn sàng hoặc vượt giới hạn vốn.\n", yesNo(b.Bot.OperatorHalt), viTerm(b.Bot.DoctorStatus), viTerm(b.Bot.DataHealthStatus), b.Bot.DataHealthSummary, viTerm(b.Bot.ReconcileSafetyStatus), b.Bot.ReconcileSafetySummary, viTerm(b.Bot.RiskGovernorStatus), b.Bot.RiskGovernorSummary, b.Bot.OpenLiveOrders, b.Bot.LivePositions)
 }
+
 func renderHermesFlow(b HermesOperationsBrief) string {
 	var x strings.Builder
-	x.WriteString("HERMES — FLOW / MM / LIQUIDITY\n")
+	x.WriteString("HERMES — DÒNG TIỀN LỚN VÀ THANH KHOẢN\n")
 	for _, m := range b.MM {
-		fmt.Fprintf(&x, "\n%s: %s score %.0f%% quality %.0f%% core=%d ask_pressure=%v\n- %s\n", m.Symbol, m.Verdict, m.Score*100, m.Quality*100, m.Core, m.AskPressure, strings.Join(m.Reasons, "; "))
+		fmt.Fprintf(&x, "\n%s: %s, điểm %.0f/100; chất lượng dữ liệu %.0f%%.\nCó %d tín hiệu chính; áp lực bán hiện tại: %s.\nChi tiết: %s\n", m.Symbol, viTerm(m.Verdict), m.Score*100, m.Quality*100, m.Core, yesNo(m.AskPressure), strings.Join(m.Reasons, "; "))
 	}
-	x.WriteString("\nFunding/basis chỉ là context; verdict dương cần executed-flow/orderbook core signal. Threshold taker anomaly tự calibrate theo outcome 24h.\n")
+	x.WriteString("\nPhí hợp đồng và chênh lệch giá chỉ dùng để tham khảo. Hermes chỉ tăng độ tin cậy khi giao dịch thực tế và sổ lệnh cùng xác nhận.\n")
 	return x.String()
 }
+
 func renderHermesSchedule(b HermesOperationsBrief) string {
-	return fmt.Sprintf("HERMES — LỊCH VẬN HÀNH (%s)\n07:00: opening — macro/news, BTC regime, flow/MM, asset plan, risk budget\n13:00: mid-day — thay đổi confidence, liquidity, decision/exposure\nMỗi 4 giờ: digest — delta từ bản trước, trigger sắp đạt\n23:00: closing — action/fill/PnL, calibration outcome, kế hoạch ngày sau\nMỗi 15 phút: market/reconcile/supervisor/exit\nMỗi 60 phút: live audit + Hermes autonomous decision\nNgay lập tức: execution, fill, cancel, reduce/exit, halt, reconcile/data/exchange incident\n", b.Timezone)
+	return fmt.Sprintf("HERMES — LỊCH LÀM VIỆC (%s)\n07:00: kế hoạch đầu ngày — bối cảnh chung, vùng giá và ngân sách rủi ro.\n13:00: đánh giá giữa ngày — dòng tiền, mức tin cậy và tỷ trọng vốn.\nMỗi 4 giờ: chỉ gửi những thay đổi quan trọng và điều kiện sắp đạt.\n23:00: tổng kết — lệnh, kết quả và kế hoạch ngày sau.\nMỗi 15 phút: kiểm tra thị trường, tài khoản, lệnh và điểm thoát.\nMỗi 60 phút: cập nhật quyết định tự động của Hermes.\nThông báo ngay khi có lệnh, khớp lệnh, hủy lệnh, giảm vị thế, thoát vị thế hoặc sự cố an toàn.\n", b.Timezone)
 }

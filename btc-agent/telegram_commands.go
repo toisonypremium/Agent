@@ -123,7 +123,7 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 				}
 			}
 			if cmd != "" {
-				text, ok := buildReadOnlyTelegramCommandReply(cmd)
+				text, ok := buildReadOnlyTelegramCommandReplyWithConfig(cfg, cmd)
 				if ok {
 					if err := notify.Telegram(ctx, token, chatID, usertext.TelegramVietnamese(text)); err != nil {
 						log.Printf("[TelegramCommands] reply error [%s]: %v", cmd, err)
@@ -170,7 +170,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
+	case "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -178,22 +178,24 @@ func normalizeTelegramCommand(text string) string {
 }
 
 func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
+	return buildReadOnlyTelegramCommandReplyWithConfig(config.Config{}, cmd)
+}
+
+func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) (string, bool) {
 	snapshot, snapshotOK := loadBotRuntimeSnapshotReport()
 	scenario, scenarioOK := loadScenarioReportFile()
 	supervisor, supervisorOK := loadLatestSupervisorReportFile()
 	switch cmd {
 	case "/help":
 		return telegramCommandsHelp(), true
-	case "/status":
-		if !snapshotOK || !scenarioOK {
-			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
-		}
-		return telegramCommandStatus(snapshot, scenario), true
+	case "/status", "/hermes", "/h":
+		return renderHermesExecutive(buildHermesOperationsBrief(cfg, "interactive status")), true
 	case "/why":
-		if !scenarioOK {
-			return "Chưa có scenario report. Chờ live supervisor chạy một chu kỳ.", true
-		}
-		return telegramCommandWhy(scenario), true
+		return renderHermesWhy(buildHermesOperationsBrief(cfg, "decision explanation")), true
+	case "/plan", "/schedule":
+		return renderHermesSchedule(buildHermesOperationsBrief(cfg, "operating schedule")), true
+	case "/flow":
+		return renderHermesFlow(buildHermesOperationsBrief(cfg, "flow detail")), true
 	case "/coins":
 		if !scenarioOK {
 			return "Chưa có scenario report. Chờ live supervisor chạy một chu kỳ.", true
@@ -262,17 +264,12 @@ func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
 		}
 		return telegramCommandNext(scenario), true
 	case "/risk":
-		if !snapshotOK || !scenarioOK {
-			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
-		}
-		return telegramCommandRisk(snapshot, scenario), true
-	case "/hermes", "/h":
-		return telegramCommandHermesFromLatest(), true
+		return renderHermesRisk(buildHermesOperationsBrief(cfg, "risk detail")), true
 	case "/ask":
 		return "Dung: /ask <cau hoi cua ban>, vi du: /ask tai sao bot chua vao lenh?", true
 	case "/exits":
-		snap := buildHermesSnapshotFromReports()
-		return telegramCommandExits(snap), true
+		brief := buildHermesOperationsBrief(cfg, "exit state")
+		return telegramCommandExits(brief.Hermes), true
 	case "/audit":
 		return telegramCommandAudit(), true
 	default:
@@ -283,7 +280,10 @@ func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
 func telegramCommandsHelp() string {
 	return strings.TrimSpace(`BTC Agent — lệnh Telegram read-only
 /status — trạng thái bot
-/why — vì sao chưa đặt lệnh
+/why — Hermes giải thích quyết định gần nhất
+/plan — kế hoạch vận hành Hermes
+/schedule — lịch bot cụ thể
+/flow — MM footprint, CVD, taker, orderbook và liquidity
 /coins — từng coin
 /filters — bộ lọc đang chặn gì
 /scorecard — bảng điểm kỹ thuật
@@ -304,7 +304,7 @@ func telegramCommandsHelp() string {
 /exits — exit signals hiện tại
 /audit — live-auto-audit verdict
 
-Không có lệnh đặt mua/bán qua Telegram. Không bypass ACTIVE_LIMIT.`) + "\n"
+Không có lệnh đặt mua/bán qua Telegram. Telegram là operator console; Hermes autonomous thực thi qua safety/reconcile/final assertions.`) + "\n"
 }
 
 func telegramCommandStatus(s BotRuntimeSnapshot, r ScenarioReport) string {

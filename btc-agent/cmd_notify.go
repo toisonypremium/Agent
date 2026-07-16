@@ -136,7 +136,7 @@ func buildResearchTelegramText(ctx context.Context, cfg config.Config, result re
 
 func shouldAutoSendTelegram(label string) bool {
 	switch label {
-	case "expert-report", "market-critical", "market-watch-error", "scheduler-heartbeat-stale", "operator-halt", "operator-resume", "reconcile-live-orders", "auto-live-management", "manual-live-order", "cancel-all-live-orders":
+	case "hermes-opening", "hermes-midday", "hermes-closing", "hermes-digest", "hermes-decision", "hermes-execution", "hermes-exit", "hermes-safety", "expert-report", "market-critical", "market-watch-error", "scheduler-heartbeat-stale", "operator-halt", "operator-resume", "reconcile-live-orders", "auto-live-management", "manual-live-order", "cancel-all-live-orders":
 		return true
 	default:
 		return false

@@ -32,7 +32,7 @@ func telegramCommandExits(snap hermesagent.HermesSnapshot) string {
 	for _, ex := range snap.Exits {
 		b.WriteString(fmt.Sprintf("- %s → %s PnL=%.2f%%\n  %s\n", ex.Symbol, ex.Action, ex.PnLPct*100, ex.Reason))
 	}
-	b.WriteString("\n⚠ Report-only. Operator review required trước khi execute.\nREAD_ONLY — no order placed.")
+	b.WriteString("\nHermes tự REDUCE/EXIT vị thế thuộc HERMES_OPERATOR qua limit order, ownership check, filter normalization và reconcile-safe lifecycle.")
 	return b.String()
 }
 

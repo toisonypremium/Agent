@@ -114,6 +114,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextHermes time.Time
 	var nextAlivePing time.Time
 	var nextTelegramCommands time.Time
+	var nextHermesOpening, nextHermesMidday, nextHermesClosing, nextHermesDigest time.Time
 	var latestDoctor *liveguard.RuntimeDoctorResult
 	consecutiveDoctorBlocks := 0
 	consecutiveMarketErrors := 0
@@ -176,6 +177,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	if err != nil {
 		return err
 	}
+	nextHermesOpening, _ = getNextRunTime("07:00", loc, time.Now().In(loc))
+	nextHermesMidday, _ = getNextRunTime("13:00", loc, time.Now().In(loc))
+	nextHermesClosing, _ = getNextRunTime("23:00", loc, time.Now().In(loc))
+	nextHermesDigest = time.Now().Add(4 * time.Hour)
+	log.Printf("[Scheduler] Hermes Telegram brief schedule: opening=%s midday=%s closing=%s digest=%s", nextHermesOpening.Format(time.RFC3339), nextHermesMidday.Format(time.RFC3339), nextHermesClosing.Format(time.RFC3339), nextHermesDigest.Format(time.RFC3339))
 	log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
 
 	if maintenanceEnabled {
@@ -405,6 +411,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if alivePingEnabled && nextAlivePing.Before(waitUntil) {
 			waitUntil = nextAlivePing
 		}
+		if nextHermesOpening.Before(waitUntil) {
+			waitUntil = nextHermesOpening
+		}
+		if nextHermesMidday.Before(waitUntil) {
+			waitUntil = nextHermesMidday
+		}
+		if nextHermesClosing.Before(waitUntil) {
+			waitUntil = nextHermesClosing
+		}
+		if nextHermesDigest.Before(waitUntil) {
+			waitUntil = nextHermesDigest
+		}
 		if telegramCommandsEnabled && nextTelegramCommands.Before(waitUntil) {
 			waitUntil = nextTelegramCommands
 		}
@@ -456,6 +474,26 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			}
 			log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("daily run completed")
+		}
+
+		if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+			nowUTC := time.Now().UTC()
+			if !nowUTC.Before(nextHermesOpening) {
+				sendScheduledTelegram(shutdownCtx, cfg, "hermes-opening", renderHermesExecutive(buildHermesOperationsBrief(cfg, "opening brief")))
+				nextHermesOpening, _ = getNextRunTime("07:00", loc, time.Now().In(loc))
+			}
+			if !nowUTC.Before(nextHermesMidday) {
+				sendScheduledTelegram(shutdownCtx, cfg, "hermes-midday", renderHermesExecutive(buildHermesOperationsBrief(cfg, "mid-day review")))
+				nextHermesMidday, _ = getNextRunTime("13:00", loc, time.Now().In(loc))
+			}
+			if !nowUTC.Before(nextHermesClosing) {
+				sendScheduledTelegram(shutdownCtx, cfg, "hermes-closing", renderHermesExecutive(buildHermesOperationsBrief(cfg, "closing review")))
+				nextHermesClosing, _ = getNextRunTime("23:00", loc, time.Now().In(loc))
+			}
+			if !nowUTC.Before(nextHermesDigest) {
+				sendScheduledTelegram(shutdownCtx, cfg, "hermes-digest", renderHermesExecutive(buildHermesOperationsBrief(cfg, "4h digest")))
+				nextHermesDigest = time.Now().Add(4 * time.Hour)
+			}
 		}
 
 		if cfg.Live.Enabled && !time.Now().Before(nextReconcile) {

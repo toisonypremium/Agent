@@ -296,13 +296,23 @@ Allowed commands:
 /help
 ```
 
-Blocked/not implemented:
+Blocked Telegram actions:
 
 ```text
 /buy /sell /market /leverage /override /resume /halt /cancel /close
 ```
 
 Telegram chỉ hiển thị state, blockers, dashboard, trigger, orders, positions, doctor, supervisor. Không đặt/hủy/đóng lệnh và không override gates.
+
+Control-plane halt authority:
+
+```bash
+./bin/btc-agent control-plane-request-halt --caller nous-hermes \
+  --reason-code UNKNOWN_POSITION \
+  --summary "reason" --config config.yaml
+```
+
+Lệnh này chỉ được phép kích hoạt halt, ghi audit event và không thể resume. Resume là thao tác operator riêng; circuit-breaker demotion cũng yêu cầu human resume.
 
 ## Verification trước khi báo done
 
@@ -368,8 +378,17 @@ No real order was placed.
 - Done: `EvaluateExits` with TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL.
 - Done: `PeakTracker` persists across supervisor cycles.
 - Done: `OpenedAt` on `LivePosition` for accurate time-stop.
-- Done: Wired into supervisor cycle (report-only, `exit.enabled=false` default).
+- Done: Wired into supervisor cycle (report-only; `exit.enabled=false` default). Auto exit execution is not enabled.
 - Done: `live-auto-audit` scheduled in scheduler loop (`audit_interval_minutes`).
+
+### Current Hermes control plane
+
+- Nous Hermes reads sanitized state through allowlisted MCP tools.
+- Trade proposals are strict-schema, policy-validated and persisted as `SHADOW_ONLY`.
+- Circuit breaker demotes Hermes and activates operator halt after repeated supervisor errors.
+- Daily operations report and weekly performance review run through systemd timers.
+- Lesson candidates are review-only; no skill or policy change is auto-applied.
+- Current production authority remains canary/shadow and halted until explicit human review.
 
 ### Milestone C: proof before sizing
 

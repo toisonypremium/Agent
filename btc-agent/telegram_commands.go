@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"btc-agent/internal/agent2"
@@ -21,8 +22,68 @@ import (
 )
 
 type telegramCommandState struct {
-	LastUpdateID int       `json:"last_update_id"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	LastUpdateID int                    `json:"last_update_id"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	RateLimits   map[string][]time.Time `json:"rate_limits,omitempty"`
+}
+
+const telegramMaxRequestsPerMinute = 5
+
+var telegramRateMu sync.Mutex
+var telegramRateWindow = map[int64][]time.Time{}
+
+func telegramRateAllow(chatID int64) bool {
+	telegramRateMu.Lock()
+	defer telegramRateMu.Unlock()
+	now := time.Now()
+	window := telegramRateWindow[chatID]
+	valid := make([]time.Time, 0, len(window))
+	for _, t := range window {
+		if now.Sub(t) < time.Minute {
+			valid = append(valid, t)
+		}
+	}
+	if len(valid) >= telegramMaxRequestsPerMinute {
+		telegramRateWindow[chatID] = valid
+		return false
+	}
+	telegramRateWindow[chatID] = append(valid, now)
+	return true
+}
+
+func loadTelegramRateLimits(state telegramCommandState) {
+	telegramRateMu.Lock()
+	defer telegramRateMu.Unlock()
+	telegramRateWindow = map[int64][]time.Time{}
+	for chatID, timestamps := range state.RateLimits {
+		id, err := strconv.ParseInt(chatID, 10, 64)
+		if err != nil {
+			continue
+		}
+		for _, timestamp := range timestamps {
+			if time.Since(timestamp) < time.Minute {
+				telegramRateWindow[id] = append(telegramRateWindow[id], timestamp)
+			}
+		}
+	}
+}
+
+func saveTelegramRateLimits(state *telegramCommandState) {
+	telegramRateMu.Lock()
+	defer telegramRateMu.Unlock()
+	state.RateLimits = map[string][]time.Time{}
+	now := time.Now()
+	for chatID, timestamps := range telegramRateWindow {
+		valid := make([]time.Time, 0, len(timestamps))
+		for _, timestamp := range timestamps {
+			if now.Sub(timestamp) < time.Minute {
+				valid = append(valid, timestamp)
+			}
+		}
+		if len(valid) > 0 {
+			state.RateLimits[strconv.FormatInt(chatID, 10)] = valid
+		}
+	}
 }
 
 func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -32,6 +93,7 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 		return fmt.Errorf("telegram command config missing token/chat_id")
 	}
 	state := loadTelegramCommandState()
+	loadTelegramRateLimits(state)
 	updates, err := notify.TelegramGetUpdates(ctx, token, state.LastUpdateID+1)
 	if err != nil {
 		return err
@@ -42,6 +104,10 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 		}
 		advance := true
 		if telegramChatAllowed(chatID, update.Message.Chat.ID) {
+			if !telegramRateAllow(update.Message.Chat.ID) {
+				log.Printf("[TelegramCommands] rate limit exceeded for chat %d", update.Message.Chat.ID)
+				continue
+			}
 			cmd := normalizeTelegramCommand(update.Message.Text)
 			// Free-text Hermes question routing (before command check)
 			if cmd == "" {
@@ -73,6 +139,7 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 		if advance {
 			state.LastUpdateID = update.UpdateID
 			state.UpdatedAt = time.Now()
+			saveTelegramRateLimits(&state)
 			if err := saveTelegramCommandState(state); err != nil {
 				return err
 			}

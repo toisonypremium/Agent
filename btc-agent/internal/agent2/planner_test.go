@@ -445,3 +445,89 @@ func TestBuildPlanDoesNotProbeWeakAsset(t *testing.T) {
 		t.Fatalf("weak/far asset must not create probe: %+v", got)
 	}
 }
+
+// Test moi duoc them boi antigravity agent 2026-07-16
+
+func TestExceptionalRRBypassFallingKnifePromotesToScout(t *testing.T) {
+	cfg := testConfig()
+	cfg.Risk.ExceptionalRRBypassFallingKnife = 6.0
+
+	// Analysis: falling knife HIGH but not panic selling, not FOMO
+	analysis := allowedAnalysis()
+	analysis.FallingKnifeRisk = agent1.High
+	analysis.MarketRegime = "MARKDOWN"
+
+	// ETHUSDT with candles that should produce high RR
+	candles := assetCandles(80, true)
+	got := BuildPlan(cfg, analysis, map[string][]market.Candle{
+		"ETHUSDT":    candles,
+		"SOLUSDT":    nil,
+		"RENDERUSDT": nil,
+	})
+
+	// When exceptional RR bypass is enabled and FallingKnifeRisk=High (no panic/FOMO),
+	// assets with RR >= threshold should be SCOUT (not NO_TRADE), and no layers
+	ethAsset := got.Assets[0]
+	if ethAsset.RewardRisk >= cfg.Risk.ExceptionalRRBypassFallingKnife {
+		// High RR asset should be promoted to SCOUT
+		if ethAsset.State == StateNoTrade {
+			t.Errorf("exceptional RR %.2f >= threshold %.1f: expected SCOUT not NO_TRADE; reason: %s", ethAsset.RewardRisk, cfg.Risk.ExceptionalRRBypassFallingKnife, ethAsset.Reason)
+		}
+		if ethAsset.State == StateActiveLimit {
+			t.Errorf("exceptional RR bypass must not create ACTIVE_LIMIT: %+v", ethAsset)
+		}
+		if len(ethAsset.Layers) > 0 {
+			t.Errorf("exceptional RR bypass SCOUT must have no layers: %+v", ethAsset.Layers)
+		}
+	}
+}
+
+func TestExceptionalRRBypassDisabledWhenThresholdZero(t *testing.T) {
+	cfg := testConfig()
+	cfg.Risk.ExceptionalRRBypassFallingKnife = 0 // disabled
+
+	analysis := allowedAnalysis()
+	analysis.FallingKnifeRisk = agent1.High
+	analysis.MarketRegime = "MARKDOWN"
+
+	got := BuildPlan(cfg, analysis, map[string][]market.Candle{
+		"ETHUSDT":    assetCandles(80, true),
+		"SOLUSDT":    nil,
+		"RENDERUSDT": nil,
+	})
+
+	// When threshold=0, falling knife should still hard-block (NO_TRADE)
+	for _, asset := range got.Assets {
+		if asset.State == StateActiveLimit {
+			t.Errorf("falling knife with disabled bypass must not create ACTIVE_LIMIT: %+v", asset)
+		}
+	}
+	if got.State == StateActiveLimit {
+		t.Errorf("plan state must not be ACTIVE_LIMIT when falling knife hard blocks: %+v", got)
+	}
+}
+
+func TestExceptionalRRBypassDoesNotBypassPanicSelling(t *testing.T) {
+	cfg := testConfig()
+	cfg.Risk.ExceptionalRRBypassFallingKnife = 1.0 // very low threshold to trigger bypass if logic is wrong
+
+	analysis := allowedAnalysis()
+	analysis.FallingKnifeRisk = agent1.High
+	analysis.MarketRegime = "PANIC_SELLING" // panic selling must never be bypassed
+
+	got := BuildPlan(cfg, analysis, map[string][]market.Candle{
+		"ETHUSDT":    assetCandles(80, true),
+		"SOLUSDT":    nil,
+		"RENDERUSDT": nil,
+	})
+
+	// PANIC_SELLING must always hard block even with exceptional RR bypass enabled
+	if got.State == StateActiveLimit {
+		t.Errorf("PANIC_SELLING must never be bypassed: %+v", got)
+	}
+	for _, asset := range got.Assets {
+		if asset.State == StateScout || asset.State == StateActiveLimit {
+			t.Errorf("PANIC_SELLING asset must be NO_TRADE, got %s: %+v", asset.State, asset)
+		}
+	}
+}

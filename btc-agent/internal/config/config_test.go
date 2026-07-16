@@ -663,3 +663,38 @@ func validTestConfig() Config {
 	cfg.Live.MaxOrderNotionalUSDT = 10
 	return cfg
 }
+
+func TestHermesOperatorModesAndCaps(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.HermesOperator.Enabled = true
+	cfg.HermesOperator.Mode = "shadow"
+	cfg.HermesOperator.DecisionTTLSeconds = 120
+	cfg.HermesOperator.MinConfidence = 0.6
+	cfg.HermesOperator.MaxActionsPerCycle = 3
+	cfg.HermesOperator.MaxProbeNotionalUSDT = 5
+	cfg.HermesOperator.MaxActionNotionalUSDT = 10
+	cfg.HermesOperator.MaxPortfolioExposureUSDT = 20
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 10
+	cfg.Live.MaxLiveNotionalTotalUSDT = 20
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid shadow operator rejected: %v", err)
+	}
+	if cfg.HermesOperator.CanExecute() {
+		t.Fatal("shadow must not execute")
+	}
+
+	cfg.HermesOperator.Mode = "root_override"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unknown operator mode should fail")
+	}
+}
+
+func TestHermesCanaryRequiresLiveExecution(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.HermesOperator = HermesOperatorConfig{Enabled: true, Mode: "canary", DecisionTTLSeconds: 120, MinConfidence: .6, MaxActionsPerCycle: 1, MaxProbeNotionalUSDT: 2, MaxActionNotionalUSDT: 2, MaxPortfolioExposureUSDT: 2}
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 2
+	cfg.Live.MaxLiveNotionalTotalUSDT = 2
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("canary without live execution should fail")
+	}
+}

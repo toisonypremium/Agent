@@ -45,7 +45,7 @@ func runSchedulerHeartbeatCheck(ctx context.Context, cfg config.Config, maxAge t
 	fmt.Print(schedulerHeartbeatCheckText(check))
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
 		if check.Stale && shouldSendSchedulerHeartbeatAlert(check) {
-			sendTelegram(ctx, cfg, "scheduler-heartbeat-stale", schedulerHeartbeatAlertText(check))
+			sendScheduledTelegram(ctx, cfg, "scheduler-heartbeat-stale", schedulerHeartbeatAlertText(check))
 		}
 		if err := saveSchedulerHeartbeatAlertState(check); err != nil {
 			return err

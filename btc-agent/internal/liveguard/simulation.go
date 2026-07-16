@@ -86,6 +86,10 @@ func simScenario(name, expected string, cfg config.Config, plan agent2.Plan, ope
 }
 
 func simulationConfig(cfg config.Config) config.Config {
+	// This deterministic harness exercises managed-order lifecycle without a live
+	// order-book provider. MM liquidity behavior is covered by dedicated tests.
+	cfg.Live.LiquidityGateEnabled = false
+	cfg.Live.RequireOrderBookLiquidity = false
 	cfg.Live.Enabled = true
 	cfg.Live.AutoExecute = true
 	cfg.Live.OrderManagementEnabled = true

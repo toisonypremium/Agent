@@ -10,6 +10,29 @@ import (
 )
 
 // ExitConfig controls automatic take-profit, trailing stop, and time-stop behaviour.
+type HermesOperatorConfig struct {
+	Enabled                  bool    `yaml:"enabled"`
+	Mode                     string  `yaml:"mode"`
+	DecisionTTLSeconds       int     `yaml:"decision_ttl_seconds"`
+	MinConfidence            float64 `yaml:"min_confidence"`
+	MaxActionsPerCycle       int     `yaml:"max_actions_per_cycle"`
+	MaxProbeNotionalUSDT     float64 `yaml:"max_probe_notional_usdt"`
+	MaxActionNotionalUSDT    float64 `yaml:"max_action_notional_usdt"`
+	MaxPortfolioExposureUSDT float64 `yaml:"max_portfolio_exposure_usdt"`
+}
+
+func (c HermesOperatorConfig) NormalizedMode() string {
+	mode := strings.ToLower(strings.TrimSpace(c.Mode))
+	if mode == "" {
+		return "observe"
+	}
+	return mode
+}
+
+func (c HermesOperatorConfig) CanExecute() bool {
+	return c.Enabled && (c.NormalizedMode() == "canary" || c.NormalizedMode() == "autonomous")
+}
+
 type ExitConfig struct {
 	Enabled               bool    `yaml:"enabled"`
 	TakeProfitPct         float64 `yaml:"take_profit_pct"`
@@ -38,35 +61,36 @@ type Config struct {
 		ReserveCashRatio float64            `yaml:"reserve_cash_ratio"`
 	} `yaml:"portfolio"`
 	Risk struct {
-		MaxTotalDeploymentPerCycle    float64 `yaml:"max_total_deployment_per_cycle"`
-		MaxSingleAssetDeployment      float64 `yaml:"max_single_asset_deployment"`
-		MinRewardRisk                 float64 `yaml:"min_reward_risk"`
-		DecisionProfile               string  `yaml:"decision_profile"`
-		BTCTrendArmedThreshold        float64 `yaml:"btc_trend_armed_threshold"`
-		BTCTrendAllowedThreshold      float64 `yaml:"btc_trend_allowed_threshold"`
-		BTCFlowPromoteThreshold       float64 `yaml:"btc_flow_promote_threshold"`
-		BTCPermissionMinRewardRisk    float64 `yaml:"btc_permission_min_reward_risk"`
-		MinWatchReadinessForProbe     float64 `yaml:"min_watch_readiness_for_probe"`
-		StopOnPanicSelling            bool    `yaml:"stop_on_panic_selling"`
-		DisableRelativeStrengthFilter bool    `yaml:"disable_relative_strength_filter"`
-		RelativeStrengthLookbackDays  int     `yaml:"relative_strength_lookback_days"`
-		MinRelativeStrength           float64 `yaml:"min_relative_strength"`
-		MinAssetMomentum              float64 `yaml:"min_asset_momentum"`
-		DisableRotationScoreFilter    bool    `yaml:"disable_rotation_score_filter"`
-		MinRotationScore              float64 `yaml:"min_rotation_score"`
-		MaxRotationRank               int     `yaml:"max_rotation_rank"`
-		DisableAssetFlowEntryFilter   bool    `yaml:"disable_asset_flow_entry_filter"`
-		MinAssetFlowBullScore         float64 `yaml:"min_asset_flow_bull_score"`
-		AllowNeutralReclaimEntry      bool    `yaml:"allow_neutral_reclaim_entry"`
-		StrictAssetFlowEntry          bool    `yaml:"strict_asset_flow_entry"`
-		FlowBearHardBlockScore        float64 `yaml:"flow_bear_hard_block_score"`
-		MinScoutRewardRisk            float64 `yaml:"min_scout_reward_risk"`
-		StrictRotationRank            bool    `yaml:"strict_rotation_rank"`
-		AllowScoutInDowntrend         bool    `yaml:"allow_scout_in_downtrend"`
-		DiscountZonePremiumPct        float64 `yaml:"discount_zone_premium_pct"`
-		NoFutures                     bool    `yaml:"no_futures"`
-		NoLeverage                    bool    `yaml:"no_leverage"`
-		SpotLimitOnly                 bool    `yaml:"spot_limit_only"`
+		MaxTotalDeploymentPerCycle      float64 `yaml:"max_total_deployment_per_cycle"`
+		MaxSingleAssetDeployment        float64 `yaml:"max_single_asset_deployment"`
+		MinRewardRisk                   float64 `yaml:"min_reward_risk"`
+		DecisionProfile                 string  `yaml:"decision_profile"`
+		BTCTrendArmedThreshold          float64 `yaml:"btc_trend_armed_threshold"`
+		BTCTrendAllowedThreshold        float64 `yaml:"btc_trend_allowed_threshold"`
+		BTCFlowPromoteThreshold         float64 `yaml:"btc_flow_promote_threshold"`
+		BTCPermissionMinRewardRisk      float64 `yaml:"btc_permission_min_reward_risk"`
+		MinWatchReadinessForProbe       float64 `yaml:"min_watch_readiness_for_probe"`
+		StopOnPanicSelling              bool    `yaml:"stop_on_panic_selling"`
+		DisableRelativeStrengthFilter   bool    `yaml:"disable_relative_strength_filter"`
+		RelativeStrengthLookbackDays    int     `yaml:"relative_strength_lookback_days"`
+		MinRelativeStrength             float64 `yaml:"min_relative_strength"`
+		MinAssetMomentum                float64 `yaml:"min_asset_momentum"`
+		DisableRotationScoreFilter      bool    `yaml:"disable_rotation_score_filter"`
+		MinRotationScore                float64 `yaml:"min_rotation_score"`
+		MaxRotationRank                 int     `yaml:"max_rotation_rank"`
+		DisableAssetFlowEntryFilter     bool    `yaml:"disable_asset_flow_entry_filter"`
+		MinAssetFlowBullScore           float64 `yaml:"min_asset_flow_bull_score"`
+		AllowNeutralReclaimEntry        bool    `yaml:"allow_neutral_reclaim_entry"`
+		StrictAssetFlowEntry            bool    `yaml:"strict_asset_flow_entry"`
+		FlowBearHardBlockScore          float64 `yaml:"flow_bear_hard_block_score"`
+		MinScoutRewardRisk              float64 `yaml:"min_scout_reward_risk"`
+		StrictRotationRank              bool    `yaml:"strict_rotation_rank"`
+		AllowScoutInDowntrend           bool    `yaml:"allow_scout_in_downtrend"`
+		ExceptionalRRBypassFallingKnife float64 `yaml:"exceptional_rr_bypass_falling_knife"` // 0=disabled; >0 = min RR to demote falling knife hard block to SCOUT
+		DiscountZonePremiumPct          float64 `yaml:"discount_zone_premium_pct"`
+		NoFutures                       bool    `yaml:"no_futures"`
+		NoLeverage                      bool    `yaml:"no_leverage"`
+		SpotLimitOnly                   bool    `yaml:"spot_limit_only"`
 	} `yaml:"risk"`
 	BTCCycle struct {
 		StressPriceReference         float64 `yaml:"stress_price_reference"`
@@ -123,6 +147,10 @@ type Config struct {
 		BriefIntervalMinutes  int  `yaml:"brief_interval_minutes"`
 		MaxSourcesPerCycle    int  `yaml:"max_sources_per_cycle"`
 		RequestTimeoutSeconds int  `yaml:"request_timeout_seconds"`
+		ExpertEnabled         bool `yaml:"expert_enabled"`
+		ExpertIntervalMinutes int  `yaml:"expert_interval_minutes"`
+		ExpertMaxSections     int  `yaml:"expert_max_sections"`
+		ExpertMaxItems        int  `yaml:"expert_max_items"`
 		RSS                   struct {
 			Enabled bool     `yaml:"enabled"`
 			Feeds   []string `yaml:"feeds"`
@@ -193,8 +221,9 @@ type Config struct {
 		MMGateSamples                     int     `yaml:"mm_gate_samples"`
 		MMGateSampleDelayMs               int     `yaml:"mm_gate_sample_delay_ms"`
 	} `yaml:"live"`
-	Exit      ExitConfig `yaml:"exit"`
-	Execution struct {
+	HermesOperator HermesOperatorConfig `yaml:"hermes_operator"`
+	Exit           ExitConfig           `yaml:"exit"`
+	Execution      struct {
 		PaperTrading       bool      `yaml:"paper_trading"`
 		RealTradingEnabled bool      `yaml:"real_trading_enabled"`
 		OrderExpiryHours   int       `yaml:"order_expiry_hours"`
@@ -319,6 +348,36 @@ func (c Config) Validate() error {
 		}
 		if c.Live.CancelStaleAfterMinutes < 0 {
 			return errors.New("live.cancel_stale_after_minutes cannot be negative")
+		}
+	}
+	if c.HermesOperator.Enabled {
+		mode := c.HermesOperator.NormalizedMode()
+		if mode != "observe" && mode != "shadow" && mode != "canary" && mode != "autonomous" {
+			return errors.New("hermes_operator.mode must be observe, shadow, canary, or autonomous")
+		}
+		if c.HermesOperator.DecisionTTLSeconds < 15 || c.HermesOperator.DecisionTTLSeconds > 600 {
+			return errors.New("hermes_operator.decision_ttl_seconds must be between 15 and 600")
+		}
+		if c.HermesOperator.MinConfidence < 0 || c.HermesOperator.MinConfidence > 1 {
+			return errors.New("hermes_operator.min_confidence must be between 0 and 1")
+		}
+		if c.HermesOperator.MaxActionsPerCycle < 1 || c.HermesOperator.MaxActionsPerCycle > 20 {
+			return errors.New("hermes_operator.max_actions_per_cycle must be between 1 and 20")
+		}
+		if c.HermesOperator.MaxProbeNotionalUSDT <= 0 || c.HermesOperator.MaxActionNotionalUSDT <= 0 {
+			return errors.New("hermes_operator notional caps must be positive")
+		}
+		if c.HermesOperator.MaxProbeNotionalUSDT > c.HermesOperator.MaxActionNotionalUSDT {
+			return errors.New("hermes_operator.max_probe_notional_usdt must be <= max_action_notional_usdt")
+		}
+		if c.Live.MaxLiveNotionalPerOrderUSDT > 0 && c.HermesOperator.MaxActionNotionalUSDT > c.Live.MaxLiveNotionalPerOrderUSDT {
+			return errors.New("hermes_operator.max_action_notional_usdt must be <= live.max_live_notional_per_order_usdt")
+		}
+		if c.HermesOperator.MaxPortfolioExposureUSDT <= 0 || (c.Live.MaxLiveNotionalTotalUSDT > 0 && c.HermesOperator.MaxPortfolioExposureUSDT > c.Live.MaxLiveNotionalTotalUSDT) {
+			return errors.New("hermes_operator.max_portfolio_exposure_usdt must be positive and <= live.max_live_notional_total_usdt")
+		}
+		if c.HermesOperator.CanExecute() && (!c.Live.Enabled || !c.Live.AutoExecute || !c.Execution.RealTradingEnabled) {
+			return errors.New("Hermes canary/autonomous requires live enabled, auto_execute, and real trading enabled")
 		}
 	}
 	if c.Live.HeartbeatIntervalMinutes < 0 {
@@ -471,6 +530,12 @@ func (c Config) Validate() error {
 	}
 	if c.Research.BriefIntervalMinutes < 0 {
 		return errors.New("research.brief_interval_minutes cannot be negative")
+	}
+	if c.Research.ExpertIntervalMinutes < 0 {
+		return errors.New("research.expert_interval_minutes cannot be negative")
+	}
+	if c.Research.ExpertMaxSections < 0 || c.Research.ExpertMaxItems < 0 {
+		return errors.New("research expert limits cannot be negative")
 	}
 	if c.Research.MaxSourcesPerCycle < 0 {
 		return errors.New("research.max_sources_per_cycle cannot be negative")

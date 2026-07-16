@@ -191,3 +191,14 @@ exit:
   trailing_distance_pct: 0.08
   time_stop_days: 90
   min_pnl_for_time_stop: 0.0
+
+# Hermes strategy authority. Keep observe/shadow until audited.
+hermes_operator:
+  enabled: false
+  mode: "observe" # observe | shadow | canary | autonomous
+  decision_ttl_seconds: 120
+  min_confidence: 0.60
+  max_actions_per_cycle: 3
+  max_probe_notional_usdt: 5
+  max_action_notional_usdt: 10
+  max_portfolio_exposure_usdt: 20

@@ -13,6 +13,7 @@ import (
 
 	"btc-agent/internal/config"
 	"btc-agent/internal/hermesagent"
+	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/llm"
 	"btc-agent/internal/reportio"
@@ -42,6 +43,9 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 	if err := saveJSONFile(hermesReportDir, "hermes_report_latest.json", report); err != nil {
 		return fmt.Errorf("hermes report save: %w", err)
 	}
+	if err := runHermesShadowDecision(ctx, cfg, snap, caller); err != nil {
+		log.Printf("[Hermes] shadow decision warning: %v", err)
+	}
 	md := buildHermesMarkdown(snap, report, trigger)
 	if err := os.MkdirAll(hermesReportDir, 0700); err != nil {
 		return err
@@ -54,7 +58,7 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 	shouldSend, fp := hermesShouldNotify(state, snap, report, trigger)
 	if shouldSend {
 		if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
-			sendTelegram(ctx, cfg, "hermes-cycle", report.TelegramText)
+			sendScheduledTelegram(ctx, cfg, "hermes-cycle", report.TelegramText)
 			state.LastSentFingerprint = fp
 			state.LastSentAt = time.Now().UTC()
 			state.LastAuditVerdict = snap.AuditVerdict
@@ -64,6 +68,51 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		}
 	}
 	return nil
+}
+
+// hermesShadowDecision is persisted for audit only. It never reaches the
+// exchange executor; production execution requires a later explicit mode.
+type hermesShadowDecision struct {
+	GeneratedAt time.Time                        `json:"generated_at"`
+	Mode        string                           `json:"mode"`
+	Validation  hermesoperator.ValidationResult  `json:"validation"`
+	Safety      []liveguard.HermesActionDecision `json:"safety"`
+}
+
+func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermesagent.HermesSnapshot, caller hermesagent.JSONCaller) error {
+	if caller == nil || !cfg.HermesOperator.Enabled {
+		return nil
+	}
+	allowed := map[string]bool{}
+	for _, symbol := range cfg.Data.Symbols.Assets {
+		allowed[strings.ToUpper(symbol)] = true
+	}
+	policy := hermesoperator.ValidationPolicy{
+		Now: time.Now().UTC(), MaxDecisionTTL: time.Duration(cfg.HermesOperator.DecisionTTLSeconds) * time.Second,
+		MinConfidence: cfg.HermesOperator.MinConfidence, MaxActions: cfg.HermesOperator.MaxActionsPerCycle,
+		MaxProbeNotionalUSDT:  cfg.HermesOperator.MaxProbeNotionalUSDT,
+		MaxActionNotionalUSDT: cfg.HermesOperator.MaxActionNotionalUSDT,
+		AllowedSymbols:        allowed,
+	}
+	operatorSnapshot := hermesoperator.Snapshot{
+		GeneratedAt: snap.GeneratedAt.Format(time.RFC3339), Mode: cfg.HermesOperator.NormalizedMode(),
+		Market: map[string]any{"phase": snap.BTCPhase, "permission": snap.BTCPermission, "regime": snap.BTCRegime, "trend": snap.BTCTrend},
+		Assets: snap.Assets, Positions: snap.Positions, Safety: map[string]any{"audit": snap.AuditVerdict, "doctor": snap.DoctorStatus, "halted": snap.OperatorHalted},
+	}
+	validation, err := hermesoperator.Generate(ctx, caller, operatorSnapshot, policy)
+	if err != nil {
+		return err
+	}
+	safety := liveguard.EvaluateHermesActions(validation.Actions, liveguard.HermesSafetyContext{
+		OperatorHalted:             snap.OperatorHalted,
+		DataHealthy:                snap.DoctorStatus == "DOCTOR_OK" || snap.DoctorStatus == "OK",
+		ReconcileClean:             snap.AuditVerdict != "DOCTOR_BLOCK",
+		OKXReady:                   snap.AuditVerdict == "APPROVED_REAL_ORDER" || snap.AuditVerdict == "APPROVED_DRY_RUN",
+		PanicSelling:               strings.EqualFold(snap.BTCRegime, "PANIC_SELLING"),
+		PortfolioNotionalRemaining: cfg.HermesOperator.MaxPortfolioExposureUSDT,
+		AssetNotionalRemaining:     map[string]float64{},
+	})
+	return saveJSONFile(hermesReportDir, "hermes_shadow_decision_latest.json", hermesShadowDecision{GeneratedAt: time.Now().UTC(), Mode: cfg.HermesOperator.NormalizedMode(), Validation: validation, Safety: safety})
 }
 
 func hermesCallerFromConfig(cfg config.Config) hermesagent.JSONCaller {

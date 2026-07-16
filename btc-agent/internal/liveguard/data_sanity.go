@@ -42,19 +42,25 @@ type DataSanitySymbol struct {
 	Count       int           `json:"count"`
 	LatestClose float64       `json:"latest_close,omitempty"`
 	LatestAt    time.Time     `json:"latest_at,omitempty"`
-	Age         time.Duration `json:"age,omitempty"`
+	Age         time.Duration `json:"-"`
+	AgeSeconds  int64         `json:"age_seconds,omitempty"`
+	AgeHuman    string        `json:"age_human,omitempty"`
 	Pass        bool          `json:"pass"`
 	Reason      string        `json:"reason,omitempty"`
 }
 
 type CandleFreshness struct {
-	Interval string        `json:"interval"`
-	Count    int           `json:"count"`
-	LatestAt time.Time     `json:"latest_at,omitempty"`
-	Age      time.Duration `json:"age,omitempty"`
-	MaxAge   time.Duration `json:"max_age"`
-	Pass     bool          `json:"pass"`
-	Reason   string        `json:"reason,omitempty"`
+	Interval      string        `json:"interval"`
+	Count         int           `json:"count"`
+	LatestAt      time.Time     `json:"latest_at,omitempty"`
+	Age           time.Duration `json:"-"`
+	AgeSeconds    int64         `json:"age_seconds,omitempty"`
+	AgeHuman      string        `json:"age_human,omitempty"`
+	MaxAge        time.Duration `json:"-"`
+	MaxAgeSeconds int64         `json:"max_age_seconds"`
+	MaxAgeHuman   string        `json:"max_age_human"`
+	Pass          bool          `json:"pass"`
+	Reason        string        `json:"reason,omitempty"`
 }
 
 type ZoneSanity struct {
@@ -126,7 +132,7 @@ func CheckDataSanity(cfg config.Config, btc map[string][]market.Candle, assets m
 }
 
 func candleFreshness(interval string, candles []market.Candle, minCount int, maxAge time.Duration, now time.Time) CandleFreshness {
-	f := CandleFreshness{Interval: interval, Count: len(candles), MaxAge: maxAge}
+	f := CandleFreshness{Interval: interval, Count: len(candles), MaxAge: maxAge, MaxAgeSeconds: int64(maxAge / time.Second), MaxAgeHuman: maxAge.String()}
 	if len(candles) < minCount {
 		f.Reason = fmt.Sprintf("BTC %s candles=%d need>=%d", interval, len(candles), minCount)
 		return f
@@ -142,6 +148,8 @@ func candleFreshness(interval string, candles []market.Candle, minCount int, max
 		return f
 	}
 	f.Age = now.Sub(f.LatestAt)
+	f.AgeSeconds = int64(f.Age / time.Second)
+	f.AgeHuman = f.Age.Round(time.Second).String()
 	if f.Age < 0 || f.Age > maxAge {
 		f.Reason = fmt.Sprintf("BTC %s stale: age=%s max=%s", interval, f.Age.Round(time.Minute), maxAge)
 		return f
@@ -169,6 +177,8 @@ func dataSanitySymbol(symbol, interval string, candles []market.Candle, minCount
 		return s
 	}
 	s.Age = now.Sub(s.LatestAt)
+	s.AgeSeconds = int64(s.Age / time.Second)
+	s.AgeHuman = s.Age.Round(time.Second).String()
 	if s.Age < 0 || s.Age > maxAge {
 		s.Reason = fmt.Sprintf("%s %s stale: age=%s max=%s", symbol, interval, s.Age.Round(time.Minute), maxAge)
 		return s

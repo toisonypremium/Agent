@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -90,6 +92,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	researchInterval := time.Duration(cfg.Research.BriefIntervalMinutes) * time.Minute
 	researchScheduled := cfg.Research.Enabled && researchInterval > 0
 	log.Printf("[Scheduler] Research brief interval: %v scheduled=%v (enabled: %v)", researchInterval, researchScheduled, cfg.Research.Enabled)
+	expertInterval := time.Duration(cfg.Research.ExpertIntervalMinutes) * time.Minute
+	expertScheduled := cfg.Research.Enabled && cfg.Research.ExpertEnabled && expertInterval > 0
+	log.Printf("[Scheduler] Expert research interval: %v scheduled=%v (enabled: %v)", expertInterval, expertScheduled, cfg.Research.ExpertEnabled)
 
 	marketScanInterval := time.Duration(cfg.Monitoring.MarketScanIntervalMinutes) * time.Minute
 	if marketScanInterval <= 0 {
@@ -101,6 +106,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextDaily time.Time
 	var nextMaintenance time.Time
 	var nextResearch time.Time
+	var nextExpert time.Time
 	var nextMarketWatch time.Time
 	var nextReconcile time.Time
 	var nextSupervisor time.Time
@@ -230,6 +236,15 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			runNowDailyOK = true
 		}
 		// AI watch runs after daily so it has fresh analysis/plan.
+		if expertScheduled {
+			log.Println("[Scheduler] Executing initial expert research report (--run-now)...")
+			expertCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
+			if err := runExpertResearch(expertCtx, cfg, db, false, true); err != nil {
+				log.Printf("[Scheduler] Initial expert research error: %v", err)
+				runNowNotes = append(runNowNotes, "expert research: "+err.Error())
+			}
+			cancel()
+		}
 		if cfg.AI.Enabled {
 			log.Println("[Scheduler] Executing initial AI watch (--run-now)...")
 			aiCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAIWatchTimeout)
@@ -247,6 +262,10 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	} else if cfg.Research.Enabled {
 		// #8: interval=0 → run on --run-now only; no scheduled repeats.
 		log.Printf("[Scheduler] Research enabled but brief_interval_minutes=0: no scheduled repeats.")
+	}
+	if expertScheduled {
+		nextExpert = time.Now().Add(expertInterval)
+		log.Printf("[Scheduler] Next expert research: %s", nextExpert.Format("2006-01-02 15:04:05 MST"))
 	}
 
 	if monitoringEnabled {
@@ -266,17 +285,34 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		log.Printf("[Scheduler] Next market watch: %s", nextMarketWatch.Format("2006-01-02 15:04:05 MST"))
 	}
 
-	// Run reconciliation once on start if live is enabled, then schedule future ticks.
+	// Run reconciliation once on start if live is enabled. Recovery must fail
+	// closed before any supervisor cycle can be scheduled after a restart.
 	if cfg.Live.Enabled {
 		log.Println("[Scheduler] Executing initial live order reconciliation...")
 		notifyReconcile := !runNow
-		if err := runReconcileLiveOrdersWithNotify(shutdownCtx, cfg, db, notifyReconcile); err != nil {
-			log.Printf("[Scheduler] Initial reconciliation error: %v", err)
-			if runNow {
-				runNowNotes = append(runNowNotes, "reconcile: "+err.Error())
+		reconcileErr := runReconcileLiveOrdersWithNotify(shutdownCtx, cfg, db, notifyReconcile)
+		reconcileResult, reportOK := loadLatestReconcileReport()
+		if reconcileErr != nil {
+			log.Printf("[Scheduler] Initial reconciliation error: %v", reconcileErr)
+			if err := enforceStartupReconcileRecovery(db, liveguard.ReconcileResult{}, reconcileErr); err != nil {
+				return err
 			}
+			if runNow {
+				runNowNotes = append(runNowNotes, "reconcile: "+reconcileErr.Error())
+			}
+		} else if !reportOK {
+			missingErr := fmt.Errorf("initial reconcile report unavailable")
+			log.Printf("[Scheduler] %v", missingErr)
+			if err := enforceStartupReconcileRecovery(db, liveguard.ReconcileResult{}, missingErr); err != nil {
+				return err
+			}
+			if runNow {
+				runNowNotes = append(runNowNotes, "reconcile: "+missingErr.Error())
+			}
+		} else if err := enforceStartupReconcileRecovery(db, reconcileResult, nil); err != nil {
+			return err
 		} else if runNow {
-			runNowReconcileOK = true
+			runNowReconcileOK = reconcileResult.Safety.Status == liveguard.ReconcileClean
 		}
 		nextReconcile = time.Now().Add(reconcileInterval)
 	}
@@ -336,7 +372,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
-		sendTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
+		sendScheduledTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
 	writeHeartbeat("scheduler ready")
 
@@ -350,6 +386,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 		if researchScheduled && nextResearch.Before(waitUntil) {
 			waitUntil = nextResearch
+		}
+		if expertScheduled && nextExpert.Before(waitUntil) {
+			waitUntil = nextExpert
 		}
 		if monitoringEnabled && nextMarketWatch.Before(waitUntil) {
 			waitUntil = nextMarketWatch
@@ -440,6 +479,18 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			writeHeartbeat("research brief completed")
 		}
 
+		if expertScheduled && !time.Now().Before(nextExpert) {
+			log.Println("[Scheduler] Triggering scheduled expert research report...")
+			expertCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
+			if err := runExpertResearch(expertCtx, cfg, db, false, true); err != nil {
+				log.Printf("[Scheduler] Expert research error: %v", err)
+			}
+			cancel()
+			nextExpert = time.Now().Add(expertInterval)
+			log.Printf("[Scheduler] Next expert research: %s", nextExpert.Format("2006-01-02 15:04:05 MST"))
+			writeHeartbeat("expert research completed")
+		}
+
 		if monitoringEnabled && !time.Now().Before(nextMarketWatch) {
 			log.Println("[Scheduler] Triggering market watch cycle...")
 			if report, err := runMarketWatch(shutdownCtx, cfg, db, true); err != nil {
@@ -455,7 +506,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				}
 				alertDue := lastMarketErrorAlert.IsZero() || time.Since(lastMarketErrorAlert) >= repeat
 				if consecutiveMarketErrors >= threshold && alertDue && cfg.Monitoring.NotifyOnCritical && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
-					sendTelegram(shutdownCtx, cfg, "market-watch-error", fmt.Sprintf("🚨 BTC Agent — Lỗi theo dõi thị trường\nLỗi liên tiếp: %d (ngưỡng %d)\nChi tiết: %s\nBot fail-closed: không mở lệnh mới cho tới khi dữ liệu hoạt động bình thường.", consecutiveMarketErrors, threshold, err))
+					sendScheduledTelegram(shutdownCtx, cfg, "market-watch-error", fmt.Sprintf("🚨 BTC Agent — Lỗi theo dõi thị trường\nLỗi liên tiếp: %d (ngưỡng %d)\nChi tiết: %s\nBot fail-closed: không mở lệnh mới cho tới khi dữ liệu hoạt động bình thường.", consecutiveMarketErrors, threshold, err))
 					lastMarketErrorAlert = time.Now()
 				}
 				nextMarketWatch = time.Now().Add(marketWatchFailureDelay(marketScanInterval, consecutiveMarketErrors))
@@ -490,6 +541,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			}
 			if latestDoctor != nil {
 				consecutiveDoctorBlocks = updateDoctorBlockWatchdog(shutdownCtx, cfg, db, *latestDoctor, consecutiveDoctorBlocks)
+			}
+			if hermesEnabled && cfg.HermesOperator.CanExecute() {
+				hermesPreCtx, hermesPreCancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+				if err := runHermesCycleWithTrigger(hermesPreCtx, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "pre_execution", AllowNotify: false}); err != nil {
+					log.Printf("[Scheduler] Hermes pre-execution decision error: %v", err)
+				}
+				hermesPreCancel()
 			}
 			if _, err := runLiveSupervisorCycleWithDoctor(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor); err != nil {
 				log.Printf("[Scheduler] Live supervisor error: %v", err)
@@ -535,7 +593,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 
 		if alivePingEnabled && !time.Now().Before(nextAlivePing) {
 			log.Println("[Scheduler] Sending alive ping to Telegram...")
-			sendTelegram(shutdownCtx, cfg, "scheduler-alive", buildAlivePingText(heartbeat))
+			sendScheduledTelegram(shutdownCtx, cfg, "scheduler-alive", buildAlivePingText(heartbeat))
 			nextAlivePing = time.Now().Add(alivePingInterval)
 			writeHeartbeat("alive ping sent")
 		}
@@ -568,4 +626,45 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			writeHeartbeat("maintenance completed")
 		}
 	}
+}
+
+func loadLatestReconcileReport() (liveguard.ReconcileResult, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "live_reconcile_latest.json"))
+	if err != nil {
+		return liveguard.ReconcileResult{}, false
+	}
+	var result liveguard.ReconcileResult
+	if json.Unmarshal(b, &result) != nil || result.Safety.Status == "" {
+		return liveguard.ReconcileResult{}, false
+	}
+	return result, true
+}
+
+func enforceStartupReconcileRecovery(db *storage.DB, result liveguard.ReconcileResult, reconcileErr error) error {
+	if reconcileErr == nil && result.Safety.Status != liveguard.ReconcileBlock {
+		return nil
+	}
+	if err := db.SetHermesDemoted(true); err != nil {
+		return fmt.Errorf("startup recovery demote Hermes: %w", err)
+	}
+	if err := db.SetHaltStatus(true); err != nil {
+		return fmt.Errorf("startup recovery activate operator halt: %w", err)
+	}
+	reason := "reconcile_block"
+	if reconcileErr != nil {
+		reason = "reconcile_error"
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"reason":               reason,
+		"reconcile_status":     result.Safety.Status,
+		"unknown_orders":       result.Safety.Unknown,
+		"open_after_reconcile": result.Safety.OpenAfterReconcile,
+		"unknown_positions":    result.Safety.UnknownPositions,
+	})
+	fingerprint := fmt.Sprintf("startup-recovery:%s:%s:%d:%d:%d", reason, result.Safety.Status, result.Safety.Unknown, result.Safety.OpenAfterReconcile, result.Safety.UnknownPositions)
+	if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Timestamp: time.Now().UTC(), Source: "btc-agent-scheduler", Type: "STARTUP_RECONCILE_RECOVERY_FAILED", Severity: "critical", Fingerprint: fingerprint, PayloadJSON: string(payload)}); err != nil {
+		return fmt.Errorf("startup recovery save runtime event: %w", err)
+	}
+	log.Printf("[Scheduler] Startup recovery fail-closed: reason=%s status=%s; Hermes demoted and operator halt active", reason, result.Safety.Status)
+	return nil
 }

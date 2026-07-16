@@ -8,6 +8,7 @@ import (
 	"btc-agent/internal/storage"
 	"btc-agent/internal/telegramreport"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -59,6 +60,28 @@ func runReconcileLiveOrdersWithNotify(ctx context.Context, cfg config.Config, db
 	}
 	ledgerReport.Positions = positions
 	ledgerReport.Summary = liveguard.LiveLedgerSummary(ledgerReport)
+
+	halted, err := db.IsHalted()
+	if err != nil {
+		return fmt.Errorf("read operator halt for reconcile invariant: %w", err)
+	}
+	result = liveguard.ApplyHaltedReconcileInvariant(result, positions, halted)
+	if halted && result.Safety.Status == liveguard.ReconcileBlock {
+		if err := db.SetHermesDemoted(true); err != nil {
+			return fmt.Errorf("demote Hermes after halted reconcile invariant: %w", err)
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"status":               result.Safety.Status,
+			"unknown_orders":       result.Safety.Unknown,
+			"open_after_reconcile": result.Safety.OpenAfterReconcile,
+			"unknown_positions":    result.Safety.UnknownPositions,
+			"blocker_count":        len(result.Safety.Blockers),
+		})
+		fingerprint := fmt.Sprintf("halted-reconcile:%d:%d:%d", result.Safety.Unknown, result.Safety.OpenAfterReconcile, result.Safety.UnknownPositions)
+		if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Timestamp: time.Now().UTC(), Source: "btc-agent-reconcile", Type: "HALTED_RECONCILE_INVARIANT_FAILED", Severity: "critical", Fingerprint: fingerprint, PayloadJSON: string(payload)}); err != nil {
+			return fmt.Errorf("save halted reconcile invariant event: %w", err)
+		}
+	}
 
 	if err := saveJSONFile("reports", "live_reconcile_latest.json", result); err != nil {
 		return err
@@ -284,6 +307,9 @@ func runOperatorHalt(ctx context.Context, cfg config.Config, db *storage.DB) err
 }
 
 func runOperatorResume(ctx context.Context, cfg config.Config, db *storage.DB) error {
+	if err := db.SetHermesDemoted(false); err != nil {
+		return fmt.Errorf("clear Hermes circuit-breaker demotion: %w", err)
+	}
 	if err := db.SetHaltStatus(false); err != nil {
 		return fmt.Errorf("clear halt status: %w", err)
 	}

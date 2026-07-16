@@ -2,6 +2,8 @@ package main
 
 import (
 	"btc-agent/internal/config"
+	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
 	"btc-agent/internal/storage"
@@ -12,6 +14,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -103,16 +106,26 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			}
 		}
 	}
-	// Evaluate exit conditions if exit manager is enabled.
-	// EvaluateExits is report-only here — PlaceSellLimitOrder requires operator wire-up.
+	// Evaluate and execute deterministic exits after the managed cycle.
+	// Exits use the Hermes-owned ledger and the same reconcile-safe sell executor.
 	if cfg.Exit.Enabled {
 		if state.PeakTracker == nil {
-			state.PeakTracker = liveguard.NewPeakTracker()
+			state.PeakTracker = loadExitPeakTracker()
 		}
 		if positions, posErr := db.LivePositions(); posErr == nil && len(positions) > 0 {
 			currentPrices := buildCurrentPricesFromDB(cfg, db)
 			exits := liveguard.EvaluateExits(cfg, positions, currentPrices, state.PeakTracker)
 			result.Exits = exits
+			if err := saveExitPeakTracker(state.PeakTracker); err != nil {
+				result.Reasons = append(result.Reasons, "persist exit peak tracker: "+err.Error())
+			}
+			if !dryRun && cfg.HermesOperator.CanExecute() && !halted {
+				if exitResult, err := executeAutonomousExits(ctx, cfg, db, exits, currentOpenOrders(db)); err != nil {
+					result.Reasons = append(result.Reasons, "autonomous exit execution: "+err.Error())
+				} else if exitResult != nil {
+					result.Managed = exitResult
+				}
+			}
 			for _, ex := range exits {
 				if ex.Action != liveguard.ExitHold {
 					result.Reasons = append(result.Reasons, "exit signal: "+ex.Symbol+" → "+string(ex.Action)+": "+ex.Reason)
@@ -136,6 +149,64 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 	}
 	result.RefreshSummary()
 	return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
+}
+
+const exitPeakTrackerFile = "exit_peak_tracker.json"
+
+func loadExitPeakTracker() *liveguard.PeakTracker {
+	tracker := liveguard.NewPeakTracker()
+	b, err := os.ReadFile(filepath.Join("reports", exitPeakTrackerFile))
+	if err == nil {
+		_ = json.Unmarshal(b, tracker)
+	}
+	if tracker.PeakBySymbol == nil {
+		tracker.PeakBySymbol = map[string]float64{}
+	}
+	if tracker.TrailActive == nil {
+		tracker.TrailActive = map[string]bool{}
+	}
+	return tracker
+}
+
+func saveExitPeakTracker(tracker *liveguard.PeakTracker) error {
+	if tracker == nil {
+		return nil
+	}
+	return saveJSONFile("reports", exitPeakTrackerFile, tracker)
+}
+
+func executeAutonomousExits(ctx context.Context, cfg config.Config, db *storage.DB, exits []liveguard.ExitDecision, open []live.OrderStatus) (*liveguard.ManagedCycleResult, error) {
+	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
+	if err != nil {
+		return nil, err
+	}
+	filters, err := client.InstrumentFilters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	owned, err := db.HermesOwnedPositions()
+	if err != nil {
+		return nil, err
+	}
+	actions := liveguard.BuildAutonomousExitActions(exits, owned, open)
+	result := &liveguard.ManagedCycleResult{GeneratedAt: time.Now(), Status: liveguard.ManagedCycleCompleted}
+	for _, item := range actions {
+		decision := liveguard.HermesActionDecision{Action: item.Action, Allowed: true, NotionalUSDT: item.Action.RequestedNotionalUSDT}
+		decisionID := "exit-" + strings.ToLower(item.Decision.Symbol) + "-" + fmt.Sprint(item.Decision.GeneratedAt.UnixNano())
+		var cycle liveguard.ManagedCycleResult
+		if item.Action.Intent == hermesoperator.IntentReduce {
+			cycle = liveguard.ExecuteHermesReduceActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, client, db, false)
+		} else {
+			cycle = liveguard.ExecuteHermesExitLimitActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, client, db, false)
+		}
+		result.Placed = append(result.Placed, cycle.Placed...)
+		result.Blocked = append(result.Blocked, cycle.Blocked...)
+	}
+	if len(result.Blocked) > 0 {
+		result.Status = liveguard.ManagedCyclePartial
+	}
+	result.Summary = fmt.Sprintf("AUTONOMOUS_EXITS: placed=%d blocked=%d", len(result.Placed), len(result.Blocked))
+	return result, nil
 }
 
 func loadLatestManagedCycleReport() (liveguard.ManagedCycleResult, bool) {
@@ -225,7 +296,7 @@ func liveSupervisorMarkdown(result liveguard.SupervisorResult) string {
 			md += fmt.Sprintf("  %s → %s pnl=%.2f%% qty=%.6f price=%.4f: %s\n",
 				ex.Symbol, ex.Action, ex.PnLPct*100, ex.SellQuantity, ex.SellPrice, ex.Reason)
 		}
-		md += "  NOTE: exit signals require operator review — PlaceSellLimitOrder not auto-called.\n"
+		md += "  Autonomous execution: validated Hermes-owned positions are reduced/exited through reconcile-safe limit orders.\n"
 	}
 	md += "\nSafety: spot limit BUY post-only only; no futures, no leverage, no market order.\n"
 	return md
@@ -267,4 +338,15 @@ func buildCurrentPricesFromDB(cfg config.Config, db *storage.DB) map[string]floa
 		}
 	}
 	return prices
+}
+
+func currentOpenOrders(db *storage.DB) []live.OrderStatus {
+	if db == nil {
+		return nil
+	}
+	orders, err := db.OpenLiveOrders()
+	if err != nil {
+		return nil
+	}
+	return orders
 }

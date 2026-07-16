@@ -9,7 +9,10 @@ import (
 	"btc-agent/internal/reportio"
 	"btc-agent/internal/storage"
 	"context"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -69,14 +72,32 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 		}
 	}
 	summary := microstructure.BuildSummary(true, cfg.Data.Symbols.BTC, snapshots, microstructureRequiredFresh(cfg), now)
-	// MM Footprint: load history từ DB, phân tích dấu vết MM qua nhiều snapshot
+	// MM Footprint: load history and apply persisted, outcome-calibrated thresholds.
+	calibration := loadMMCalibration()
 	if db != nil {
 		history, err := db.LoadMicrostructureHistory(microstructureSymbols(cfg), 20)
 		if err == nil && len(history) > 0 {
-			summary.MMFootprint = microstructure.AnalyzeMMFootprintMulti(history)
+			summary.MMFootprint = microstructure.AnalyzeMMFootprintMultiCalibrated(history, calibration.Thresholds())
+			calibration.ObserveAndLearn(now, summary.MMFootprint)
+		} else if err != nil {
+			summary.Warnings = append(summary.Warnings, "load MM history: "+err.Error())
 		}
 	}
+	summary.MMCalibration = calibration
+	if err := saveJSONFile("reports", "mm_footprint_calibration.json", calibration); err != nil {
+		summary.Warnings = append(summary.Warnings, "save MM calibration: "+err.Error())
+	}
+
 	return summary, nil
+}
+
+func loadMMCalibration() microstructure.CalibrationState {
+	state := microstructure.NewCalibrationState()
+	b, err := os.ReadFile(filepath.Join("reports", "mm_footprint_calibration.json"))
+	if err == nil && json.Unmarshal(b, &state) == nil {
+		return state
+	}
+	return microstructure.NewCalibrationState()
 }
 
 func writeMicrostructureReport(summary microstructure.Summary) error {

@@ -20,7 +20,7 @@ func (d *DB) SaveMicrostructureSnapshot(s microstructure.Snapshot) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.Exec(`INSERT INTO microstructure_snapshots(timestamp, symbol, source, status, fingerprint, payload_json) VALUES(?,?,?,?,?,?)`, s.Timestamp.Unix(), strings.ToUpper(s.Symbol), s.Source, microstructureSnapshotStatus(s), microstructureSnapshotFingerprint(s), string(b))
+	_, err = d.Exec(`INSERT OR IGNORE INTO microstructure_snapshots(timestamp, symbol, source, status, fingerprint, payload_json) VALUES(?,?,?,?,?,?)`, s.Timestamp.Unix(), strings.ToUpper(s.Symbol), s.Source, microstructureSnapshotStatus(s), microstructureSnapshotFingerprint(s), string(b))
 	return err
 }
 
@@ -31,7 +31,7 @@ func (d *DB) SaveMicrostructureSnapshots(items []microstructure.Snapshot) error 
 			return err
 		}
 		defer tx.Rollback()
-		st, err := tx.Prepare(`INSERT INTO microstructure_snapshots(timestamp, symbol, source, status, fingerprint, payload_json) VALUES(?,?,?,?,?,?)`)
+		st, err := tx.Prepare(`INSERT OR IGNORE INTO microstructure_snapshots(timestamp, symbol, source, status, fingerprint, payload_json) VALUES(?,?,?,?,?,?)`)
 		if err != nil {
 			return err
 		}

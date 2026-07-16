@@ -14,41 +14,34 @@ import (
 
 func (c *BinanceClient) KlineFlow(ctx context.Context, symbol, interval string, limit int) (microstructure.SpotFlow, time.Time, error) {
 	if limit <= 0 {
-		limit = 120
+		limit = 3
 	}
 	q := url.Values{"symbol": {strings.ToUpper(symbol)}, "interval": {interval}, "limit": {strconv.Itoa(limit)}}
 	var raw [][]json.RawMessage
 	if err := c.get(ctx, "/api/v3/klines?"+q.Encode(), &raw); err != nil {
 		return microstructure.SpotFlow{}, time.Time{}, err
 	}
-	flow := microstructure.SpotFlow{}
-	latest := time.Time{}
-	for _, row := range raw {
-		if len(row) < 11 {
-			continue
-		}
-		var closeMS int64
-		_ = json.Unmarshal(row[6], &closeMS)
-		latest = time.UnixMilli(closeMS)
-		volume := rawStringFloat(row[5])
-		quoteVolume := rawStringFloat(row[7])
-		takerBuyBase := rawStringFloat(row[9])
-		takerBuyQuote := rawStringFloat(row[10])
-		flow.VolumeBase += volume
-		flow.QuoteVolumeUSDT += quoteVolume
-		flow.TakerBuyBase += takerBuyBase
-		flow.TakerBuyQuoteUSDT += takerBuyQuote
+	// Use the newest closed candle only. The newest API row may still be open;
+	// selecting the previous row makes each persisted observation a non-overlapping bucket.
+	if len(raw) < 2 {
+		return microstructure.SpotFlow{}, time.Time{}, fmt.Errorf("insufficient closed kline flow for %s %s", symbol, interval)
 	}
+	row := raw[len(raw)-2]
+	if len(row) < 11 {
+		return microstructure.SpotFlow{}, time.Time{}, fmt.Errorf("invalid kline flow for %s %s", symbol, interval)
+	}
+	var closeMS int64
+	_ = json.Unmarshal(row[6], &closeMS)
+	flow := microstructure.SpotFlow{VolumeBase: rawStringFloat(row[5]), QuoteVolumeUSDT: rawStringFloat(row[7]), TakerBuyBase: rawStringFloat(row[9]), TakerBuyQuoteUSDT: rawStringFloat(row[10])}
 	if flow.QuoteVolumeUSDT <= 0 {
-		return flow, latest, fmt.Errorf("no kline flow for %s %s", symbol, interval)
+		return flow, time.UnixMilli(closeMS), fmt.Errorf("no kline flow for %s %s", symbol, interval)
 	}
 	flow.TakerSellBase = maxExchangeFloat(0, flow.VolumeBase-flow.TakerBuyBase)
 	flow.TakerSellQuoteUSDT = maxExchangeFloat(0, flow.QuoteVolumeUSDT-flow.TakerBuyQuoteUSDT)
 	flow.TakerBuyRatio = flow.TakerBuyQuoteUSDT / flow.QuoteVolumeUSDT
 	flow.CVDQuoteUSDT = flow.TakerBuyQuoteUSDT - flow.TakerSellQuoteUSDT
-	return flow, latest, nil
+	return flow, time.UnixMilli(closeMS), nil
 }
-
 func (c *BinanceClient) Depth(ctx context.Context, symbol string, limit int) (microstructure.OrderBook, error) {
 	if limit <= 0 {
 		limit = 100

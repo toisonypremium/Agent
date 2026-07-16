@@ -395,7 +395,7 @@ func buildHermesMarkdown(snap hermesagent.HermesSnapshot, report hermesagent.Her
 		for _, ex := range snap.Exits {
 			b.WriteString(fmt.Sprintf("- %s → %s PnL=%.2f%%: %s\n", ex.Symbol, ex.Action, ex.PnLPct*100, ex.Reason))
 		}
-		b.WriteString("⚠ Report-only — PlaceSellLimitOrder not auto-called.\n\n")
+		b.WriteString("Autonomous exit authority active for validated Hermes-owned positions.\n\n")
 	} else {
 		b.WriteString("📉 EXIT SIGNALS: NONE\n\n")
 	}

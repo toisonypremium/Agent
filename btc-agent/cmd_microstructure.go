@@ -69,6 +69,13 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 		}
 	}
 	summary := microstructure.BuildSummary(true, cfg.Data.Symbols.BTC, snapshots, microstructureRequiredFresh(cfg), now)
+	// MM Footprint: load history từ DB, phân tích dấu vết MM qua nhiều snapshot
+	if db != nil {
+		history, err := db.LoadMicrostructureHistory(microstructureSymbols(cfg), 20)
+		if err == nil && len(history) > 0 {
+			summary.MMFootprint = microstructure.AnalyzeMMFootprintMulti(history)
+		}
+	}
 	return summary, nil
 }
 

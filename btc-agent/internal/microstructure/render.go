@@ -35,5 +35,28 @@ func Markdown(s Summary) string {
 		}
 	}
 	b.WriteString("\nSafety: report-only; stale/missing microstructure can only reduce permission, never place orders. No futures execution.\n")
+	if len(s.MMFootprint) > 0 {
+		b.WriteString(FootprintMarkdown(s.MMFootprint))
+	}
+	return b.String()
+}
+
+// FootprintMarkdown renders MM footprint signals as a markdown section.
+func FootprintMarkdown(fp map[string]MMFootprintSignal) string {
+	if len(fp) == 0 {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\nMM FOOTPRINT ANALYSIS\n")
+	for sym, sig := range fp {
+		b.WriteString(fmt.Sprintf("- %s verdict=%s score=%.2f snapshots=%d\n",
+			sym, sig.Verdict, sig.FootprintScore, sig.SnapshotCount))
+		b.WriteString(fmt.Sprintf("  cvd_slope=%.0f price_delta=%.2f%% cvd_divergence=%v taker_anomaly=%v bid_streak=%d funding_ok=%v\n",
+			sig.CVDSlope, sig.PriceDeltaPct, sig.CVDPriceDivergence, sig.TakerBuyAnomaly,
+			sig.BidSupportStreak, sig.FundingFavorable))
+		for _, r := range sig.Reasons {
+			b.WriteString("  → " + r + "\n")
+		}
+	}
 	return b.String()
 }

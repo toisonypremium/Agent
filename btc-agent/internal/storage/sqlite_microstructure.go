@@ -106,3 +106,21 @@ func microstructureSnapshotStatus(s microstructure.Snapshot) string {
 func microstructureSnapshotFingerprint(s microstructure.Snapshot) string {
 	return fmt.Sprintf("%s|fresh=%v|buy=%s|cvd=%s|ob=%s|fund=%s|basis=%s|b=%d|w=%d", strings.ToUpper(s.Symbol), s.Health.Fresh, s.Signals.BuyPressure, s.Signals.CVDTrend, s.Signals.OrderBookBias, s.Signals.FundingBias, s.Signals.BasisBias, len(s.Health.Blockers), len(s.Health.Warnings))
 }
+
+// LoadMicrostructureHistory loads recent snapshots for each symbol to enable
+// time-series analysis (e.g., MM footprint detection).
+// Returns map[symbol][]Snapshot newest-first, up to limit per symbol.
+func (d *DB) LoadMicrostructureHistory(symbols []string, limit int) (map[string][]microstructure.Snapshot, error) {
+	if limit <= 0 {
+		limit = 20
+	}
+	out := make(map[string][]microstructure.Snapshot, len(symbols))
+	for _, symbol := range symbols {
+		rows, err := d.LoadMicrostructureSnapshots(strings.ToUpper(symbol), limit)
+		if err != nil {
+			return out, fmt.Errorf("load microstructure history %s: %w", symbol, err)
+		}
+		out[strings.ToUpper(symbol)] = rows
+	}
+	return out, nil
+}

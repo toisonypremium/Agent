@@ -145,6 +145,29 @@ type Config struct {
 		HermesEventDrivenEnabled   bool    `yaml:"hermes_event_driven_enabled"`
 		HermesTelegramInteractive  bool    `yaml:"hermes_telegram_interactive"`
 	} `yaml:"ai"`
+	FreeAPI struct {
+		Enabled         bool   `yaml:"enabled"`
+		TimeoutSeconds  int    `yaml:"timeout_seconds"`
+		CacheDir        string `yaml:"cache_dir"`
+		MaxStaleMinutes int    `yaml:"max_stale_minutes"`
+		CoinGecko       struct {
+			Enabled         bool `yaml:"enabled"`
+			IntervalMinutes int  `yaml:"interval_minutes"`
+		} `yaml:"coingecko"`
+		FearGreed struct {
+			Enabled         bool `yaml:"enabled"`
+			IntervalMinutes int  `yaml:"interval_minutes"`
+		} `yaml:"fear_greed"`
+		FX struct {
+			Enabled         bool `yaml:"enabled"`
+			IntervalMinutes int  `yaml:"interval_minutes"`
+		} `yaml:"fx"`
+		News struct {
+			Enabled         bool `yaml:"enabled"`
+			IntervalMinutes int  `yaml:"interval_minutes"`
+			MaxItems        int  `yaml:"max_items"`
+		} `yaml:"news"`
+	} `yaml:"free_api"`
 	Research struct {
 		Enabled               bool `yaml:"enabled"`
 		BriefIntervalMinutes  int  `yaml:"brief_interval_minutes"`

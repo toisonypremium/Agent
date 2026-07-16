@@ -14,6 +14,7 @@ import (
 
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
+	"btc-agent/internal/freeapi"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/notify"
 	"btc-agent/internal/reportio"
@@ -184,7 +185,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/menu", "/start", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
+	case "/menu", "/start", "/macro", "/sources", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -202,6 +203,10 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 	switch cmd {
 	case "/help":
 		return telegramCommandsHelp(), true
+	case "/macro":
+		return telegramCommandFreeAPI(false), true
+	case "/sources":
+		return telegramCommandFreeAPI(true), true
 	case "/status", "/hermes", "/h":
 		return renderHermesExecutive(buildHermesOperationsBrief(cfg, "interactive status")), true
 	case "/why":
@@ -289,6 +294,22 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 	default:
 		return "", false
 	}
+}
+
+func telegramCommandFreeAPI(sources bool) string {
+	r, e := freeapi.Load("reports")
+	if e != nil {
+		return "FREE API: chưa có snapshot; Hermes sẽ refresh ở chu kỳ kế tiếp."
+	}
+	if sources {
+		var b strings.Builder
+		b.WriteString("HERMES — FREE API SOURCES\n")
+		for _, s := range r.Sources {
+			fmt.Fprintf(&b, "- %s fresh=%v age=%dm err=%s\n", s.Name, s.Fresh, s.AgeMinutes, s.Error)
+		}
+		return b.String()
+	}
+	return fmt.Sprintf("HERMES — MACRO / SENTIMENT / FX\nGlobal cap: %.0f USD\nGlobal volume: %.0f USD\nBTC dominance: %.2f%%\nFear & Greed: %d (%s)\nEUR/USD: %.5f\nNews items: %d\nFree API chỉ là context; không tự tạo hard block hay order authority.", r.GlobalMarketCapUSD, r.GlobalVolumeUSD, r.BTCDominancePct, r.FearGreedValue, r.FearGreedLabel, r.EURUSD, len(r.News))
 }
 
 func hermesTelegramMenuText(cfg config.Config) string {

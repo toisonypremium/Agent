@@ -16,6 +16,9 @@ type ManagedExecutionContext struct {
 	FirstOrderDryRunApproved   bool   `json:"first_order_dry_run_approved,omitempty"`
 	ManagedOrderHistoryKnown   bool   `json:"managed_order_history_known,omitempty"`
 	HasManagedRealOrderHistory bool   `json:"has_managed_real_order_history,omitempty"`
+	HermesMode                 string `json:"hermes_mode,omitempty"`
+	HermesDecisionID           string `json:"hermes_decision_id,omitempty"`
+	HermesIntent               string `json:"hermes_intent,omitempty"`
 }
 
 type ExecutionAssertionInput struct {
@@ -53,19 +56,29 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 	if !cfg.Risk.NoFutures || !cfg.Risk.NoLeverage || !cfg.Risk.SpotLimitOnly {
 		reasons = append(reasons, "risk flags must enforce no futures/no leverage/spot limit only")
 	}
-	if in.Plan.State != agent2.StateActiveLimit {
-		reasons = append(reasons, "plan state must be ACTIVE_LIMIT")
-	}
-	if in.Plan.ActionPermission != agent1.Allowed {
-		reasons = append(reasons, "plan action permission must be ALLOWED")
-	}
-	phase := strings.ToUpper(strings.TrimSpace(in.BTCAccumulationPhase))
-	if phase == "" {
-		if !in.DryRun {
+	hermesProbe := strings.EqualFold(d.Source, "HERMES_OPERATOR") && strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") && (strings.EqualFold(in.HermesMode, "canary") || strings.EqualFold(in.HermesMode, "autonomous"))
+	if !hermesProbe {
+		if in.Plan.State != agent2.StateActiveLimit {
+			reasons = append(reasons, "plan state must be ACTIVE_LIMIT")
+		}
+		if in.Plan.ActionPermission != agent1.Allowed {
+			reasons = append(reasons, "plan action permission must be ALLOWED")
+		}
+		phase := strings.ToUpper(strings.TrimSpace(in.BTCAccumulationPhase))
+		if phase == "" {
+			if !in.DryRun {
+				reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
+			}
+		} else if phase != "ACCUMULATION_CONFIRMED" {
 			reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
 		}
-	} else if phase != "ACCUMULATION_CONFIRMED" {
-		reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
+	} else {
+		if strings.TrimSpace(in.HermesDecisionID) == "" {
+			reasons = append(reasons, "Hermes decision_id required")
+		}
+		if d.AllocationTier != string(OpportunityProbe) {
+			reasons = append(reasons, "Hermes canary order must use PROBE allocation tier")
+		}
 	}
 	if strings.ToUpper(d.Side) != "BUY" {
 		reasons = append(reasons, "desired side must be BUY")

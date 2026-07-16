@@ -57,6 +57,10 @@ func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, int, []st
 	if limit <= 0 {
 		limit = 20
 	}
+	perFeedLimit := limit / len(feeds)
+	if perFeedLimit < 1 {
+		perFeedLimit = 1
+	}
 	timeout := time.Duration(cfg.Research.RequestTimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = 12 * time.Second
@@ -73,8 +77,9 @@ func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, int, []st
 			continue
 		}
 		sourcesOK++
+		feedCount := 0
 		for _, item := range feedItems {
-			if len(items) >= limit {
+			if len(items) >= limit || feedCount >= perFeedLimit {
 				break
 			}
 			key := strings.TrimSpace(item.URL)
@@ -86,7 +91,10 @@ func FetchRSS(ctx context.Context, cfg config.Config) ([]ResearchItem, int, []st
 			}
 			seen[key] = true
 			item.Tags, item.Risk = classify(item.Title + " " + item.Summary)
+			item.Category = classifyCategory(item.Title + " " + item.Summary)
+			item.Confidence = sourceConfidence(item.Source, item.URL)
 			items = append(items, item)
+			feedCount++
 		}
 	}
 	return items, sourcesOK, warnings

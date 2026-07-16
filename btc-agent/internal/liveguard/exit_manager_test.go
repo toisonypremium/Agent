@@ -152,9 +152,9 @@ func TestEvaluateExits_TrailingStop_AboveStop(t *testing.T) {
 
 // TestEvaluateExits_TimeStop: position age > time_stop_days AND pnl >= min_pnl → TIME_STOP.
 func TestEvaluateExits_TimeStop(t *testing.T) {
-	cfg := testExitCfg() // time_stop_days=90, min_pnl=0.0
+	cfg := testExitCfg()                                                  // time_stop_days=90, min_pnl=0.0
 	positions := []live.LivePosition{testPos("ETHUSDT", 2.0, 2000.0, 95)} // 95d old
-	prices := map[string]float64{"ETHUSDT": 2100.0}                        // +5% >= 0%
+	prices := map[string]float64{"ETHUSDT": 2100.0}                       // +5% >= 0%
 	result := EvaluateExits(cfg, positions, prices, NewPeakTracker())
 	if result[0].Action != ExitTimeStop {
 		t.Errorf("expected TIME_STOP, got %s: %s", result[0].Action, result[0].Reason)

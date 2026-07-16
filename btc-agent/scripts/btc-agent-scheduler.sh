@@ -2,12 +2,18 @@
 
 set -u
 
+ENV_FILE="/home/admin/btc-agent-systemd.env"
+if [ -r "$ENV_FILE" ]; then
+  set -a
+  . "$ENV_FILE"
+  set +a
+fi
+
 APP_DIR="${BTC_AGENT_APP_DIR:-/data/data/com.termux/files/home/.openclaw/workspace/btc-agent}"
 CONFIG_PATH="${BTC_AGENT_CONFIG:-config.yaml}"
 LOG_DIR="${BTC_AGENT_LOG_DIR:-logs}"
 MODE="${BTC_AGENT_MODE:-paper}"
 LOCK_FILE="${BTC_AGENT_SCHEDULER_LOCK_FILE:-$HOME/.btc-agent-scheduler.lock}"
-ENV_FILE="${BTC_AGENT_ENV_FILE:-$HOME/btc-agent.env}"
 
 cd "$APP_DIR" || exit 1
 mkdir -p "$LOG_DIR"
@@ -47,11 +53,15 @@ run_with_rotating_log() {
   return "$status"
 }
 
-if [ -f "$ENV_FILE" ]; then
-  # shellcheck disable=SC1090
-  . "$ENV_FILE"
-  log "loaded env file: $ENV_FILE"
+if [ ! -r "$ENV_FILE" ]; then
+  fail "missing required env file: $ENV_FILE"
 fi
+# Single env source for the scheduler and systemd service.
+# shellcheck disable=SC1091
+set -a
+. "$ENV_FILE"
+set +a
+log "loaded env file: $ENV_FILE"
 
 case "$MODE" in
   paper|live-proof|live-auto) ;;
@@ -87,15 +97,16 @@ case "$MODE" in
     if [ "${BTC_AGENT_ALLOW_AUTO_LIVE:-}" != "true" ]; then
       fail "live-auto requires BTC_AGENT_ALLOW_AUTO_LIVE=true"
     fi
-    if ./bin/btc-agent live-doctor --config "$CONFIG_PATH" >> "$LOG_DIR/live-doctor.log" 2>&1; then
-      if grep -q 'Status: DOCTOR_BLOCK' reports/live_doctor_latest.md 2>/dev/null; then
-        fail "live doctor blocked runtime; see reports/live_doctor_latest.md"
-      fi
-      log "live doctor passed or warned; starting real scheduler"
-      rotate_log "$LOG_DIR/scheduler.log" 5242880
-      rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
-      run_with_rotating_log "$LOG_DIR/scheduler.log" ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now
+    if ! ./bin/btc-agent live-doctor --config "$CONFIG_PATH" >> "$LOG_DIR/live-doctor.log" 2>&1; then
+      fail "live doctor command failed; see $LOG_DIR/live-doctor.log"
     fi
-    fail "live doctor command failed; see $LOG_DIR/live-doctor.log"
+    if grep -q "Status: DOCTOR_BLOCK" reports/live_doctor_latest.md 2>/dev/null; then
+      log "live doctor blocked; starting scheduler in fail-closed monitoring mode"
+    else
+      log "live doctor passed or warned; starting real scheduler"
+    fi
+    rotate_log "$LOG_DIR/scheduler.log" 5242880
+    rotate_log "$LOG_DIR/scheduler-wrapper.log" 1048576
+    run_with_rotating_log "$LOG_DIR/scheduler.log" ./bin/btc-agent scheduler --config "$CONFIG_PATH" --run-now
     ;;
 esac

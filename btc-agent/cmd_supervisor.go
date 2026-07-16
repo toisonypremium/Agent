@@ -122,6 +122,11 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 	}
 
 	if cfg.Live.AutoHaltAfterErrors > 0 && state.ConsecutiveErrors >= cfg.Live.AutoHaltAfterErrors {
+		if err := db.SetHermesDemoted(true); err != nil {
+			result.Reasons = append(result.Reasons, "Hermes circuit-breaker demotion failed: "+err.Error())
+		} else {
+			result.Reasons = append(result.Reasons, "Hermes circuit-breaker demoted after repeated supervisor errors")
+		}
 		if err := db.SetHaltStatus(true); err != nil {
 			result.Reasons = append(result.Reasons, "auto-halt failed: "+err.Error())
 		} else {
@@ -170,7 +175,7 @@ func writeLiveSupervisorResult(ctx context.Context, cfg config.Config, db *stora
 		return err
 	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && scenarioOK && shouldSendNearTriggerAlert(scenario) {
-		sendTelegram(ctx, cfg, "near-trigger", nearTriggerTelegram(scenario))
+		sendScheduledTelegram(ctx, cfg, "near-trigger", nearTriggerTelegram(scenario))
 		if err := saveTelegramScenarioState(scenario); err != nil {
 			log.Printf("telegram scenario state warning: %v", err)
 		}
@@ -181,7 +186,7 @@ func writeLiveSupervisorResult(ctx context.Context, cfg config.Config, db *stora
 		if scenarioOK {
 			text = liveSupervisorScenarioTelegram(scenario, result)
 		}
-		sendTelegram(ctx, cfg, "live-supervisor", text)
+		sendScheduledTelegram(ctx, cfg, "live-supervisor", text)
 	}
 	fmt.Println(md)
 	return nil

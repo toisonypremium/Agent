@@ -133,3 +133,30 @@ func TestReconcileSafetyHandlesCanonicalPartialFill(t *testing.T) {
 		t.Fatalf("partial fill with details should be clean: %+v", good)
 	}
 }
+
+func TestApplyHaltedReconcileInvariantClean(t *testing.T) {
+	got := ApplyHaltedReconcileInvariant(ReconcileOrders(context.Background(), nil, nil), nil, true)
+	if got.Safety.Status != ReconcileClean || !got.Safety.OperatorHalted || got.Safety.OpenAfterReconcile != 0 || got.Safety.UnknownPositions != 0 {
+		t.Fatalf("expected clean halted invariant: %+v", got.Safety)
+	}
+}
+
+func TestApplyHaltedReconcileInvariantBlocksResidualOpenOrder(t *testing.T) {
+	result := ReconcileResult{Checked: 1, Orders: []live.OrderStatus{{ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen}}}
+	result.Safety = ReconcileSafety(result)
+	got := ApplyHaltedReconcileInvariant(result, nil, true)
+	if got.Safety.Status != ReconcileBlock || got.Safety.OpenAfterReconcile != 1 {
+		t.Fatalf("expected residual open order to block: %+v", got.Safety)
+	}
+}
+
+func TestApplyHaltedReconcileInvariantBlocksMalformedPositivePosition(t *testing.T) {
+	got := ApplyHaltedReconcileInvariant(ReconcileOrders(context.Background(), nil, nil), []live.LivePosition{{Symbol: "BTCUSDT", Quantity: 0.01}}, true)
+	if got.Safety.Status != ReconcileBlock || got.Safety.UnknownPositions != 1 {
+		t.Fatalf("expected malformed positive position to block: %+v", got.Safety)
+	}
+	closed := ApplyHaltedReconcileInvariant(ReconcileOrders(context.Background(), nil, nil), []live.LivePosition{{Symbol: "BTCUSDT", Quantity: 0}}, true)
+	if closed.Safety.Status != ReconcileClean || closed.Safety.UnknownPositions != 0 {
+		t.Fatalf("closed ledger row must not block: %+v", closed.Safety)
+	}
+}

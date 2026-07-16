@@ -1,6 +1,7 @@
 package liveguard
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -83,4 +84,23 @@ func candlesForSanity(symbol, interval string, n int, latest time.Time, close fl
 		out[i] = market.Candle{Symbol: symbol, Interval: interval, OpenTime: at.Add(-step), CloseTime: at, Open: px, High: px * 1.02, Low: px * 0.98, Close: px, Volume: 1000}
 	}
 	return out
+}
+
+func TestDataSanityJSONUsesReadableAgeFields(t *testing.T) {
+	now := time.Date(2026, 7, 16, 12, 0, 0, 0, time.UTC)
+	fresh := CandleFreshness{Interval: "4h", Age: 9*time.Hour + 7*time.Minute, AgeSeconds: 32820, AgeHuman: "9h7m0s", MaxAge: 12 * time.Hour, MaxAgeSeconds: 43200, MaxAgeHuman: "12h0m0s", Pass: true}
+	b, err := json.Marshal(fresh)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(b)
+	if strings.Contains(text, `"age":`) || strings.Contains(text, `"max_age":`) {
+		t.Fatalf("raw duration leaked: %s", text)
+	}
+	for _, want := range []string{`"age_seconds":32820`, `"age_human":"9h7m0s"`, `"max_age_seconds":43200`} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("missing %s in %s", want, text)
+		}
+	}
+	_ = now
 }

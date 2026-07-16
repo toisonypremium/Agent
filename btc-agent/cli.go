@@ -64,6 +64,18 @@ func run(ctx context.Context, args []string) error {
 		return runBTCGateDiagnostic(ctx, cfg, db)
 	case "run-daily":
 		return runDaily(ctx, cfg, db)
+	case "control-plane-snapshot":
+		return runControlPlaneSnapshot(cfg, db)
+	case "control-plane-validate-proposal":
+		return runControlPlaneValidateProposal(cfg, args)
+	case "control-plane-submit-proposal":
+		return runControlPlaneSubmitProposal(cfg, db, args)
+	case "control-plane-proposal-result":
+		return runControlPlaneProposalResult(db, args)
+	case "control-plane-recent-proposals":
+		return runControlPlaneRecentProposals(db)
+	case "control-plane-request-halt":
+		return runControlPlaneRequestHalt(db, args)
 	case "status":
 		status, err := formatStatus(cfg, db)
 		if err != nil {
@@ -99,6 +111,8 @@ func run(ctx context.Context, args []string) error {
 		return runLiveProof(ctx, cfg, db)
 	case "live-readiness":
 		return runLiveReadiness(ctx, cfg, db)
+	case "hermes-canary-readiness":
+		return runCanaryReadiness(cfg, db)
 	case "live-auto-audit":
 		return runLiveAutoAudit(ctx, cfg, db)
 	case "live-doctor":
@@ -110,6 +124,8 @@ func run(ctx context.Context, args []string) error {
 	case "research-brief":
 		_, err := runResearchBrief(ctx, cfg, true)
 		return err
+	case "research-expert":
+		return runExpertResearch(ctx, cfg, db, hasFlag(args, "--dry-run"), !hasFlag(args, "--dry-run"))
 	case "execute-live-proof-order":
 		return runExecuteLiveProofOrder(ctx, cfg, db, argValue(args, "--confirm"))
 	case "auto-live-order":
@@ -149,7 +165,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|operations-plan|market-watch|ops-events|microstructure-fetch|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|live-auto-audit|live-doctor|research-doctor|research-brief|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|operations-plan|market-watch|ops-events|microstructure-fetch|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|hermes-canary-readiness|live-auto-audit|live-doctor|research-doctor|research-brief|research-expert|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|control-plane-snapshot|control-plane-validate-proposal|control-plane-submit-proposal|control-plane-proposal-result|control-plane-recent-proposals|control-plane-request-halt|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>|--proposal-file <path>|--decision-id <id>|--caller <name>|--reason-code <code>|--summary <text>]")
 }
 
 func argValue(args []string, key string) string {

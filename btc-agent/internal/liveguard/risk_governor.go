@@ -24,11 +24,15 @@ type RiskGovernorResult struct {
 	Summary     string    `json:"summary"`
 }
 
-func EvaluateRiskGovernor(cfg config.Config, analysis agent1.MarketAnalysis, plan agent2.Plan, open []live.OrderStatus, positions []live.LivePosition, dataHealth DataHealthResult, reconcile ReconcileSafetyResult) RiskGovernorResult {
+func EvaluateRiskGovernor(cfg config.Config, analysis agent1.MarketAnalysis, plan agent2.Plan, open []live.OrderStatus, positions []live.LivePosition, dataHealth DataHealthResult, dataSanity DataSanityResult, reconcile ReconcileSafetyResult) RiskGovernorResult {
 	res := RiskGovernorResult{GeneratedAt: time.Now(), Status: RiskGovernorOK}
 	if dataHealth.Status == DataHealthBlock {
 		res.Blockers = append(res.Blockers, "data health block")
 		res.Blockers = append(res.Blockers, dataHealth.Blockers...)
+	}
+	if dataSanity.Status == DataSanityBlock {
+		res.Blockers = append(res.Blockers, "data sanity block")
+		res.Blockers = append(res.Blockers, dataSanity.Blockers...)
 	}
 	if reconcile.Status == ReconcileBlock {
 		res.Blockers = append(res.Blockers, "reconciliation mismatch requires manual check")
@@ -38,7 +42,15 @@ func EvaluateRiskGovernor(cfg config.Config, analysis agent1.MarketAnalysis, pla
 		res.Blockers = append(res.Blockers, "BTC PANIC_SELLING risk governor block")
 	}
 	if analysis.FallingKnifeRisk == agent1.High {
-		res.Blockers = append(res.Blockers, "BTC falling knife HIGH risk governor block")
+		// Hard block only when plan intends to place real orders (ARMED or ACTIVE_LIMIT).
+		// For SCOUT/WATCH/NO_TRADE the exceptional RR bypass in planner already demoted
+		// to SCOUT; at this layer we only warn so monitoring continues unblocked.
+		planIsActive := plan.State == agent2.StateArmed || plan.State == agent2.StateActiveLimit
+		if planIsActive {
+			res.Blockers = append(res.Blockers, "BTC falling knife HIGH risk governor block")
+		} else {
+			res.Warnings = append(res.Warnings, "BTC falling knife HIGH: monitoring only, plan not active")
+		}
 	}
 	if analysis.FomoRisk == agent1.High {
 		res.Blockers = append(res.Blockers, "BTC FOMO HIGH risk governor block")

@@ -1,4 +1,5 @@
 config.yaml
+config.yaml.*
 config.local.yaml
 .env
 data/
@@ -18,3 +19,10 @@ secrets.env
 .codebase-memory/
 reports/
 logs/
+
+# Local runtime and audit artifacts
+.audit-quarantine/
+*.sqlite
+*.sqlite-*
+*.bak
+*.bak_exit

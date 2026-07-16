@@ -16,22 +16,22 @@ import (
 type ExitAction string
 
 const (
-	ExitHold          ExitAction = "HOLD"
-	ExitTakeProfit    ExitAction = "TAKE_PROFIT"
-	ExitTrailingStop  ExitAction = "TRAILING_STOP"
-	ExitTimeStop      ExitAction = "TIME_STOP"
-	ExitPanicSell     ExitAction = "PANIC_SELL"
+	ExitHold         ExitAction = "HOLD"
+	ExitTakeProfit   ExitAction = "TAKE_PROFIT"
+	ExitTrailingStop ExitAction = "TRAILING_STOP"
+	ExitTimeStop     ExitAction = "TIME_STOP"
+	ExitPanicSell    ExitAction = "PANIC_SELL"
 )
 
 // ExitDecision is the output of EvaluateExits for a single position.
 type ExitDecision struct {
-	Symbol        string     `json:"symbol"`
-	Action        ExitAction `json:"action"`
-	SellPrice     float64    `json:"sell_price"`   // Limit price to place
-	SellQuantity  float64    `json:"sell_quantity"` // Qty to sell (partial or full)
-	PnLPct        float64    `json:"pnl_pct"`
-	Reason        string     `json:"reason"`
-	GeneratedAt   time.Time  `json:"generated_at"`
+	Symbol       string     `json:"symbol"`
+	Action       ExitAction `json:"action"`
+	SellPrice    float64    `json:"sell_price"`    // Limit price to place
+	SellQuantity float64    `json:"sell_quantity"` // Qty to sell (partial or full)
+	PnLPct       float64    `json:"pnl_pct"`
+	Reason       string     `json:"reason"`
+	GeneratedAt  time.Time  `json:"generated_at"`
 }
 
 // PeakTracker holds the highest price seen since a position was opened.
@@ -99,12 +99,12 @@ func EvaluateExits(
 		trailActive := peakTracker.TrailActive[sym]
 
 		decision := ExitDecision{
-			Symbol:      sym,
-			Action:      ExitHold,
-			SellPrice:   currentPrice,
+			Symbol:       sym,
+			Action:       ExitHold,
+			SellPrice:    currentPrice,
 			SellQuantity: pos.Quantity,
-			PnLPct:      finiteFloat(pnlPct),
-			GeneratedAt: now,
+			PnLPct:       finiteFloat(pnlPct),
+			GeneratedAt:  now,
 		}
 
 		switch {

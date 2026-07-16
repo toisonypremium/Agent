@@ -152,8 +152,9 @@ func runLiveReadiness(ctx context.Context, cfg config.Config, db *storage.DB) er
 		return fmt.Errorf("load assets for data health: %w", err)
 	}
 	dataHealth := liveguard.CheckDataHealth(cfg, analysis, p, assets, open, positions, time.Now())
+	dataSanity := liveguard.DataSanityResult{}
 	reconcileSafety := liveguard.ReconcileSafety(liveguard.ReconcileResult{Checked: len(open), Orders: open})
-	riskGovernor := liveguard.EvaluateRiskGovernor(cfg, analysis, p, open, positions, dataHealth, reconcileSafety)
+	riskGovernor := liveguard.EvaluateRiskGovernor(cfg, analysis, p, open, positions, dataHealth, dataSanity, reconcileSafety)
 	var balanceReader liveguard.BalanceReader
 	var filterReader liveguard.FilterReader
 	if cfg.Live.Enabled && strings.ToLower(cfg.Live.Exchange) == "okx" {
@@ -401,11 +402,21 @@ func buildLiveDoctorResult(ctx context.Context, cfg config.Config, db *storage.D
 		if assetsErr != nil {
 			result.Warnings = append(result.Warnings, "load assets for data health: "+assetsErr.Error())
 		} else {
-			result.DataHealth = liveguard.CheckDataHealth(cfg, analysis, plan, assets, open, positions, time.Now())
+			now := time.Now()
+			result.DataHealth = liveguard.CheckDataHealth(cfg, analysis, plan, assets, open, positions, now)
+			btc, btcErr := loadBTC(cfg, db)
+			if btcErr != nil {
+				result.Warnings = append(result.Warnings, "load BTC for data sanity: "+btcErr.Error())
+			} else {
+				result.DataSanity = liveguard.CheckDataSanity(cfg, btc, assets, analysis, now)
+			}
 			result.ReconcileSafety = liveguard.ReconcileSafety(liveguard.ReconcileResult{Checked: len(open), Orders: open})
-			result.RiskGovernor = liveguard.EvaluateRiskGovernor(cfg, analysis, plan, open, positions, result.DataHealth, result.ReconcileSafety)
+			result.RiskGovernor = liveguard.EvaluateRiskGovernor(cfg, analysis, plan, open, positions, result.DataHealth, result.DataSanity, result.ReconcileSafety)
 			if result.DataHealth.Status == liveguard.DataHealthBlock {
 				result.Blockers = append(result.Blockers, result.DataHealth.Blockers...)
+			}
+			if result.DataSanity.Status == liveguard.DataSanityBlock {
+				result.Blockers = append(result.Blockers, result.DataSanity.Blockers...)
 			}
 			if result.ReconcileSafety.Status == liveguard.ReconcileBlock {
 				result.Blockers = append(result.Blockers, result.ReconcileSafety.Blockers...)
@@ -720,7 +731,7 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		log.Printf("shadow probe journal warning: %v", err)
 	}
 	reconcileSafety := liveguard.ReconcileSafety(liveguard.ReconcileResult{Checked: len(open), Orders: open})
-	riskGovernor := liveguard.EvaluateRiskGovernor(cfg, analysis, p, open, positions, dataHealth, reconcileSafety)
+	riskGovernor := liveguard.EvaluateRiskGovernor(cfg, analysis, p, open, positions, dataHealth, dataSanity, reconcileSafety)
 	if dataHealth.Status == liveguard.DataHealthBlock || reconcileSafety.Status == liveguard.ReconcileBlock || riskGovernor.Status == liveguard.RiskGovernorBlock || !cfg.Live.OrderManagementEnabled {
 		result := liveguard.ManagedCycleResult{GeneratedAt: time.Now(), Status: liveguard.ManagedCycleBlocked, PlanState: p.State, Desired: []liveguard.ManagedDesiredOrder{}, DryRun: dryRun, DataHealth: dataHealth, ReconcileSafety: reconcileSafety, RiskGovernor: riskGovernor}
 		result.Reasons = append(result.Reasons, dataHealth.Blockers...)
@@ -758,7 +769,7 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 	}
 	// Skip OKX InstrumentFilters HTTP call when plan is not ACTIVE_LIMIT
 	// and there are no open orders to cancel. Avoids unnecessary API usage every cycle.
-	noActiveWork := p.State != agent2.StateActiveLimit && len(open) == 0
+	noActiveWork := p.State != agent2.StateActiveLimit && len(open) == 0 && !cfg.HermesOperator.CanExecute()
 	filters := []live.InstrumentFilter{}
 	if filterReader != nil && !noActiveWork {
 		filters, err = filterReader.InstrumentFilters(ctx)
@@ -786,6 +797,14 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 	if historyErr == nil {
 		execCtx.ManagedOrderHistoryKnown = true
 		execCtx.HasManagedRealOrderHistory = hasHistory
+	}
+	if cfg.HermesOperator.CanExecute() {
+		if hermesResult, handled := executeLatestHermesDecision(ctx, cfg, db, p, analysis, open, positions, filters, dataHealth, reconcileSafety, riskGovernor, placer, dryRun); handled {
+			if !dryRun {
+				_ = persistManagedCycleResult(db, hermesResult)
+			}
+			return writeAutoLiveManagementResult(ctx, cfg, db, hermesResult, notifyTelegram && !dryRun)
+		}
 	}
 	result := liveguard.ManageLiveOrdersWithRecorderAndContext(ctx, cfg, p, open, positions, filters, placer, canceler, db, execCtx, recorder, dryRun)
 	result.DataHealth = dataHealth

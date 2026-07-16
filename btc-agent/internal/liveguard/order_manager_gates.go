@@ -164,6 +164,9 @@ func normalizedMaxOpenLiveOrdersTotal(cfg config.Config) int {
 }
 
 func normalizedMaxLiveNotionalPerOrder(cfg config.Config) float64 {
+	if v := config.EffectiveLiveNotionalPerOrder(cfg); v > 0 {
+		return v
+	}
 	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
 		return cfg.Live.MaxLiveNotionalPerOrderUSDT
 	}
@@ -171,6 +174,9 @@ func normalizedMaxLiveNotionalPerOrder(cfg config.Config) float64 {
 }
 
 func normalizedMaxLiveNotionalPerAsset(cfg config.Config) float64 {
+	if v := config.EffectiveLiveNotionalPerAsset(cfg); v > 0 {
+		return v
+	}
 	if cfg.Live.MaxLiveNotionalPerAssetUSDT > 0 {
 		return cfg.Live.MaxLiveNotionalPerAssetUSDT
 	}
@@ -178,6 +184,9 @@ func normalizedMaxLiveNotionalPerAsset(cfg config.Config) float64 {
 }
 
 func normalizedMaxLiveNotionalTotal(cfg config.Config) float64 {
+	if v := config.EffectiveLiveNotionalTotal(cfg); v > 0 {
+		return v
+	}
 	if cfg.Live.MaxLiveNotionalTotalUSDT > 0 {
 		return cfg.Live.MaxLiveNotionalTotalUSDT
 	}

@@ -198,8 +198,11 @@ type Config struct {
 		MaxOpenLiveOrdersPerAsset         int     `yaml:"max_open_live_orders_per_asset"`
 		MaxOpenLiveOrdersTotal            int     `yaml:"max_open_live_orders_total"`
 		MaxLiveNotionalPerOrderUSDT       float64 `yaml:"max_live_notional_per_order_usdt"`
+		MaxLiveNotionalPerOrderPct        float64 `yaml:"max_live_notional_per_order_pct"`
 		MaxLiveNotionalPerAssetUSDT       float64 `yaml:"max_live_notional_per_asset_usdt"`
+		MaxLiveNotionalPerAssetPct        float64 `yaml:"max_live_notional_per_asset_pct"`
 		MaxLiveNotionalTotalUSDT          float64 `yaml:"max_live_notional_total_usdt"`
+		MaxLiveNotionalTotalPct           float64 `yaml:"max_live_notional_total_pct"`
 		CancelIfPlanNotActive             bool    `yaml:"cancel_if_plan_not_active"`
 		CancelIfPriceAboveDiscountZonePct float64 `yaml:"cancel_if_price_above_discount_zone_pct"`
 		ReplaceIfPriceDriftPct            float64 `yaml:"replace_if_price_drift_pct"`
@@ -254,6 +257,37 @@ func LiveAutoMode(c Config) bool {
 // LiveAutoMaxNotionalUSDT returns the current live-auto cap.
 func LiveAutoMaxNotionalUSDT(c Config) float64 {
 	return c.Live.LiveAutoMaxNotionalUSDT
+}
+
+// EffectiveLiveNotionalPerOrder returns the max notional per live order.
+// If max_live_notional_per_order_pct is set (0 < pct <= 1), it takes priority:
+//   effective = total_capital x pct
+// Otherwise falls back to max_live_notional_per_order_usdt.
+func EffectiveLiveNotionalPerOrder(c Config) float64 {
+	if pct := c.Live.MaxLiveNotionalPerOrderPct; pct > 0 && pct <= 1 {
+		return c.Portfolio.TotalCapital * pct
+	}
+	return c.Live.MaxLiveNotionalPerOrderUSDT
+}
+
+// EffectiveLiveNotionalPerAsset returns the max notional per asset across all layers.
+// If max_live_notional_per_asset_pct is set, effective = total_capital x pct.
+// Otherwise falls back to max_live_notional_per_asset_usdt.
+func EffectiveLiveNotionalPerAsset(c Config) float64 {
+	if pct := c.Live.MaxLiveNotionalPerAssetPct; pct > 0 && pct <= 1 {
+		return c.Portfolio.TotalCapital * pct
+	}
+	return c.Live.MaxLiveNotionalPerAssetUSDT
+}
+
+// EffectiveLiveNotionalTotal returns the max total notional across all assets.
+// If max_live_notional_total_pct is set, effective = total_capital x pct.
+// Otherwise falls back to max_live_notional_total_usdt.
+func EffectiveLiveNotionalTotal(c Config) float64 {
+	if pct := c.Live.MaxLiveNotionalTotalPct; pct > 0 && pct <= 1 {
+		return c.Portfolio.TotalCapital * pct
+	}
+	return c.Live.MaxLiveNotionalTotalUSDT
 }
 
 func validClockTime(value string) bool {
@@ -331,14 +365,17 @@ func (c Config) Validate() error {
 		if c.Live.MaxOpenLiveOrdersTotal < c.Live.MaxOpenLiveOrdersPerAsset {
 			return errors.New("live.max_open_live_orders_total must be >= live.max_open_live_orders_per_asset")
 		}
-		if c.Live.MaxLiveNotionalPerOrderUSDT <= 0 || c.Live.MaxLiveNotionalPerOrderUSDT > c.Live.MaxOrderNotionalUSDT {
-			return errors.New("live.max_live_notional_per_order_usdt must be >0 and <= live.max_order_notional_usdt")
+		effPerOrder := EffectiveLiveNotionalPerOrder(c)
+		if effPerOrder <= 0 || effPerOrder > c.Live.MaxOrderNotionalUSDT {
+			return errors.New("live notional per order (usdt or pct) must be >0 and <= live.max_order_notional_usdt")
 		}
-		if c.Live.MaxLiveNotionalPerAssetUSDT < c.Live.MaxLiveNotionalPerOrderUSDT {
-			return errors.New("live.max_live_notional_per_asset_usdt must be >= live.max_live_notional_per_order_usdt")
+		effPerAsset := EffectiveLiveNotionalPerAsset(c)
+		if effPerAsset > 0 && effPerAsset < effPerOrder {
+			return errors.New("live notional per asset (usdt or pct) must be >= notional per order")
 		}
-		if c.Live.MaxLiveNotionalTotalUSDT < c.Live.MaxLiveNotionalPerAssetUSDT {
-			return errors.New("live.max_live_notional_total_usdt must be >= live.max_live_notional_per_asset_usdt")
+		effTotal := EffectiveLiveNotionalTotal(c)
+		if effTotal > 0 && effPerAsset > 0 && effTotal < effPerAsset {
+			return errors.New("live notional total (usdt or pct) must be >= notional per asset")
 		}
 		if c.Live.CancelIfPriceAboveDiscountZonePct < 0 {
 			return errors.New("live.cancel_if_price_above_discount_zone_pct cannot be negative")

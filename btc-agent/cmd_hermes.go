@@ -48,7 +48,9 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		enrichHermesAssetsFromPlan(&snap, plan)
 	}
 	caller := hermesCallerFromConfig(cfg)
+	narrativeStarted := time.Now()
 	report, err := hermesagent.Generate(ctx, caller, snap)
+	logHermesLLMCall("narrative", trigger, narrativeStarted, err)
 	if err != nil {
 		log.Printf("[Hermes] LLM warning: %v", err)
 	}
@@ -58,7 +60,7 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 	if err := saveJSONFile(hermesReportDir, "hermes_report_latest.json", report); err != nil {
 		return fmt.Errorf("hermes report save: %w", err)
 	}
-	if err := runHermesShadowDecision(ctx, cfg, snap, caller); err != nil {
+	if err := runHermesShadowDecision(ctx, cfg, snap, caller, trigger); err != nil {
 		log.Printf("[Hermes] shadow decision warning: %v", err)
 	}
 	md := buildHermesMarkdown(snap, report, trigger)
@@ -83,6 +85,27 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		}
 	}
 	return nil
+}
+
+// runHermesDecisionCycle refreshes only the autonomous execution decision.
+// Narrative generation is deliberately excluded from the 15-minute execution path.
+func runHermesDecisionCycle(ctx context.Context, cfg config.Config, db *storage.DB, trigger hermesagent.HermesTrigger) error {
+	if err := ensureFreshHermesInputs(ctx, cfg, db, trigger); err != nil {
+		log.Printf("[Hermes] decision freshness warning: %v", err)
+	}
+	snap := buildHermesSnapshotWithTrigger(cfg, trigger)
+	if plan, err := db.LatestPlan(); err == nil {
+		enrichHermesAssetsFromPlan(&snap, plan)
+	}
+	return runHermesShadowDecision(ctx, cfg, snap, hermesCallerFromConfig(cfg), trigger)
+}
+
+func logHermesLLMCall(purpose string, trigger hermesagent.HermesTrigger, started time.Time, err error) {
+	status := "ok"
+	if err != nil {
+		status = "error"
+	}
+	log.Printf("[LLM_USAGE] purpose=%s trigger=%s/%s status=%s latency_ms=%d", purpose, trigger.Source, trigger.Reason, status, time.Since(started).Milliseconds())
 }
 
 func enrichHermesAssetsFromPlan(snap *hermesagent.HermesSnapshot, plan agent2.Plan) {
@@ -126,7 +149,7 @@ type hermesShadowDecision struct {
 	Safety      []liveguard.HermesActionDecision `json:"safety"`
 }
 
-func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermesagent.HermesSnapshot, caller hermesagent.JSONCaller) error {
+func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermesagent.HermesSnapshot, caller hermesagent.JSONCaller, trigger hermesagent.HermesTrigger) error {
 	if caller == nil || !cfg.HermesOperator.Enabled {
 		return nil
 	}
@@ -150,7 +173,9 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 	for _, symbol := range cfg.Data.Symbols.Assets {
 		assetAllowance[strings.ToUpper(symbol)] = config.EffectiveLiveNotionalPerAsset(cfg)
 	}
+	decisionStarted := time.Now()
 	validation, err := hermesoperator.Generate(ctx, caller, operatorSnapshot, policy)
+	logHermesLLMCall("operator_decision", trigger, decisionStarted, err)
 	if err != nil {
 		return err
 	}

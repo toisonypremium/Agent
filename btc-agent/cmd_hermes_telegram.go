@@ -80,7 +80,7 @@ func parseTelegramHermesRequest(text string) (hermesagent.HermesTrigger, bool) {
 func telegramCommandHermesFromLatest() string {
 	report, ok := loadHermesReportFile()
 	if !ok {
-		return "Chua co Hermes report. Chay Hermes cycle hoac dung /ask de lenh anh xa ngay."
+		return "Chưa có bản phân tích của Hermes. Hãy dùng /hermes để tạo bản mới."
 	}
 	return telegramCommandHermes(report)
 }
@@ -93,11 +93,11 @@ func buildHermesSnapshotFromReports() hermesagent.HermesSnapshot {
 // runHermesTelegramReply runs a Hermes cycle for an interactive Telegram trigger and returns the reply text.
 func runHermesTelegramReply(ctx context.Context, cfg config.Config, db *storage.DB, trigger hermesagent.HermesTrigger) string {
 	if err := runHermesCycleWithTrigger(ctx, cfg, db, trigger); err != nil {
-		return fmt.Sprintf("Hermes cycle error: %v\nREAD_ONLY — no order placed.", err)
+		return fmt.Sprintf("Hermes chưa thể hoàn thành bản phân tích: %v\nBot giữ nguyên trạng thái và không mở lệnh mới.", err)
 	}
 	report, ok := loadHermesReportFile()
 	if !ok {
-		return "Hermes report unavailable.\nREAD_ONLY — no order placed."
+		return "Chưa đọc được bản phân tích mới nhất. Bot giữ nguyên trạng thái và không mở lệnh mới."
 	}
 	return telegramCommandHermes(report)
 }

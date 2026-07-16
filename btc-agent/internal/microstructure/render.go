@@ -34,7 +34,7 @@ func Markdown(s Summary) string {
 			b.WriteString(fmt.Sprintf("- %s fresh=%v age=%s taker_buy=%.1f%% cvd=%.2f spread=%.2fbps ob=%s funding=%.4f basis=%.2f%% supportive=%v risky=%v\n", snap.Symbol, snap.Health.Fresh, snap.Health.Age.Round(0), snap.SpotFlow.TakerBuyRatio*100, snap.SpotFlow.CVDQuoteUSDT, snap.OrderBook.SpreadBps, snap.Signals.OrderBookBias, snap.Futures.FundingRate, snap.Futures.BasisPct, snap.Signals.Supportive, snap.Signals.Risky))
 		}
 	}
-	b.WriteString("\nSafety: report-only; stale/missing microstructure can only reduce permission, never place orders. No futures execution.\n")
+	b.WriteString("\nSafety: microstructure feeds Hermes confidence sizing; stale/missing data blocks new exposure. No futures execution.\n")
 	if len(s.MMFootprint) > 0 {
 		b.WriteString(FootprintMarkdown(s.MMFootprint))
 	}

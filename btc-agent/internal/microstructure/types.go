@@ -66,19 +66,20 @@ type Signals struct {
 }
 
 type Summary struct {
-	GeneratedAt   time.Time           `json:"generated_at"`
-	Enabled       bool                `json:"enabled"`
-	Status        string              `json:"status"`
-	FreshSymbols  int                 `json:"fresh_symbols"`
-	RequiredFresh int                 `json:"required_fresh"`
-	Snapshots     []Snapshot          `json:"snapshots,omitempty"`
-	BySymbol      map[string]Snapshot `json:"by_symbol,omitempty"`
-	BTC           Snapshot            `json:"btc,omitempty"`
-	Blockers      []string            `json:"blockers,omitempty"`
-	Warnings      []string            `json:"warnings,omitempty"`
-	Fingerprint   string              `json:"fingerprint"`
-	Summary       string              `json:"summary"`
-	MMFootprint         map[string]MMFootprintSignal `json:"mm_footprint,omitempty"`
+	GeneratedAt   time.Time                    `json:"generated_at"`
+	Enabled       bool                         `json:"enabled"`
+	Status        string                       `json:"status"`
+	FreshSymbols  int                          `json:"fresh_symbols"`
+	RequiredFresh int                          `json:"required_fresh"`
+	Snapshots     []Snapshot                   `json:"snapshots,omitempty"`
+	BySymbol      map[string]Snapshot          `json:"by_symbol,omitempty"`
+	BTC           Snapshot                     `json:"btc,omitempty"`
+	Blockers      []string                     `json:"blockers,omitempty"`
+	Warnings      []string                     `json:"warnings,omitempty"`
+	Fingerprint   string                       `json:"fingerprint"`
+	Summary       string                       `json:"summary"`
+	MMFootprint   map[string]MMFootprintSignal `json:"mm_footprint,omitempty"`
+	MMCalibration CalibrationState             `json:"mm_calibration,omitempty"`
 }
 
 type Report struct {

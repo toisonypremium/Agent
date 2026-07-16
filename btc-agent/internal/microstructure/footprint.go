@@ -3,6 +3,7 @@ package microstructure
 import (
 	"math"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -51,6 +52,13 @@ type MMFootprintSignal struct {
 // AnalyzeMMFootprint expects newest-first snapshots. Thresholds adapt to each
 // symbol using robust median/MAD rather than fixed cross-asset values.
 func AnalyzeMMFootprint(snapshots []Snapshot) MMFootprintSignal {
+	return AnalyzeMMFootprintWithThreshold(snapshots, DefaultTakerAnomalyZ)
+}
+
+func AnalyzeMMFootprintWithThreshold(snapshots []Snapshot, takerAnomalyZ float64) MMFootprintSignal {
+	if takerAnomalyZ < MinTakerAnomalyZ || takerAnomalyZ > MaxTakerAnomalyZ {
+		takerAnomalyZ = DefaultTakerAnomalyZ
+	}
 	sig := MMFootprintSignal{Verdict: "NO_SIGNAL"}
 	if len(snapshots) < 3 {
 		sig.Reasons = []string{"insufficient snapshot history (need >= 3)"}
@@ -127,7 +135,7 @@ func AnalyzeMMFootprint(snapshots []Snapshot) MMFootprintSignal {
 	sig.TakerBuyLatest = s[0].SpotFlow.TakerBuyRatio
 	scale := math.Max(0.005, 1.4826*sig.TakerBuyMAD)
 	sig.TakerBuyAnomalyZ = (sig.TakerBuyLatest - sig.TakerBuyBaseline) / scale
-	sig.TakerBuyAnomaly = sig.TakerBuyAnomalyZ >= 1.5 && sig.PriceDeltaPct < 2
+	sig.TakerBuyAnomaly = sig.TakerBuyAnomalyZ >= takerAnomalyZ && sig.PriceDeltaPct < 2
 
 	for i, x := range s {
 		if x.Signals.OrderBookBias == "BID_SUPPORT" {
@@ -205,25 +213,34 @@ func AnalyzeMMFootprint(snapshots []Snapshot) MMFootprintSignal {
 }
 
 func AnalyzeMMFootprintMulti(historyBySymbol map[string][]Snapshot) map[string]MMFootprintSignal {
+	return AnalyzeMMFootprintMultiCalibrated(historyBySymbol, nil)
+}
+
+func AnalyzeMMFootprintMultiCalibrated(historyBySymbol map[string][]Snapshot, thresholds map[string]float64) map[string]MMFootprintSignal {
 	out := make(map[string]MMFootprintSignal, len(historyBySymbol))
 	for sym, snaps := range historyBySymbol {
-		out[sym] = AnalyzeMMFootprint(snaps)
+		threshold := DefaultTakerAnomalyZ
+		if v := thresholds[strings.ToUpper(sym)]; v >= MinTakerAnomalyZ && v <= MaxTakerAnomalyZ {
+			threshold = v
+		}
+		out[sym] = AnalyzeMMFootprintWithThreshold(snaps, threshold)
 	}
 	return out
 }
 
-func median(v []float64) float64 {
-	if len(v) == 0 {
+func median(values []float64) float64 {
+	if len(values) == 0 {
 		return 0
 	}
-	x := append([]float64(nil), v...)
+	x := append([]float64(nil), values...)
 	sort.Float64s(x)
 	m := len(x) / 2
-	if len(x)%2 == 0 {
-		return (x[m-1] + x[m]) / 2
+	if len(x)%2 == 1 {
+		return x[m]
 	}
-	return x[m]
+	return (x[m-1] + x[m]) / 2
 }
+
 func mmClamp01(v float64) float64 {
 	if v < 0 {
 		return 0

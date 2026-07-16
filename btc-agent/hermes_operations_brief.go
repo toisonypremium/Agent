@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"btc-agent/internal/config"
+	"btc-agent/internal/freeapi"
 	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/microstructure"
 )
@@ -27,6 +29,22 @@ type HermesBriefMM struct {
 	AskPressure     bool
 	Reasons         []string
 }
+type HermesBriefGlobal struct {
+	MarketCapUSD, VolumeUSD, BTCDominance, EURUSD float64
+	FearGreed                                     int
+	FearGreedLabel                                string
+}
+type HermesBriefZone struct {
+	Symbol, Kind                 string
+	Low, High, Score, Confidence float64
+	Evidence, Missing            []string
+	Invalidation, Trigger        string
+}
+type HermesBriefAllocation struct {
+	Symbol                                              string
+	CeilingPct, CurrentPct, ProbePct, OpenPct, ScalePct float64
+	State, Condition                                    string
+}
 type HermesOperationsBrief struct {
 	GeneratedAt     time.Time
 	LocalTime       string
@@ -41,6 +59,11 @@ type HermesOperationsBrief struct {
 	MacroSummary    string
 	Sources         []HermesBriefSource
 	Missing         []string
+	Global          HermesBriefGlobal
+	Zones           []HermesBriefZone
+	Allocations     []HermesBriefAllocation
+	ReservePct      float64
+	PortfolioCapPct float64
 }
 
 func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperationsBrief {
@@ -104,11 +127,97 @@ func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperations
 	} else {
 		b.Missing = append(b.Missing, "expert macro/political")
 	}
+	var api freeapi.Report
+	if readReport("freeapi_latest.json", &api) {
+		b.Global = HermesBriefGlobal{api.GlobalMarketCapUSD, api.GlobalVolumeUSD, api.BTCDominancePct, api.EURUSD, api.FearGreedValue, api.FearGreedLabel}
+		b.Sources = append(b.Sources, sourceStatusMax("free APIs", api.GeneratedAt, "global cap/volume, dominance, sentiment, FX", 90))
+	} else {
+		b.Missing = append(b.Missing, "free API global context")
+	}
+	b.ReservePct = cfg.Portfolio.ReserveCashRatio * 100
+	b.PortfolioCapPct = config.EffectiveHermesPortfolioExposure(cfg) / cfg.Portfolio.TotalCapital * 100
+	for _, asset := range b.Hermes.Assets {
+		capPct := cfg.Portfolio.Allocation[strings.ToUpper(asset.Symbol)] * 100
+		if max := config.EffectiveLiveNotionalPerAsset(cfg) / cfg.Portfolio.TotalCapital * 100; capPct <= 0 || capPct > max {
+			capPct = max
+		}
+		confidence := asset.Readiness
+		probe := math.Min(capPct, cfg.HermesOperator.MaxProbeNotionalPct*100*confidence)
+		open := math.Min(capPct, probe*2)
+		scale := math.Min(capPct, open*1.5)
+		if strings.Contains(strings.ToUpper(asset.State), "NO_TRADE") {
+			probe, open, scale = 0, 0, 0
+		}
+		b.Allocations = append(b.Allocations, HermesBriefAllocation{asset.Symbol, capPct, 0, probe, open, scale, asset.State, asset.NextTrigger})
+		acc := HermesBriefZone{Symbol: asset.Symbol, Kind: "ACCUMULATION_CANDIDATE", Low: asset.EntryZoneLow, High: asset.EntryZoneHigh, Invalidation: fmt.Sprintf("$%.4f", asset.Invalidation), Trigger: asset.NextTrigger}
+		if asset.EntryZoneLow > 0 && asset.EntryZoneHigh > 0 {
+			acc.Score += 25
+			acc.Evidence = append(acc.Evidence, "discount/support zone")
+		} else {
+			acc.Missing = append(acc.Missing, "entry zone")
+		}
+		if asset.MMScore >= 50 {
+			acc.Score += 25
+			acc.Evidence = append(acc.Evidence, "MM footprint")
+		} else {
+			acc.Missing = append(acc.Missing, "MM footprint")
+		}
+		if asset.FlowScore >= 0.25 {
+			acc.Score += 20
+			acc.Evidence = append(acc.Evidence, "bullish executed flow")
+		} else {
+			acc.Missing = append(acc.Missing, "flow reclaim/absorption")
+		}
+		if asset.LiquidityPass {
+			acc.Score += 15
+			acc.Evidence = append(acc.Evidence, "liquidity pass")
+		} else {
+			acc.Missing = append(acc.Missing, "liquidity")
+		}
+		if asset.RR >= cfg.Risk.MinRewardRisk {
+			acc.Score += 15
+			acc.Evidence = append(acc.Evidence, "RR envelope")
+		} else {
+			acc.Missing = append(acc.Missing, "RR target")
+		}
+		acc.Confidence = acc.Score / 100
+		b.Zones = append(b.Zones, acc)
+		dist := HermesBriefZone{Symbol: asset.Symbol, Kind: "DISTRIBUTION_CANDIDATE", Low: asset.Target, High: asset.Target, Invalidation: fmt.Sprintf("entry invalid $%.4f", asset.Invalidation), Trigger: "ask pressure/CVD divergence hoặc distribution trap tại target/resistance"}
+		if asset.Target > 0 {
+			dist.Score += 35
+			dist.Evidence = append(dist.Evidence, "target/resistance")
+		} else {
+			dist.Missing = append(dist.Missing, "target")
+		}
+		if strings.Contains(strings.ToUpper(asset.MMCase), "DISTRIBUTION") {
+			dist.Score += 40
+			dist.Evidence = append(dist.Evidence, "distribution trap")
+		} else {
+			dist.Missing = append(dist.Missing, "distribution confirmation")
+		}
+		for _, m := range b.MM {
+			if m.Symbol == asset.Symbol && m.AskPressure {
+				dist.Score += 25
+				dist.Evidence = append(dist.Evidence, "current ask pressure")
+			}
+		}
+		dist.Confidence = dist.Score / 100
+		b.Zones = append(b.Zones, dist)
+	}
 	return b
 }
 func readReport(name string, v any) bool {
 	d, e := os.ReadFile(filepath.Join("reports", name))
 	return e == nil && json.Unmarshal(d, v) == nil
+}
+func sourceStatusMax(name string, at time.Time, detail string, maxAge int) HermesBriefSource {
+	age := 0
+	fresh := false
+	if !at.IsZero() {
+		age = int(time.Since(at).Minutes())
+		fresh = age >= 0 && age <= maxAge
+	}
+	return HermesBriefSource{name, fresh, age, detail}
 }
 func sourceStatus(name string, at time.Time, detail string) HermesBriefSource {
 	age := 0
@@ -156,44 +265,53 @@ func briefAction(b HermesOperationsBrief) string {
 
 func renderHermesExecutive(b HermesOperationsBrief) string {
 	var x strings.Builder
-	fmt.Fprintf(&x, "HERMES — TRUNG TÂM VẬN HÀNH\n%s | %s\n\n", b.LocalTime, strings.ToUpper(b.Kind))
-	fmt.Fprintf(&x, "1. QUYẾT ĐỊNH HIỆN TẠI\n%s\nMode autonomous | Plan %s | BTC permission %s\nDoctor %s | Reconcile %s | Orders %d | Positions %d\n\n", briefAction(b), b.Bot.PlanState, b.Bot.BTCPermission, b.Bot.DoctorStatus, b.Bot.ReconcileSafetyStatus, b.Bot.OpenLiveOrders, b.Bot.LivePositions)
-	fmt.Fprintf(&x, "2. THỊ TRƯỜNG & DÒNG TIỀN\nBTC $%.0f | %s | trend %.1f/100\nW/D/4H: %s/%s/%s | Flow %s %.2f | Accumulation %s %.0f\n%s | %s\n", b.Bot.BTC.Price, b.Bot.BTC.Regime, b.Bot.BTC.TrendScore, b.Bot.BTC.WeeklyBias, b.Bot.BTC.DailyBias, b.Bot.BTC.FourHourBias, b.Bot.BTC.FlowBias, b.Bot.BTC.FlowScore, b.Bot.BTC.AccumulationPhase, b.Bot.BTC.AccumulationScore, briefZone("Support", b.Bot.BTC.SupportZone.Low, b.Bot.BTC.SupportZone.High), briefZone("Invalid", b.Bot.BTC.InvalidationZone.Low, b.Bot.BTC.InvalidationZone.High))
-	if len(b.MM) > 0 {
-		x.WriteString("MM footprint: ")
-		for i, m := range b.MM {
-			if i >= 4 {
-				break
-			}
-			if i > 0 {
-				x.WriteString(" | ")
-			}
-			fmt.Fprintf(&x, "%s %s %.0f%% q%.0f%%", m.Symbol, m.Verdict, m.Score*100, m.Quality*100)
-		}
-		x.WriteString("\n")
+	fmt.Fprintf(&x, "HERMES INTELLIGENCE BRIEF\n%s | %s\n\nI. EXECUTIVE DECISION\n%s\nAutonomous | Plan %s | BTC %s | Doctor %s | Reconcile %s\n\n", b.LocalTime, strings.ToUpper(b.Kind), briefAction(b), b.Bot.PlanState, b.Bot.BTCPermission, b.Bot.DoctorStatus, b.Bot.ReconcileSafetyStatus)
+	fmt.Fprintf(&x, "II. GLOBAL & BTC REGIME\nGlobal cap $%.2fT | volume $%.1fB | BTC dom %.2f%%\nFear & Greed %d %s | EUR/USD %.4f\nBTC $%.0f %s trend %.1f/100 | W/D/4H %s/%s/%s\nFlow %s %.2f | phase %s %.0f | risk %s knife %s FOMO %s\n%s | %s | %s\n\n", b.Global.MarketCapUSD/1e12, b.Global.VolumeUSD/1e9, b.Global.BTCDominance, b.Global.FearGreed, b.Global.FearGreedLabel, b.Global.EURUSD, b.Bot.BTC.Price, b.Bot.BTC.Regime, b.Bot.BTC.TrendScore, b.Bot.BTC.WeeklyBias, b.Bot.BTC.DailyBias, b.Bot.BTC.FourHourBias, b.Bot.BTC.FlowBias, b.Bot.BTC.FlowScore, b.Bot.BTC.AccumulationPhase, b.Bot.BTC.AccumulationScore, b.Bot.BTC.RiskLevel, b.Bot.BTC.FallingKnifeRisk, b.Bot.BTC.FomoRisk, briefZone("Support", b.Bot.BTC.SupportZone.Low, b.Bot.BTC.SupportZone.High), briefZone("Resistance", b.Bot.BTC.ResistanceZone.Low, b.Bot.BTC.ResistanceZone.High), briefZone("Invalid", b.Bot.BTC.InvalidationZone.Low, b.Bot.BTC.InvalidationZone.High))
+	x.WriteString("III. MM / FLOW / LIQUIDITY\n")
+	for _, m := range b.MM {
+		fmt.Fprintf(&x, "- %s %s %.0f/100 quality %.0f%% core=%d ask=%v | %s\n", m.Symbol, m.Verdict, m.Score*100, m.Quality*100, m.Core, m.AskPressure, briefCut(strings.Join(m.Reasons, "; "), 150))
 	}
-	fmt.Fprintf(&x, "\n3. VĨ MÔ / CHÍNH SÁCH / TÂM LÝ\n%s\nResearch: %s\n", briefCut(firstBrief(b.MacroSummary, "Chưa có expert macro/political fresh; Hermes không tự suy diễn."), 500), briefCut(firstBrief(b.ResearchSummary, "Chưa có research brief fresh."), 350))
-	x.WriteString("\n4. KẾ HOẠCH TÀI SẢN\n")
-	for i, c := range b.Scenario.Coins {
-		if i >= 4 {
-			break
+	x.WriteString("\nIV. ACCUMULATION / DISTRIBUTION MAP\n")
+	for _, z := range b.Zones {
+		if z.Score < 20 {
+			continue
 		}
-		fmt.Fprintf(&x, "- %s %s %.0f%% | MM %s %.0f | Liq %s %.0f | RR %.2f\n  Trigger: %s\n", c.Symbol, c.State, c.ReadinessScore*100, c.MMCase, c.MMScore, c.LiquidityGrade, c.LiquidityScore, c.RewardRisk, briefCut(c.NextTrigger, 180))
+		fmt.Fprintf(&x, "- %s %s $%.4f–%.4f score %.0f confidence %.0f%%\n  Evidence: %s | Missing: %s\n  Confirm: %s | Invalid: %s\n", z.Symbol, z.Kind, z.Low, z.High, z.Score, z.Confidence*100, firstBrief(strings.Join(z.Evidence, ", "), "none"), firstBrief(strings.Join(z.Missing, ", "), "none"), briefCut(z.Trigger, 130), z.Invalidation)
 	}
-	fmt.Fprintf(&x, "\n5. TRIGGER / VÔ HIỆU\nBase: %s\nMở khóa: %s\nVô hiệu: %s\n", briefCut(b.Scenario.BTC.BaseCase, 250), briefCut(b.Scenario.BTC.BullUnlock, 250), briefCut(b.Scenario.BTC.BearInvalidation, 250))
-	fmt.Fprintf(&x, "\n6. LỊCH HERMES (%s)\n07:00 opening brief | 13:00 mid-day review | mỗi 4h digest | 23:00 closing review\nMỗi 15m: reconcile + supervisor/exit | mỗi 60m: audit + Hermes decision | safety/execution: báo ngay\n", b.Timezone)
-	fmt.Fprintf(&x, "\n7. DATA QUALITY\n")
-	for _, s := range b.Sources {
+	fmt.Fprintf(&x, "\nV. CAPITAL ALLOCATION (%% VỐN)\nReserve %.1f%% | portfolio cap %.1f%%\n", b.ReservePct, b.PortfolioCapPct)
+	for _, a := range b.Allocations {
+		fmt.Fprintf(&x, "- %s ceiling %.1f%% | now %.1f%% | probe/open/scale %.1f/%.1f/%.1f%% | %s\n  Điều kiện: %s\n", a.Symbol, a.CeilingPct, a.CurrentPct, a.ProbePct, a.OpenPct, a.ScalePct, a.State, briefCut(a.Condition, 130))
+	}
+	x.WriteString("\nVI. ASSET PLAYBOOK\n")
+	for _, a := range b.Hermes.Assets {
+		fmt.Fprintf(&x, "- %s %s ready %.0f%% | entry $%.4f–%.4f | invalid $%.4f | target $%.4f | RR %.2f\n  MM %s %.0f | flow %s %.2f | Liq %s %.0f | trigger %s\n", a.Symbol, a.State, a.Readiness*100, a.EntryZoneLow, a.EntryZoneHigh, a.Invalidation, a.Target, a.RR, a.MMCase, a.MMScore, a.FlowBias, a.FlowScore, a.LiquidityGrade, a.LiquidityScore, briefCut(a.NextTrigger, 140))
+	}
+	fmt.Fprintf(&x, "\nVII. SCENARIO MATRIX\nBASE: %s\nBULL unlock: %s\nBEAR invalidation: %s\n\nVIII. MACRO / POLICY / NEWS\n%s\nResearch: %s\n\nIX. BOT & SAFETY\nOrders %d | positions %d | autonomous execution retained. Spot limit post-only; không futures, leverage, short, market order.\n\nX. DATA QUALITY\n", briefCut(b.Scenario.BTC.BaseCase, 220), briefCut(b.Scenario.BTC.BullUnlock, 220), briefCut(b.Scenario.BTC.BearInvalidation, 220), briefCut(firstBrief(b.MacroSummary, "Không có macro evidence fresh; không suy diễn."), 420), briefCut(firstBrief(b.ResearchSummary, "Không có research fresh."), 200), b.Bot.OpenLiveOrders, b.Bot.LivePositions)
+	for _, q := range b.Sources {
 		state := "fresh"
-		if !s.Fresh {
-			state = "stale"
+		if !q.Fresh {
+			state = "STALE"
 		}
-		fmt.Fprintf(&x, "- %s: %s age=%dm (%s)\n", s.Name, state, s.AgeMinutes, s.Detail)
+		fmt.Fprintf(&x, "- %s %s age=%dm: %s\n", q.Name, state, q.AgeMinutes, q.Detail)
 	}
 	if len(b.Missing) > 0 {
-		fmt.Fprintf(&x, "Thiếu: %s. Hermes không suy diễn nguồn thiếu.\n", strings.Join(b.Missing, ", "))
+		fmt.Fprintf(&x, "Missing: %s. Không dùng nguồn thiếu để tăng confidence.\n", strings.Join(b.Missing, ", "))
 	}
-	x.WriteString("\nSafety: spot-only; limit orders; không futures, leverage, short, withdrawal. Market uncertainty điều chỉnh sizing; system/account faults mới hard-block.\n")
+	return x.String()
+}
+
+func renderHermesPlan(b HermesOperationsBrief) string {
+	var x strings.Builder
+	x.WriteString("HERMES — KẾ HOẠCH & PHÂN BỔ CHUYÊN NGHIỆP\n")
+	fmt.Fprintf(&x, "Reserve %.1f%% | portfolio cap %.1f%%\n", b.ReservePct, b.PortfolioCapPct)
+	for _, a := range b.Allocations {
+		fmt.Fprintf(&x, "\n%s %s — ceiling %.1f%% vốn\nProbe %.1f%% → Open %.1f%% → Scale %.1f%%\nĐiều kiện: %s\n", a.Symbol, a.State, a.CeilingPct, a.ProbePct, a.OpenPct, a.ScalePct, a.Condition)
+	}
+	x.WriteString("\nVÙNG GOM / PHÂN PHỐI\n")
+	for _, z := range b.Zones {
+		fmt.Fprintf(&x, "- %s %s $%.4f–%.4f score %.0f | %s\n", z.Symbol, z.Kind, z.Low, z.High, z.Score, briefCut(z.Trigger, 130))
+	}
+	fmt.Fprintf(&x, "\nBase: %s\nBull: %s\nBear/invalid: %s\n", b.Scenario.BTC.BaseCase, b.Scenario.BTC.BullUnlock, b.Scenario.BTC.BearInvalidation)
 	return x.String()
 }
 

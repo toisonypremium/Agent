@@ -586,7 +586,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			}
 			if hermesEnabled && cfg.HermesOperator.CanExecute() {
 				hermesPreCtx, hermesPreCancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
-				if err := runHermesCycleWithTrigger(hermesPreCtx, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "pre_execution", AllowNotify: false}); err != nil {
+				if err := runHermesDecisionCycle(hermesPreCtx, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "pre_execution", AllowNotify: false}); err != nil {
 					log.Printf("[Scheduler] Hermes pre-execution decision error: %v", err)
 				}
 				hermesPreCancel()
@@ -597,11 +597,6 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextSupervisor = time.Now().Add(managementInterval)
 			log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live supervisor completed")
-			if hermesEnabled && cfg.AI.HermesEventDrivenEnabled {
-				hermesCtx3, cancel3 := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
-				_ = runHermesCycleWithTrigger(hermesCtx3, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "supervisor_completed", AllowNotify: true})
-				cancel3()
-			}
 		}
 
 		if auditEnabled && !time.Now().Before(nextAudit) {
@@ -614,11 +609,6 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			nextAudit = time.Now().Add(auditInterval)
 			log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("live-auto-audit completed")
-			if hermesEnabled && cfg.AI.HermesEventDrivenEnabled {
-				hermesCtx4, cancel4 := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
-				_ = runHermesCycleWithTrigger(hermesCtx4, cfg, db, hermesagent.HermesTrigger{Source: "audit", Reason: "audit_completed", AllowNotify: true})
-				cancel4()
-			}
 		}
 
 		if hermesEnabled && !time.Now().Before(nextHermes) {

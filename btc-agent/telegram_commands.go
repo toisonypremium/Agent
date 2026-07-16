@@ -123,6 +123,20 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 				}
 			}
 			if cmd != "" {
+				if cmd == "/menu" || cmd == "/start" {
+					menuText := hermesTelegramMenuText(cfg)
+					if _, err := notify.TelegramSendMenu(ctx, token, chatID, menuText); err != nil {
+						return err
+					}
+					log.Printf("[TelegramCommands] Hermes menu sent ok [%s]", cmd)
+					state.LastUpdateID = update.UpdateID
+					state.UpdatedAt = time.Now()
+					saveTelegramRateLimits(&state)
+					if err := saveTelegramCommandState(state); err != nil {
+						return err
+					}
+					continue
+				}
 				text, ok := buildReadOnlyTelegramCommandReplyWithConfig(cfg, cmd)
 				if ok {
 					if err := notify.Telegram(ctx, token, chatID, usertext.TelegramVietnamese(text)); err != nil {
@@ -170,7 +184,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
+	case "/menu", "/start", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -277,8 +291,18 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 	}
 }
 
+func hermesTelegramMenuText(cfg config.Config) string {
+	tz := cfg.App.Timezone
+	if tz == "" {
+		tz = "Asia/Ho_Chi_Minh"
+	}
+	return fmt.Sprintf("HERMES OPERATIONS CENTER\n\nChọn một nút để xem trạng thái vận hành. Các lệnh chỉ đọc; Hermes tự vận hành chiến lược qua safety/reconcile/final assertions.\n\nLịch: 07:00 opening · 13:00 mid-day · mỗi 4h digest · 23:00 closing (%s)\n\nNhóm chính:\n• Decision: /status /hermes /why\n• Operations: /plan /schedule /flow\n• Risk & exits: /risk /exits\n• Portfolio: /positions /orders", tz)
+}
+
 func telegramCommandsHelp() string {
 	return strings.TrimSpace(`BTC Agent — lệnh Telegram read-only
+/menu — mở menu điều hành Hermes
+/start — mở menu điều hành Hermes
 /status — trạng thái bot
 /why — Hermes giải thích quyết định gần nhất
 /plan — kế hoạch vận hành Hermes

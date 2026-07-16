@@ -46,6 +46,50 @@ func Telegram(ctx context.Context, token, chatID, text string) error {
 	return err
 }
 
+// TelegramSendMenu sends a Hermes operations message with a persistent command keyboard.
+// Buttons are regular slash-command text, so the existing read-only command router handles them.
+func TelegramSendMenu(ctx context.Context, token, chatID, text string) (SendResult, error) {
+	if strings.TrimSpace(token) == "" {
+		return SendResult{}, fmt.Errorf("%w: missing telegram token", ErrTelegramConfig)
+	}
+	if strings.TrimSpace(chatID) == "" {
+		return SendResult{}, fmt.Errorf("%w: missing telegram chat_id", ErrTelegramConfig)
+	}
+	body, _ := json.Marshal(map[string]any{
+		"chat_id": chatID,
+		"text":    text,
+		"reply_markup": map[string]any{
+			"keyboard": [][]map[string]string{
+				{{"text": "/status"}, {"text": "/hermes"}},
+				{{"text": "/why"}, {"text": "/plan"}, {"text": "/schedule"}},
+				{{"text": "/flow"}, {"text": "/risk"}, {"text": "/exits"}},
+				{{"text": "/positions"}, {"text": "/orders"}, {"text": "/menu"}},
+			},
+			"resize_keyboard": true,
+			"is_persistent":   true,
+		},
+	})
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBaseURL, token), bytes.NewReader(body))
+	if err != nil {
+		return SendResult{}, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, data, err := doWithRetry(req, token)
+	if err != nil {
+		return SendResult{}, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return SendResult{}, fmt.Errorf("telegram menu http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
+	}
+	var raw struct {
+		Result struct {
+			MessageID int `json:"message_id"`
+		} `json:"result"`
+	}
+	_ = json.Unmarshal(data, &raw)
+	return SendResult{MessageID: raw.Result.MessageID}, nil
+}
+
 // TelegramSend sends a new message and returns message_id + error.
 func TelegramSend(ctx context.Context, token, chatID, text string) (SendResult, error) {
 	if strings.TrimSpace(token) == "" {

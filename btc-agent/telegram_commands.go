@@ -173,6 +173,16 @@ func telegramChatAllowed(configured string, actual int64) bool {
 
 func normalizeTelegramCommand(text string) string {
 	text = strings.TrimSpace(text)
+	iconCommands := map[string]string{
+		"📊 Trạng thái": "/status", "🧠 Phân tích": "/hermes", "❓ Lý do": "/why",
+		"🗺 Kế hoạch": "/plan", "🕒 Lịch": "/schedule", "🌊 Dòng tiền": "/flow",
+		"🌐 Vĩ mô": "/macro", "🛡 Rủi ro": "/risk", "🎯 Điểm thoát": "/exits",
+		"💼 Vị thế": "/positions", "📋 Lệnh chờ": "/orders", "🧾 Nguồn dữ liệu": "/sources",
+		"⚙️ Menu": "/menu",
+	}
+	if cmd, ok := iconCommands[text]; ok {
+		return cmd
+	}
 	if !strings.HasPrefix(text, "/") {
 		return ""
 	}
@@ -211,7 +221,9 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 		return renderHermesExecutive(buildHermesOperationsBrief(cfg, "interactive status")), true
 	case "/why":
 		return renderHermesWhy(buildHermesOperationsBrief(cfg, "decision explanation")), true
-	case "/plan", "/schedule":
+	case "/plan":
+		return renderHermesPlan(buildHermesOperationsBrief(cfg, "capital plan")), true
+	case "/schedule":
 		return renderHermesSchedule(buildHermesOperationsBrief(cfg, "operating schedule")), true
 	case "/flow":
 		return renderHermesFlow(buildHermesOperationsBrief(cfg, "flow detail")), true
@@ -317,9 +329,8 @@ func hermesTelegramMenuText(cfg config.Config) string {
 	if tz == "" {
 		tz = "Asia/Ho_Chi_Minh"
 	}
-	return fmt.Sprintf("HERMES OPERATIONS CENTER\n\nChọn một nút để xem trạng thái vận hành. Các lệnh chỉ đọc; Hermes tự vận hành chiến lược qua safety/reconcile/final assertions.\n\nLịch: 07:00 opening · 13:00 mid-day · mỗi 4h digest · 23:00 closing (%s)\n\nNhóm chính:\n• Decision: /status /hermes /why\n• Operations: /plan /schedule /flow\n• Risk & exits: /risk /exits\n• Portfolio: /positions /orders", tz)
+	return fmt.Sprintf("TRUNG TÂM ĐIỀU HÀNH HERMES\n\nChạm vào biểu tượng bên dưới để xem thông tin.\n\n📊 Trạng thái · 🧠 Phân tích · ❓ Lý do\n🗺 Kế hoạch · 🕒 Lịch · 🌊 Dòng tiền\n🌐 Vĩ mô · 🛡 Rủi ro · 🎯 Điểm thoát\n💼 Vị thế · 📋 Lệnh chờ · 🧾 Nguồn dữ liệu\n\nLịch tự động: 07:00, 13:00, mỗi 4 giờ và 23:00 (%s).\nTelegram chỉ dùng để xem; Hermes tự vận hành qua các lớp bảo vệ tài khoản.", tz)
 }
-
 func telegramCommandsHelp() string {
 	return strings.TrimSpace(`BTC Agent — lệnh Telegram read-only
 /menu — mở menu điều hành Hermes

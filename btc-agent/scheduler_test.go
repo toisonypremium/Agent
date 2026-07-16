@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -242,5 +243,77 @@ VI. Trạng thái an toàn: daily OK, reconcile OK, supervisor OK. An toàn: spo
 	}
 	if err := validateSchedulerTelegramAI(long + " https://example.com"); err == nil {
 		t.Fatal("expected URL rejected")
+	}
+}
+
+func TestEnforceStartupReconcileRecoveryCleanDoesNotChangeControls(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	haltedBefore, err := db.IsHalted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	demotedBefore, err := db.IsHermesDemoted()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := enforceStartupReconcileRecovery(db, liveguard.ReconcileResult{Safety: liveguard.ReconcileSafetyResult{Status: liveguard.ReconcileClean}}, nil); err != nil {
+		t.Fatal(err)
+	}
+	haltedAfter, _ := db.IsHalted()
+	demotedAfter, _ := db.IsHermesDemoted()
+	if haltedAfter != haltedBefore || demotedAfter != demotedBefore {
+		t.Fatalf("clean recovery changed controls halted=%v→%v demoted=%v→%v", haltedBefore, haltedAfter, demotedBefore, demotedAfter)
+	}
+}
+
+func TestEnforceStartupReconcileRecoveryBlocksAndDeduplicatesAudit(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	result := liveguard.ReconcileResult{Safety: liveguard.ReconcileSafetyResult{Status: liveguard.ReconcileBlock, Unknown: 1, OpenAfterReconcile: 1, UnknownPositions: 1}}
+	for i := 0; i < 2; i++ {
+		if err := enforceStartupReconcileRecovery(db, result, nil); err != nil {
+			t.Fatal(err)
+		}
+	}
+	halted, _ := db.IsHalted()
+	demoted, _ := db.IsHermesDemoted()
+	if !halted || !demoted {
+		t.Fatalf("expected halted/demoted got %v/%v", halted, demoted)
+	}
+	events, err := db.PendingRuntimeEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, e := range events {
+		if e.Type == "STARTUP_RECONCILE_RECOVERY_FAILED" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("expected one deduplicated startup event, got %d: %+v", count, events)
+	}
+}
+
+func TestEnforceStartupReconcileRecoveryErrorFailsClosed(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := enforceStartupReconcileRecovery(db, liveguard.ReconcileResult{}, fmt.Errorf("exchange timeout")); err != nil {
+		t.Fatal(err)
+	}
+	halted, _ := db.IsHalted()
+	demoted, _ := db.IsHermesDemoted()
+	if !halted || !demoted {
+		t.Fatalf("reconcile error did not fail closed")
 	}
 }

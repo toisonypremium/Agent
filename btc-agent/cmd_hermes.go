@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/hermesoperator"
@@ -33,6 +34,9 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		log.Printf("[Hermes] freshness warning: %v", err)
 	}
 	snap := buildHermesSnapshotWithTrigger(cfg, trigger)
+	if plan, err := db.LatestPlan(); err == nil {
+		enrichHermesAssetsFromPlan(&snap, plan)
+	}
 	caller := hermesCallerFromConfig(cfg)
 	report, err := hermesagent.Generate(ctx, caller, snap)
 	if err != nil {
@@ -69,6 +73,38 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		}
 	}
 	return nil
+}
+
+func enrichHermesAssetsFromPlan(snap *hermesagent.HermesSnapshot, plan agent2.Plan) {
+	bySymbol := map[string]agent2.AssetPlan{}
+	for _, asset := range plan.Assets {
+		bySymbol[strings.ToUpper(asset.Symbol)] = asset
+	}
+	for i := range snap.Assets {
+		asset, ok := bySymbol[strings.ToUpper(snap.Assets[i].Symbol)]
+		if !ok {
+			continue
+		}
+		target := asset.RewardRiskDetail.Target
+		if target <= 0 && len(asset.Layers) > 0 {
+			target = asset.Layers[0].Target
+		}
+		snap.Assets[i].EntryZoneLow = asset.DiscountZone.Low
+		snap.Assets[i].EntryZoneHigh = asset.DiscountZone.High
+		snap.Assets[i].Invalidation = asset.Invalidation
+		snap.Assets[i].Target = target
+		snap.Assets[i].MMCase = string(asset.MMCase)
+		snap.Assets[i].MMScore = asset.MMScore
+		snap.Assets[i].MMMissing = asset.MMMissing
+		snap.Assets[i].FlowBias = string(asset.AssetFlowBias)
+		snap.Assets[i].FlowScore = asset.AssetFlowScore
+		snap.Assets[i].LiquidityGrade = asset.LiquidityQuality.Grade
+		snap.Assets[i].LiquidityScore = asset.LiquidityQuality.Score
+		snap.Assets[i].LiquidityPass = asset.LiquidityQuality.Pass
+		snap.Assets[i].RotationRank = asset.RotationRank
+		snap.Assets[i].RotationScore = asset.RotationScore
+		snap.Assets[i].NextTrigger = asset.NextTrigger
+	}
 }
 
 // hermesShadowDecision is the persisted validated decision audit. In autonomous mode its

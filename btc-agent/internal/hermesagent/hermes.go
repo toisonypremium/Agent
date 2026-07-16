@@ -54,12 +54,27 @@ type HermesSnapshot struct {
 }
 
 type HermesAsset struct {
-	Symbol     string  `json:"symbol"`
-	State      string  `json:"state"`
-	Readiness  float64 `json:"readiness_pct"`
-	RR         float64 `json:"reward_risk"`
-	OpenOrders int     `json:"open_orders"`
-	Why        string  `json:"why,omitempty"`
+	Symbol         string   `json:"symbol"`
+	State          string   `json:"state"`
+	Readiness      float64  `json:"readiness_pct"`
+	RR             float64  `json:"reward_risk"`
+	OpenOrders     int      `json:"open_orders"`
+	Why            string   `json:"why,omitempty"`
+	EntryZoneLow   float64  `json:"entry_zone_low,omitempty"`
+	EntryZoneHigh  float64  `json:"entry_zone_high,omitempty"`
+	Invalidation   float64  `json:"invalidation,omitempty"`
+	Target         float64  `json:"target,omitempty"`
+	MMCase         string   `json:"mm_case,omitempty"`
+	MMScore        float64  `json:"mm_score,omitempty"`
+	MMMissing      []string `json:"mm_missing,omitempty"`
+	FlowBias       string   `json:"flow_bias,omitempty"`
+	FlowScore      float64  `json:"flow_score,omitempty"`
+	LiquidityGrade string   `json:"liquidity_grade,omitempty"`
+	LiquidityScore float64  `json:"liquidity_score,omitempty"`
+	LiquidityPass  bool     `json:"liquidity_pass,omitempty"`
+	RotationRank   int      `json:"rotation_rank,omitempty"`
+	RotationScore  float64  `json:"rotation_score,omitempty"`
+	NextTrigger    string   `json:"next_trigger,omitempty"`
 }
 
 type HermesExit struct {

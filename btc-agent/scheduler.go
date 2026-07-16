@@ -337,16 +337,6 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 		nextSupervisor = time.Now().Add(managementInterval)
 		log.Printf("[Scheduler] Next live supervisor cycle: %s", nextSupervisor.Format("2006-01-02 15:04:05 MST"))
-		if runNow {
-			log.Println("[Scheduler] Executing initial live supervisor cycle (--run-now)...")
-			if supervisor, err := runLiveSupervisorCycleWithDoctorNotify(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor, false); err != nil {
-				log.Printf("[Scheduler] Initial live supervisor error: %v", err)
-				runNowNotes = append(runNowNotes, "supervisor: "+err.Error())
-			} else {
-				runNowSupervisor = supervisor
-				runNowSupervisorSet = true
-			}
-		}
 	}
 
 	if auditEnabled {
@@ -375,6 +365,20 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			cancel()
 		}
 		log.Printf("[Scheduler] Next Hermes cycle: %s", nextHermes.Format("2006-01-02 15:04:05 MST"))
+	}
+
+	if runNow && cfg.Live.SupervisorEnabled {
+		if hermesEnabled && cfg.HermesOperator.CanExecute() {
+			log.Println("[Scheduler] Fresh Hermes decision generated before initial supervisor execution.")
+		}
+		log.Println("[Scheduler] Executing initial live supervisor cycle (--run-now) after audit/Hermes decision...")
+		if supervisor, err := runLiveSupervisorCycleWithDoctorNotify(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor, false); err != nil {
+			log.Printf("[Scheduler] Initial live supervisor error: %v", err)
+			runNowNotes = append(runNowNotes, "supervisor: "+err.Error())
+		} else {
+			runNowSupervisor = supervisor
+			runNowSupervisorSet = true
+		}
 	}
 
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {

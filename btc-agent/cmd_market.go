@@ -10,11 +10,13 @@ import (
 	"sync"
 	"time"
 
+	"btc-agent/internal/accumulation"
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange"
 	"btc-agent/internal/market"
+	"btc-agent/internal/microstructure"
 	"btc-agent/internal/notify"
 	"btc-agent/internal/paper"
 	"btc-agent/internal/storage"
@@ -148,7 +150,9 @@ func analyze(ctx context.Context, cfg config.Config, db *storage.DB) (agent1.Mar
 	if err != nil {
 		log.Printf("feargreed warning: %v", err)
 	}
-	analysis, err := agent1.Analyze(cfg, btc, fg)
+	// Load BTC footprint từ microstructure history để detect MM accumulation
+	btcFP := loadBTCMMFootprint(cfg, db)
+	analysis, err := agent1.Analyze(cfg, btc, fg, btcFP)
 	if err != nil {
 		return analysis, err
 	}
@@ -307,4 +311,28 @@ func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, 
 	}
 	fmt.Println(report)
 	return nil
+}
+
+// loadBTCMMFootprint load lịch sử microstructure của BTC từ DB và tính MM footprint.
+// Trả về zero MMFootprint nếu không đủ dữ liệu — an toàn, không làm hỏng logic cũ.
+func loadBTCMMFootprint(cfg config.Config, db *storage.DB) accumulation.MMFootprint {
+	if db == nil || !cfg.Microstructure.Enabled {
+		return accumulation.MMFootprint{}
+	}
+	btcSym := strings.ToUpper(strings.TrimSpace(cfg.Data.Symbols.BTC))
+	if btcSym == "" {
+		btcSym = "BTCUSDT"
+	}
+	history, err := db.LoadMicrostructureHistory([]string{btcSym}, 20)
+	if err != nil || len(history[btcSym]) < 3 {
+		return accumulation.MMFootprint{}
+	}
+	fp := microstructure.AnalyzeMMFootprint(history[btcSym])
+	return accumulation.MMFootprint{
+		Verdict:            fp.Verdict,
+		FootprintScore:     fp.FootprintScore,
+		CVDPriceDivergence: fp.CVDPriceDivergence,
+		TakerBuyAnomaly:    fp.TakerBuyAnomaly,
+		BidSupportStreak:   fp.BidSupportStreak,
+	}
 }

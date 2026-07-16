@@ -74,3 +74,50 @@ func TestAnalyzeLowDataDoesNotConfirm(t *testing.T) {
 		t.Fatalf("low data must not confirm: %+v", got)
 	}
 }
+
+func TestApplyMMFootprintUpgradesMarkdownToAbsorption(t *testing.T) {
+	r := Result{
+		Phase:       PhaseMarkdown,
+		Score:       25,
+		DataQuality: 1,
+	}
+	fp := MMFootprint{
+		Verdict:            "POSSIBLE_ACCUMULATION",
+		FootprintScore:     0.75,
+		CVDPriceDivergence: true,
+		BidSupportStreak:   5,
+	}
+	applyMMFootprint(&r, fp)
+	if r.Phase != PhaseAbsorption {
+		t.Fatalf("expected %s, got %s", PhaseAbsorption, r.Phase)
+	}
+	if r.Score != 37 {
+		t.Fatalf("expected score 37, got %.1f", r.Score)
+	}
+	if len(r.Evidence) != 1 || r.Evidence[0].Name != "mm_footprint" {
+		t.Fatalf("expected mm_footprint evidence, got %+v", r.Evidence)
+	}
+}
+
+func TestApplyMMFootprintDoesNotOverrideHardBlock(t *testing.T) {
+	r := Result{
+		Phase:        PhaseInvalidated,
+		Score:        25,
+		DataQuality:  1,
+		HardBlockers: []string{"falling knife breakdown"},
+	}
+	fp := MMFootprint{
+		Verdict:            "MM_ACCUMULATING",
+		FootprintScore:     0.90,
+		CVDPriceDivergence: true,
+		TakerBuyAnomaly:    true,
+		BidSupportStreak:   8,
+	}
+	applyMMFootprint(&r, fp)
+	if r.Phase != PhaseInvalidated {
+		t.Fatalf("hard block overridden: got %s", r.Phase)
+	}
+	if r.Score != 25 {
+		t.Fatalf("hard block score changed: got %.1f", r.Score)
+	}
+}

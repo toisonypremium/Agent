@@ -28,13 +28,17 @@ type HermesSnapshot struct {
 	AuditReasons          []string `json:"audit_reasons,omitempty"`
 	AuditAgeMinutes       int      `json:"audit_age_minutes,omitempty"`
 
-	BTCPhase       string   `json:"btc_phase"`
-	BTCPermission  string   `json:"btc_permission"`
-	BTCRegime      string   `json:"btc_regime"`
-	BTCTrend       float64  `json:"btc_trend_score"`
-	PlanState      string   `json:"plan_state"`
-	DoctorStatus   string   `json:"doctor_status"`
-	DoctorBlockers []string `json:"doctor_blockers,omitempty"`
+	BTCPhase         string   `json:"btc_phase"`
+	BTCPermission    string   `json:"btc_permission"`
+	BTCRegime        string   `json:"btc_regime"`
+	BTCTrend         float64  `json:"btc_trend_score"`
+	BTCMMVerdict     string   `json:"btc_mm_verdict,omitempty"`
+	BTCMMConfidence  float64  `json:"btc_mm_confidence,omitempty"`
+	BTCMMCoreSignals int      `json:"btc_mm_core_signals,omitempty"`
+	BTCMMDataQuality float64  `json:"btc_mm_data_quality,omitempty"`
+	PlanState        string   `json:"plan_state"`
+	DoctorStatus     string   `json:"doctor_status"`
+	DoctorBlockers   []string `json:"doctor_blockers,omitempty"`
 
 	Assets      []HermesAsset `json:"assets,omitempty"`
 	ExitEnabled bool          `json:"exit_enabled"`

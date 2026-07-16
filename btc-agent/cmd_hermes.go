@@ -16,6 +16,7 @@ import (
 	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/llm"
+	"btc-agent/internal/microstructure"
 	"btc-agent/internal/reportio"
 	"btc-agent/internal/storage"
 )
@@ -70,8 +71,8 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 	return nil
 }
 
-// hermesShadowDecision is persisted for audit only. It never reaches the
-// exchange executor; production execution requires a later explicit mode.
+// hermesShadowDecision is the persisted validated decision audit. In autonomous mode its
+// validated actions are re-evaluated by production safety immediately before execution.
 type hermesShadowDecision struct {
 	GeneratedAt time.Time                        `json:"generated_at"`
 	Mode        string                           `json:"mode"`
@@ -90,14 +91,18 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 	policy := hermesoperator.ValidationPolicy{
 		Now: time.Now().UTC(), MaxDecisionTTL: time.Duration(cfg.HermesOperator.DecisionTTLSeconds) * time.Second,
 		MinConfidence: cfg.HermesOperator.MinConfidence, MaxActions: cfg.HermesOperator.MaxActionsPerCycle,
-		MaxProbeNotionalUSDT:  cfg.HermesOperator.MaxProbeNotionalUSDT,
-		MaxActionNotionalUSDT: cfg.HermesOperator.MaxActionNotionalUSDT,
+		MaxProbeNotionalUSDT:  config.EffectiveHermesProbeNotional(cfg),
+		MaxActionNotionalUSDT: config.EffectiveHermesActionNotional(cfg),
 		AllowedSymbols:        allowed,
 	}
 	operatorSnapshot := hermesoperator.Snapshot{
 		GeneratedAt: snap.GeneratedAt.Format(time.RFC3339), Mode: cfg.HermesOperator.NormalizedMode(),
-		Market: map[string]any{"phase": snap.BTCPhase, "permission": snap.BTCPermission, "regime": snap.BTCRegime, "trend": snap.BTCTrend},
-		Assets: snap.Assets, Positions: snap.Positions, Safety: map[string]any{"audit": snap.AuditVerdict, "doctor": snap.DoctorStatus, "halted": snap.OperatorHalted},
+		Market: map[string]any{"phase": snap.BTCPhase, "permission": snap.BTCPermission, "regime": snap.BTCRegime, "trend": snap.BTCTrend, "mm_verdict": snap.BTCMMVerdict, "mm_confidence": snap.BTCMMConfidence, "mm_core_signals": snap.BTCMMCoreSignals, "mm_data_quality": snap.BTCMMDataQuality},
+		Assets: snap.Assets, Positions: snap.Positions, Limits: map[string]any{"probe_pct": cfg.HermesOperator.MaxProbeNotionalPct, "action_pct": cfg.HermesOperator.MaxActionNotionalPct, "portfolio_pct": cfg.HermesOperator.MaxPortfolioExposurePct}, Safety: map[string]any{"audit": snap.AuditVerdict, "doctor": snap.DoctorStatus, "halted": snap.OperatorHalted},
+	}
+	assetAllowance := map[string]float64{}
+	for _, symbol := range cfg.Data.Symbols.Assets {
+		assetAllowance[strings.ToUpper(symbol)] = config.EffectiveLiveNotionalPerAsset(cfg)
 	}
 	validation, err := hermesoperator.Generate(ctx, caller, operatorSnapshot, policy)
 	if err != nil {
@@ -109,8 +114,11 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 		ReconcileClean:             snap.AuditVerdict != "DOCTOR_BLOCK",
 		OKXReady:                   snap.AuditVerdict == "APPROVED_REAL_ORDER" || snap.AuditVerdict == "APPROVED_DRY_RUN",
 		PanicSelling:               strings.EqualFold(snap.BTCRegime, "PANIC_SELLING"),
-		PortfolioNotionalRemaining: cfg.HermesOperator.MaxPortfolioExposureUSDT,
-		AssetNotionalRemaining:     map[string]float64{},
+		PortfolioNotionalRemaining: config.EffectiveHermesPortfolioExposure(cfg),
+		AssetNotionalRemaining:     assetAllowance,
+		Autonomous:                 cfg.HermesOperator.NormalizedMode() == "autonomous", TotalCapital: cfg.Portfolio.TotalCapital,
+		AccumulationPhase: snap.BTCPhase, MarketRegime: snap.BTCRegime, TrendScore: snap.BTCTrend,
+		MMConfidence: snap.BTCMMConfidence, DataQuality: snap.BTCMMDataQuality, PerOrderCap: config.EffectiveLiveNotionalPerOrder(cfg),
 	})
 	return saveJSONFile(hermesReportDir, "hermes_shadow_decision_latest.json", hermesShadowDecision{GeneratedAt: time.Now().UTC(), Mode: cfg.HermesOperator.NormalizedMode(), Validation: validation, Safety: safety})
 }
@@ -219,6 +227,21 @@ func buildHermesSnapshotWithTrigger(cfg config.Config, trigger hermesagent.Herme
 			snap.DoctorBlockers = audit.Doctor.Blockers
 			if !audit.GeneratedAt.IsZero() {
 				snap.AuditAgeMinutes = int(math.Round(time.Since(audit.GeneratedAt).Minutes()))
+			}
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(hermesReportDir, "microstructure_latest.json")); err == nil {
+		var ms microstructure.Summary
+		if json.Unmarshal(b, &ms) == nil {
+			btc := strings.ToUpper(strings.TrimSpace(cfg.Data.Symbols.BTC))
+			if btc == "" {
+				btc = "BTCUSDT"
+			}
+			if fp, ok := ms.MMFootprint[btc]; ok {
+				snap.BTCMMVerdict = fp.Verdict
+				snap.BTCMMConfidence = fp.FootprintScore
+				snap.BTCMMCoreSignals = fp.CoreSignalCount
+				snap.BTCMMDataQuality = fp.DataQuality
 			}
 		}
 	}

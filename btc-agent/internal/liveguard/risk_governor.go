@@ -39,7 +39,11 @@ func EvaluateRiskGovernor(cfg config.Config, analysis agent1.MarketAnalysis, pla
 		res.Blockers = append(res.Blockers, reconcile.Blockers...)
 	}
 	if analysis.MarketRegime == "PANIC_SELLING" {
-		res.Blockers = append(res.Blockers, "BTC PANIC_SELLING risk governor block")
+		if cfg.HermesOperator.NormalizedMode() == "autonomous" {
+			res.Warnings = append(res.Warnings, "BTC PANIC_SELLING: autonomous sizing severely reduced")
+		} else {
+			res.Blockers = append(res.Blockers, "BTC PANIC_SELLING risk governor block")
+		}
 	}
 	if analysis.FallingKnifeRisk == agent1.High {
 		// Hard block only when plan intends to place real orders (ARMED or ACTIVE_LIMIT).
@@ -53,15 +57,19 @@ func EvaluateRiskGovernor(cfg config.Config, analysis agent1.MarketAnalysis, pla
 		}
 	}
 	if analysis.FomoRisk == agent1.High {
-		res.Blockers = append(res.Blockers, "BTC FOMO HIGH risk governor block")
+		if cfg.HermesOperator.NormalizedMode() == "autonomous" {
+			res.Warnings = append(res.Warnings, "BTC FOMO HIGH: autonomous sizing reduced")
+		} else {
+			res.Blockers = append(res.Blockers, "BTC FOMO HIGH risk governor block")
+		}
 	}
 	for _, position := range positions {
 		if position.Quantity < 0 || position.CostBasis < 0 || (position.Quantity > 0 && position.AvgEntryPrice <= 0) {
 			res.Blockers = append(res.Blockers, fmt.Sprintf("invalid live position exposure for %s", position.Symbol))
 		}
 	}
-	if exposure := totalLiveExposure(open, positions); cfg.Live.MaxLiveNotionalTotalUSDT > 0 && exposure > cfg.Live.MaxLiveNotionalTotalUSDT+1e-9 {
-		res.Blockers = append(res.Blockers, fmt.Sprintf("live exposure %.2f exceeds total cap %.2f", exposure, cfg.Live.MaxLiveNotionalTotalUSDT))
+	if exposure, cap := totalLiveExposure(open, positions), config.EffectiveLiveNotionalTotal(cfg); cap > 0 && exposure > cap+1e-9 {
+		res.Blockers = append(res.Blockers, fmt.Sprintf("live exposure %.2f exceeds total cap %.2f", exposure, cap))
 	}
 
 	if analysis.MarketRegime == "DOWNTREND" {

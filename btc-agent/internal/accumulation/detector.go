@@ -3,6 +3,7 @@ package accumulation
 import (
 	"btc-agent/internal/flow"
 	"btc-agent/internal/market"
+	"strconv"
 )
 
 func Analyze(symbol string, candles []market.Candle) Result {
@@ -117,7 +118,7 @@ func applyMMFootprint(r *Result, fp MMFootprint) {
 
 	// Nâng phase MARKDOWN → SELL_ABSORPTION khi footprint đủ mạnh
 	// Điều kiện: phase MARKDOWN + không có hard block + footprint >= POSSIBLE_ACCUMULATION
-	if r.Phase == PhaseMarkdown && (fp.Verdict == "POSSIBLE_ACCUMULATION" || fp.Verdict == "MM_ACCUMULATING") {
+	if r.Phase == PhaseMarkdown && fp.Verdict == "MM_ACCUMULATING" {
 		r.Phase = PhaseAbsorption
 		r.NextTrigger = "MM footprint: sell pressure đang bị hấp thụ trên orderflow; chờ OHLCV confirm reclaim support."
 	}
@@ -130,24 +131,7 @@ func boolStr(b bool) string {
 	return "false"
 }
 
-func intStr(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	s := ""
-	neg := n < 0
-	if neg {
-		n = -n
-	}
-	for n > 0 {
-		s = string(rune(0+n%10)) + s
-		n /= 10
-	}
-	if neg {
-		s = "-" + s
-	}
-	return s
-}
+func intStr(n int) string { return strconv.Itoa(n) }
 
 // MMFootprint là subset của microstructure.MMFootprintSignal dùng trong accumulation.
 // Tách riêng để tránh circular import.

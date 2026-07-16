@@ -19,6 +19,9 @@ type HermesOperatorConfig struct {
 	MaxProbeNotionalUSDT     float64 `yaml:"max_probe_notional_usdt"`
 	MaxActionNotionalUSDT    float64 `yaml:"max_action_notional_usdt"`
 	MaxPortfolioExposureUSDT float64 `yaml:"max_portfolio_exposure_usdt"`
+	MaxProbeNotionalPct      float64 `yaml:"max_probe_notional_pct"`
+	MaxActionNotionalPct     float64 `yaml:"max_action_notional_pct"`
+	MaxPortfolioExposurePct  float64 `yaml:"max_portfolio_exposure_pct"`
 }
 
 func (c HermesOperatorConfig) NormalizedMode() string {
@@ -261,7 +264,9 @@ func LiveAutoMaxNotionalUSDT(c Config) float64 {
 
 // EffectiveLiveNotionalPerOrder returns the max notional per live order.
 // If max_live_notional_per_order_pct is set (0 < pct <= 1), it takes priority:
-//   effective = total_capital x pct
+//
+//	effective = total_capital x pct
+//
 // Otherwise falls back to max_live_notional_per_order_usdt.
 func EffectiveLiveNotionalPerOrder(c Config) float64 {
 	if pct := c.Live.MaxLiveNotionalPerOrderPct; pct > 0 && pct <= 1 {
@@ -288,6 +293,27 @@ func EffectiveLiveNotionalTotal(c Config) float64 {
 		return c.Portfolio.TotalCapital * pct
 	}
 	return c.Live.MaxLiveNotionalTotalUSDT
+}
+
+func EffectiveHermesProbeNotional(c Config) float64 {
+	if pct := c.HermesOperator.MaxProbeNotionalPct; pct > 0 && pct <= 1 {
+		return c.Portfolio.TotalCapital * pct
+	}
+	return c.HermesOperator.MaxProbeNotionalUSDT
+}
+
+func EffectiveHermesActionNotional(c Config) float64 {
+	if pct := c.HermesOperator.MaxActionNotionalPct; pct > 0 && pct <= 1 {
+		return c.Portfolio.TotalCapital * pct
+	}
+	return c.HermesOperator.MaxActionNotionalUSDT
+}
+
+func EffectiveHermesPortfolioExposure(c Config) float64 {
+	if pct := c.HermesOperator.MaxPortfolioExposurePct; pct > 0 && pct <= 1 {
+		return c.Portfolio.TotalCapital * pct
+	}
+	return c.HermesOperator.MaxPortfolioExposureUSDT
 }
 
 func validClockTime(value string) bool {
@@ -401,17 +427,18 @@ func (c Config) Validate() error {
 		if c.HermesOperator.MaxActionsPerCycle < 1 || c.HermesOperator.MaxActionsPerCycle > 20 {
 			return errors.New("hermes_operator.max_actions_per_cycle must be between 1 and 20")
 		}
-		if c.HermesOperator.MaxProbeNotionalUSDT <= 0 || c.HermesOperator.MaxActionNotionalUSDT <= 0 {
-			return errors.New("hermes_operator notional caps must be positive")
+		probeCap, actionCap, portfolioCap := EffectiveHermesProbeNotional(c), EffectiveHermesActionNotional(c), EffectiveHermesPortfolioExposure(c)
+		if probeCap <= 0 || actionCap <= 0 || portfolioCap <= 0 {
+			return errors.New("hermes_operator effective notional caps must be positive")
 		}
-		if c.HermesOperator.MaxProbeNotionalUSDT > c.HermesOperator.MaxActionNotionalUSDT {
-			return errors.New("hermes_operator.max_probe_notional_usdt must be <= max_action_notional_usdt")
+		if probeCap > actionCap {
+			return errors.New("hermes_operator effective probe cap must be <= action cap")
 		}
-		if c.Live.MaxLiveNotionalPerOrderUSDT > 0 && c.HermesOperator.MaxActionNotionalUSDT > c.Live.MaxLiveNotionalPerOrderUSDT {
-			return errors.New("hermes_operator.max_action_notional_usdt must be <= live.max_live_notional_per_order_usdt")
+		if liveCap := EffectiveLiveNotionalPerOrder(c); liveCap > 0 && actionCap > liveCap {
+			return errors.New("hermes_operator effective action cap must be <= live per-order cap")
 		}
-		if c.HermesOperator.MaxPortfolioExposureUSDT <= 0 || (c.Live.MaxLiveNotionalTotalUSDT > 0 && c.HermesOperator.MaxPortfolioExposureUSDT > c.Live.MaxLiveNotionalTotalUSDT) {
-			return errors.New("hermes_operator.max_portfolio_exposure_usdt must be positive and <= live.max_live_notional_total_usdt")
+		if liveTotal := EffectiveLiveNotionalTotal(c); liveTotal > 0 && portfolioCap > liveTotal {
+			return errors.New("hermes_operator effective portfolio cap must be <= live total cap")
 		}
 		if c.HermesOperator.CanExecute() && (!c.Live.Enabled || !c.Live.AutoExecute || !c.Execution.RealTradingEnabled) {
 			return errors.New("Hermes canary/autonomous requires live enabled, auto_execute, and real trading enabled")

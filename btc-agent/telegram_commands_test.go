@@ -126,9 +126,26 @@ func TestTelegramCommandTriggerIsReadOnly(t *testing.T) {
 
 func TestHermesTelegramMenuText(t *testing.T) {
 	text := hermesTelegramMenuText(config.Config{})
-	for _, want := range []string{"HERMES OPERATIONS CENTER", "/status", "/hermes", "/why", "/plan", "/schedule", "/flow", "/risk", "/exits"} {
+	for _, want := range []string{"TRUNG TÂM ĐIỀU HÀNH HERMES", "📊 Trạng thái", "🧠 Phân tích", "❓ Lý do", "🗺 Kế hoạch", "🕒 Lịch", "🌊 Dòng tiền", "🛡 Rủi ro", "🎯 Điểm thoát"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("menu missing %q: %s", want, text)
 		}
+	}
+}
+
+func TestNormalizeTelegramIconMenuButtons(t *testing.T) {
+	cases := map[string]string{
+		"📊 Trạng thái": "/status", "🧠 Phân tích": "/hermes", "❓ Lý do": "/why",
+		"🗺 Kế hoạch": "/plan", "🕒 Lịch": "/schedule", "🌊 Dòng tiền": "/flow",
+		"🌐 Vĩ mô": "/macro", "🛡 Rủi ro": "/risk", "🎯 Điểm thoát": "/exits",
+		"💼 Vị thế": "/positions", "📋 Lệnh chờ": "/orders", "🧾 Nguồn dữ liệu": "/sources", "⚙️ Menu": "/menu",
+	}
+	for label, want := range cases {
+		if got := normalizeTelegramCommand(label); got != want {
+			t.Errorf("%q: got %q want %q", label, got, want)
+		}
+	}
+	if got := normalizeTelegramCommand("nút lạ"); got != "" {
+		t.Fatalf("unknown icon text accepted: %q", got)
 	}
 }

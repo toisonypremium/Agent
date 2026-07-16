@@ -60,10 +60,11 @@ func TelegramSendMenu(ctx context.Context, token, chatID, text string) (SendResu
 		"text":    text,
 		"reply_markup": map[string]any{
 			"keyboard": [][]map[string]string{
-				{{"text": "/status"}, {"text": "/hermes"}},
-				{{"text": "/why"}, {"text": "/plan"}, {"text": "/schedule"}},
-				{{"text": "/flow"}, {"text": "/risk"}, {"text": "/exits"}},
-				{{"text": "/positions"}, {"text": "/orders"}, {"text": "/menu"}},
+				{{"text": "📊 Trạng thái"}, {"text": "🧠 Phân tích"}, {"text": "❓ Lý do"}},
+				{{"text": "🗺 Kế hoạch"}, {"text": "🕒 Lịch"}, {"text": "🌊 Dòng tiền"}},
+				{{"text": "🌐 Vĩ mô"}, {"text": "🛡 Rủi ro"}, {"text": "🎯 Điểm thoát"}},
+				{{"text": "💼 Vị thế"}, {"text": "📋 Lệnh chờ"}, {"text": "🧾 Nguồn dữ liệu"}},
+				{{"text": "⚙️ Menu"}},
 			},
 			"resize_keyboard": true,
 			"is_persistent":   true,

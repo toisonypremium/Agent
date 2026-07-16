@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"btc-agent/internal/agent2"
+	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
 )
 
@@ -119,6 +120,15 @@ func TestTelegramCommandTriggerIsReadOnly(t *testing.T) {
 	for _, want := range []string{"BTC Agent — Trigger", "Chờ BTC ALLOWED", "Read-only", "không bypass ACTIVE_LIMIT"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("trigger reply missing %q:\n%s", want, text)
+		}
+	}
+}
+
+func TestHermesTelegramMenuText(t *testing.T) {
+	text := hermesTelegramMenuText(config.Config{})
+	for _, want := range []string{"HERMES OPERATIONS CENTER", "/status", "/hermes", "/why", "/plan", "/schedule", "/flow", "/risk", "/exits"} {
+		if !strings.Contains(text, want) {
+			t.Fatalf("menu missing %q: %s", want, text)
 		}
 	}
 }

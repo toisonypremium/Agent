@@ -75,7 +75,7 @@ type ScoreBreakdown struct {
 	RiskBlockers    []string             `json:"risk_blockers,omitempty"`
 }
 
-func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.FearGreed) (MarketAnalysis, error) {
+func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.FearGreed, btcFootprint ...accumulation.MMFootprint) (MarketAnalysis, error) {
 	w, d, h4 := market.Frame(btc["1w"]), market.Frame(btc["1d"]), market.Frame(btc["4h"])
 	price := market.LastClose(btc["1d"])
 	if price == 0 {
@@ -90,7 +90,11 @@ func Analyze(cfg config.Config, btc map[string][]market.Candle, fg exchange.Fear
 	macroAcc := market.MacroAccumulationZone(ps, cfg.BTCCycle.StressPriceReference)
 	trend := (w.TrendScore*0.45 + d.TrendScore*0.40 + h4.TrendScore*0.15)
 	fl := flow.AnalyzeMultiFrame(btc)
-	btcAccumulation := accumulation.Analyze("BTCUSDT", btc["1d"])
+	var _btcFP accumulation.MMFootprint
+	if len(btcFootprint) > 0 {
+		_btcFP = btcFootprint[0]
+	}
+	btcAccumulation := accumulation.AnalyzeWithFootprint("BTCUSDT", btc["1d"], _btcFP)
 	if cfg.Data.Symbols.BTC != "" {
 		btcAccumulation.Symbol = cfg.Data.Symbols.BTC
 	}

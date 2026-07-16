@@ -78,6 +78,7 @@ type Summary struct {
 	Warnings      []string            `json:"warnings,omitempty"`
 	Fingerprint   string              `json:"fingerprint"`
 	Summary       string              `json:"summary"`
+	MMFootprint         map[string]MMFootprintSignal `json:"mm_footprint,omitempty"`
 }
 
 type Report struct {

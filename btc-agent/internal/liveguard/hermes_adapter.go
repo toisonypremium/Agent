@@ -19,6 +19,15 @@ type HermesSafetyContext struct {
 	PanicSelling               bool
 	PortfolioNotionalRemaining float64
 	AssetNotionalRemaining     map[string]float64
+	Autonomous                 bool
+	TotalCapital               float64
+	AccumulationPhase          string
+	MarketRegime               string
+	TrendScore                 float64
+	MMConfidence               float64
+	DataQuality                float64
+	LiquidityQuality           map[string]float64
+	PerOrderCap                float64
 }
 
 type HermesActionDecision struct {
@@ -36,6 +45,9 @@ func EvaluateHermesActions(actions []hermesoperator.Action, safety HermesSafetyC
 		result := HermesActionDecision{Action: action}
 		symbol := strings.ToUpper(strings.TrimSpace(action.Symbol))
 		if action.Intent.IncreasesExposure() {
+			if safety.PanicSelling && !safety.Autonomous {
+				result.Reasons = append(result.Reasons, "panic selling hard block")
+			}
 			if safety.OperatorHalted {
 				result.Reasons = append(result.Reasons, "operator halt active")
 			}
@@ -48,9 +60,6 @@ func EvaluateHermesActions(actions []hermesoperator.Action, safety HermesSafetyC
 			if !safety.OKXReady {
 				result.Reasons = append(result.Reasons, "OKX not ready")
 			}
-			if safety.PanicSelling {
-				result.Reasons = append(result.Reasons, "panic selling hard block")
-			}
 			if safety.PortfolioNotionalRemaining <= 0 {
 				result.Reasons = append(result.Reasons, "portfolio notional exhausted")
 			}
@@ -60,6 +69,21 @@ func EvaluateHermesActions(actions []hermesoperator.Action, safety HermesSafetyC
 			}
 			if len(result.Reasons) == 0 {
 				result.NotionalUSDT = action.RequestedNotionalUSDT
+				if safety.Autonomous {
+					liq := 1.0
+					if safety.LiquidityQuality != nil && safety.LiquidityQuality[symbol] > 0 {
+						liq = safety.LiquidityQuality[symbol]
+					}
+					sizing := CalculateAutonomousSizing(AutonomousSizingContext{
+						TotalCapital: safety.TotalCapital, Confidence: action.Confidence, Intent: action.Intent,
+						AccumulationPhase: safety.AccumulationPhase, MarketRegime: safety.MarketRegime,
+						TrendScore: safety.TrendScore, MMConfidence: safety.MMConfidence,
+						DataQuality: safety.DataQuality, LiquidityQuality: liq,
+						RequestedNotional: action.RequestedNotionalUSDT, PerOrderCap: safety.PerOrderCap,
+						AssetRemaining: remaining, PortfolioRemaining: safety.PortfolioNotionalRemaining,
+					})
+					result.NotionalUSDT = sizing.NotionalUSDT
+				}
 				if result.NotionalUSDT > safety.PortfolioNotionalRemaining {
 					result.NotionalUSDT = safety.PortfolioNotionalRemaining
 				}
@@ -88,8 +112,8 @@ func EvaluateHermesActions(actions []hermesoperator.Action, safety HermesSafetyC
 }
 
 // BuildHermesShadowDesiredOrders converts allowed exposure-increasing actions
-// into desired orders for audit and dry-run. Production ManageLiveOrders does
-// not consume this output until the operator mode is explicitly promoted.
+// into desired orders for audit and dry-run. Autonomous production execution
+// uses BuildHermesDesiredOrders with production provenance and final assertions.
 func BuildHermesShadowDesiredOrders(cfg config.Config, plan agent2.Plan, decisions []HermesActionDecision, filters []live.InstrumentFilter) ([]ManagedDesiredOrder, []ManagedOrderDecision) {
 	return BuildHermesDesiredOrders(cfg, plan, "", false, decisions, filters)
 }
@@ -114,9 +138,20 @@ func BuildHermesDesiredOrders(cfg config.Config, plan agent2.Plan, decisionID st
 			blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: "Hermes shadow: asset not present in deterministic plan"})
 			continue
 		}
-		if asset.State == agent2.StateNoTrade {
+		autonomous := production && cfg.HermesOperator.NormalizedMode() == "autonomous"
+		if asset.State == agent2.StateNoTrade && !autonomous {
 			blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: "Hermes shadow: asset NO_TRADE"})
 			continue
+		}
+		if autonomous && asset.State == agent2.StateNoTrade {
+			if !asset.DiscountZone.Valid() || asset.RewardRisk < cfg.Risk.MinScoutRewardRisk {
+				blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: "Hermes autonomous: asset price/RR envelope invalid"})
+				continue
+			}
+			if asset.LiquidityQuality.Enabled && !asset.LiquidityQuality.Pass {
+				blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, Reason: "Hermes autonomous: asset liquidity unsafe"})
+				continue
+			}
 		}
 		zoneHigh := asset.DiscountZone.High
 		if cfg.Risk.DiscountZonePremiumPct > 0 {
@@ -146,7 +181,14 @@ func BuildHermesDesiredOrders(cfg config.Config, plan agent2.Plan, decisionID st
 		if production {
 			source = "HERMES_OPERATOR"
 		}
-		desired = append(desired, ManagedDesiredOrder{Symbol: symbol, InstID: instID, LayerIndex: 1, Side: "BUY", Type: "limit", Price: candidate.Price, Quantity: candidate.Quantity, Notional: candidate.Notional, PostOnly: true, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: source, DecisionReason: strings.Join(action.ReasonCodes, ","), AllocationTier: string(OpportunityProbe), AllocationReason: "Hermes validated action", TargetPrice: action.Target, RewardRisk: asset.RewardRisk, LayerReason: "Hermes " + string(action.Intent), DecisionID: decisionID, Intent: string(action.Intent)})
+		tier := OpportunityProbe
+		if action.Intent == hermesoperator.IntentOpenLimit {
+			tier = OpportunityNormal
+		}
+		if action.Intent == hermesoperator.IntentScaleLimit {
+			tier = OpportunityStrong
+		}
+		desired = append(desired, ManagedDesiredOrder{Symbol: symbol, InstID: instID, LayerIndex: 1, Side: "BUY", Type: "limit", Price: candidate.Price, Quantity: candidate.Quantity, Notional: candidate.Notional, PostOnly: true, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: source, DecisionReason: strings.Join(action.ReasonCodes, ","), AllocationTier: string(tier), AllocationReason: "Hermes validated action", TargetPrice: action.Target, RewardRisk: asset.RewardRisk, LayerReason: "Hermes " + string(action.Intent), DecisionID: decisionID, Intent: string(action.Intent)})
 	}
 	return desired, blocked
 }

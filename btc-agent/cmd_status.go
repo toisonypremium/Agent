@@ -121,7 +121,7 @@ Agent 2
 		}
 	}
 	out += fmt.Sprintf("- Open paper orders: %d", len(orders))
-	out += fmt.Sprintf("\n\nHermes Operator\n- Enabled: %v | mode: %s | execution authority: %v\n- TTL: %ds | confidence: %.2f | actions/cycle: %d\n- Caps: probe %.2f | action %.2f | portfolio %.2f USDT", cfg.HermesOperator.Enabled, cfg.HermesOperator.NormalizedMode(), cfg.HermesOperator.CanExecute(), cfg.HermesOperator.DecisionTTLSeconds, cfg.HermesOperator.MinConfidence, cfg.HermesOperator.MaxActionsPerCycle, cfg.HermesOperator.MaxProbeNotionalUSDT, cfg.HermesOperator.MaxActionNotionalUSDT, cfg.HermesOperator.MaxPortfolioExposureUSDT)
+	out += fmt.Sprintf("\n\nHermes Operator\n- Enabled: %v | mode: %s | execution authority: %v\n- TTL: %ds | confidence: %.2f | actions/cycle: %d\n- Caps: probe %.2f | action %.2f | portfolio %.2f USDT", cfg.HermesOperator.Enabled, cfg.HermesOperator.NormalizedMode(), cfg.HermesOperator.CanExecute(), cfg.HermesOperator.DecisionTTLSeconds, cfg.HermesOperator.MinConfidence, cfg.HermesOperator.MaxActionsPerCycle, config.EffectiveHermesProbeNotional(cfg), config.EffectiveHermesActionNotional(cfg), config.EffectiveHermesPortfolioExposure(cfg))
 	if shadow, ok := loadHermesShadowStatus(); ok {
 		out += fmt.Sprintf("\n- Last shadow: %s | validated=%d | safety=%d | rejected=%d", shadow.GeneratedAt, shadow.Validated, shadow.Safety, shadow.Rejected)
 	}

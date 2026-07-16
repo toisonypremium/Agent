@@ -57,7 +57,8 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 		reasons = append(reasons, "risk flags must enforce no futures/no leverage/spot limit only")
 	}
 	hermesProbe := strings.EqualFold(d.Source, "HERMES_OPERATOR") && strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") && (strings.EqualFold(in.HermesMode, "canary") || strings.EqualFold(in.HermesMode, "autonomous"))
-	if !hermesProbe {
+	hermesAutonomousExposure := strings.EqualFold(d.Source, "HERMES_OPERATOR") && strings.EqualFold(in.HermesMode, "autonomous") && (strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") || strings.EqualFold(in.HermesIntent, "OPEN_LIMIT") || strings.EqualFold(in.HermesIntent, "SCALE_LIMIT"))
+	if !hermesProbe && !hermesAutonomousExposure {
 		if in.Plan.State != agent2.StateActiveLimit {
 			reasons = append(reasons, "plan state must be ACTIVE_LIMIT")
 		}
@@ -76,7 +77,7 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 		if strings.TrimSpace(in.HermesDecisionID) == "" {
 			reasons = append(reasons, "Hermes decision_id required")
 		}
-		if d.AllocationTier != string(OpportunityProbe) {
+		if strings.EqualFold(in.HermesMode, "canary") && d.AllocationTier != string(OpportunityProbe) {
 			reasons = append(reasons, "Hermes canary order must use PROBE allocation tier")
 		}
 	}

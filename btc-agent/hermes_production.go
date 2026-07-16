@@ -64,45 +64,44 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	}
 	assetRemaining := map[string]float64{}
 	for _, symbol := range cfg.Data.Symbols.Assets {
-		assetRemaining[strings.ToUpper(symbol)] = maxFloat(0, cfg.Live.MaxLiveNotionalPerAssetUSDT-assetExposure[strings.ToUpper(symbol)])
+		assetRemaining[strings.ToUpper(symbol)] = maxFloat(0, config.EffectiveLiveNotionalPerAsset(cfg)-assetExposure[strings.ToUpper(symbol)])
 	}
-	safety := liveguard.EvaluateHermesActions(audit.Validation.Actions, liveguard.HermesSafetyContext{OperatorHalted: halted || haltErr != nil, DataHealthy: dataHealth.Status != liveguard.DataHealthBlock, ReconcileClean: reconcile.Status != liveguard.ReconcileBlock, OKXReady: placer != nil, PanicSelling: analysis.MarketRegime == "PANIC_SELLING", PortfolioNotionalRemaining: maxFloat(0, cfg.HermesOperator.MaxPortfolioExposureUSDT-openExposure), AssetNotionalRemaining: assetRemaining})
+	mmConfidence := 0.0
+	if fp, ok := analysis.Microstructure.MMFootprint[strings.ToUpper(cfg.Data.Symbols.BTC)]; ok {
+		mmConfidence = fp.FootprintScore
+	}
+	liquidityQuality := map[string]float64{}
+	for _, asset := range plan.Assets {
+		q := 0.5
+		if asset.LiquidityQuality.Pass {
+			q = 1.0
+		}
+		liquidityQuality[strings.ToUpper(asset.Symbol)] = q
+	}
+	safety := liveguard.EvaluateHermesActions(audit.Validation.Actions, liveguard.HermesSafetyContext{
+		OperatorHalted: halted || haltErr != nil, DataHealthy: dataHealth.Status != liveguard.DataHealthBlock,
+		ReconcileClean: reconcile.Status != liveguard.ReconcileBlock, OKXReady: placer != nil,
+		PanicSelling:               analysis.MarketRegime == "PANIC_SELLING",
+		PortfolioNotionalRemaining: maxFloat(0, config.EffectiveLiveNotionalTotal(cfg)-openExposure),
+		AssetNotionalRemaining:     assetRemaining, Autonomous: cfg.HermesOperator.NormalizedMode() == "autonomous",
+		TotalCapital: cfg.Portfolio.TotalCapital, AccumulationPhase: string(analysis.BTCAccumulation.Phase),
+		MarketRegime: analysis.MarketRegime, TrendScore: analysis.TrendScore, MMConfidence: mmConfidence,
+		DataQuality: analysis.BTCAccumulation.DataQuality, LiquidityQuality: liquidityQuality,
+		PerOrderCap: config.EffectiveLiveNotionalPerOrder(cfg),
+	})
 	if cfg.HermesOperator.NormalizedMode() == "canary" && len(safety) > 1 {
 		safety = safety[:1]
 	}
 	decisionID := audit.Validation.Decision.DecisionID
-	if len(safety) == 1 && safety[0].Allowed && safety[0].Action.Intent == hermesoperator.IntentCancel {
-		canceler, _ := placer.(liveguard.OrderCanceler)
-		statusReader, _ := placer.(liveguard.OrderStatusReader)
-		result := liveguard.ExecuteHermesCancelActions(ctx, cfg, decisionID, safety, open, canceler, statusReader, db, dryRun)
-		result.PlanState = plan.State
-		result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
-		return result, true
-	}
-	if len(safety) == 1 && safety[0].Allowed && safety[0].Action.Intent == hermesoperator.IntentReduce {
-		owned, err := db.HermesOwnedPositions()
-		if err != nil {
-			return blockedHermesCycle(plan, dryRun, "Hermes owned-position ledger unavailable"), true
-		}
-		result := liveguard.ExecuteHermesReduceActions(ctx, cfg, decisionID, safety, owned, filters, placer, db, dryRun)
-		result.PlanState = plan.State
-		result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
-		return result, true
-	}
-	if len(safety) == 1 && safety[0].Allowed && safety[0].Action.Intent == hermesoperator.IntentExitLimit {
-		owned, err := db.HermesOwnedPositions()
-		if err != nil {
-			return blockedHermesCycle(plan, dryRun, "Hermes owned-position ledger unavailable"), true
-		}
-		result := liveguard.ExecuteHermesExitLimitActions(ctx, cfg, decisionID, safety, owned, filters, placer, db, dryRun)
-		result.PlanState = plan.State
-		result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
-		return result, true
-	}
+	reducing := make([]liveguard.HermesActionDecision, 0)
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.ReducesExposure() {
-			return blockedHermesCycle(plan, dryRun, "Hermes reducing intent lifecycle not implemented: "+string(decision.Action.Intent)), true
+			reducing = append(reducing, decision)
 		}
+	}
+	if len(reducing) > 0 {
+		result := executeHermesReducingBatch(ctx, cfg, db, plan, decisionID, reducing, open, positions, filters, placer, dataHealth, reconcile, risk, dryRun)
+		return result, true
 	}
 	desired, blocked := liveguard.BuildHermesDesiredOrders(cfg, plan, decisionID, true, safety, filters)
 	if len(desired) == 0 {
@@ -137,3 +136,45 @@ func maxFloat(a, b float64) float64 {
 
 var _ = fmt.Sprintf
 var _ hermesoperator.Decision
+
+// executeHermesReducingBatch executes all validated risk-reducing actions in
+// one cycle. Mixed decisions intentionally reduce first; exposure increases are
+// deferred until the next fresh Hermes decision.
+func executeHermesReducingBatch(ctx context.Context, cfg config.Config, db *storage.DB, plan agent2.Plan, decisionID string, decisions []liveguard.HermesActionDecision, open []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, placer liveguard.OrderPlacer, dataHealth liveguard.DataHealthResult, reconcile liveguard.ReconcileSafetyResult, risk liveguard.RiskGovernorResult, dryRun bool) liveguard.ManagedCycleResult {
+	out := liveguard.ManagedCycleResult{GeneratedAt: time.Now(), Status: liveguard.ManagedCycleCompleted, PlanState: plan.State, DryRun: dryRun}
+	owned, ownedErr := db.HermesOwnedPositions()
+	for _, decision := range decisions {
+		var one liveguard.ManagedCycleResult
+		switch decision.Action.Intent {
+		case hermesoperator.IntentCancel:
+			canceler, _ := placer.(liveguard.OrderCanceler)
+			statusReader, _ := placer.(liveguard.OrderStatusReader)
+			one = liveguard.ExecuteHermesCancelActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, open, canceler, statusReader, db, dryRun)
+		case hermesoperator.IntentReduce:
+			if ownedErr != nil {
+				one = blockedHermesCycle(plan, dryRun, "Hermes owned-position ledger unavailable")
+			} else {
+				one = liveguard.ExecuteHermesReduceActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, placer, db, dryRun)
+			}
+		case hermesoperator.IntentExitLimit:
+			if ownedErr != nil {
+				one = blockedHermesCycle(plan, dryRun, "Hermes owned-position ledger unavailable")
+			} else {
+				one = liveguard.ExecuteHermesExitLimitActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, placer, db, dryRun)
+			}
+		}
+		out.Desired = append(out.Desired, one.Desired...)
+		out.Canceled = append(out.Canceled, one.Canceled...)
+		out.Placed = append(out.Placed, one.Placed...)
+		out.Blocked = append(out.Blocked, one.Blocked...)
+		out.Reasons = append(out.Reasons, one.Reasons...)
+	}
+	if dryRun {
+		out.Status = liveguard.ManagedCycleDryRun
+	} else if len(out.Blocked) > 0 {
+		out.Status = liveguard.ManagedCyclePartial
+	}
+	out.DataHealth, out.ReconcileSafety, out.RiskGovernor = dataHealth, reconcile, risk
+	out.Summary = fmt.Sprintf("HERMES_REDUCE_BATCH: actions=%d canceled=%d placed=%d blocked=%d", len(decisions), len(out.Canceled), len(out.Placed), len(out.Blocked))
+	return out
+}

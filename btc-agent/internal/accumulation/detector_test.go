@@ -75,7 +75,7 @@ func TestAnalyzeLowDataDoesNotConfirm(t *testing.T) {
 	}
 }
 
-func TestApplyMMFootprintUpgradesMarkdownToAbsorption(t *testing.T) {
+func TestApplyMMFootprintPossibleDoesNotPromote(t *testing.T) {
 	r := Result{
 		Phase:       PhaseMarkdown,
 		Score:       25,
@@ -88,8 +88,8 @@ func TestApplyMMFootprintUpgradesMarkdownToAbsorption(t *testing.T) {
 		BidSupportStreak:   5,
 	}
 	applyMMFootprint(&r, fp)
-	if r.Phase != PhaseAbsorption {
-		t.Fatalf("expected %s, got %s", PhaseAbsorption, r.Phase)
+	if r.Phase != PhaseMarkdown {
+		t.Fatalf("expected %s, got %s", PhaseMarkdown, r.Phase)
 	}
 	if r.Score != 37 {
 		t.Fatalf("expected score 37, got %.1f", r.Score)
@@ -119,5 +119,16 @@ func TestApplyMMFootprintDoesNotOverrideHardBlock(t *testing.T) {
 	}
 	if r.Score != 25 {
 		t.Fatalf("hard block score changed: got %.1f", r.Score)
+	}
+}
+
+func TestApplyMMFootprintAccumulatingPromotes(t *testing.T) {
+	r := Result{Phase: PhaseMarkdown, Score: 25, DataQuality: 1}
+	applyMMFootprint(&r, MMFootprint{Verdict: "MM_ACCUMULATING", FootprintScore: .8, CVDPriceDivergence: true, TakerBuyAnomaly: true, BidSupportStreak: 4})
+	if r.Phase != PhaseAbsorption {
+		t.Fatalf("expected absorption, got %s", r.Phase)
+	}
+	if r.Score != 45 {
+		t.Fatalf("expected 45, got %.1f", r.Score)
 	}
 }

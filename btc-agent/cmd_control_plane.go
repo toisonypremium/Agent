@@ -132,7 +132,7 @@ func readControlPlaneProposal(cfg config.Config, args []string) (hermesoperator.
 	for _, symbol := range cfg.Data.Symbols.Assets {
 		allowed[symbol] = true
 	}
-	result := hermesoperator.Validate(decision, hermesoperator.ValidationPolicy{Now: time.Now().UTC(), MaxDecisionTTL: time.Duration(cfg.HermesOperator.DecisionTTLSeconds) * time.Second, MinConfidence: cfg.HermesOperator.MinConfidence, MaxActions: cfg.HermesOperator.MaxActionsPerCycle, MaxProbeNotionalUSDT: cfg.HermesOperator.MaxProbeNotionalUSDT, MaxActionNotionalUSDT: cfg.HermesOperator.MaxActionNotionalUSDT, AllowedSymbols: allowed})
+	result := hermesoperator.Validate(decision, hermesoperator.ValidationPolicy{Now: time.Now().UTC(), MaxDecisionTTL: time.Duration(cfg.HermesOperator.DecisionTTLSeconds) * time.Second, MinConfidence: cfg.HermesOperator.MinConfidence, MaxActions: cfg.HermesOperator.MaxActionsPerCycle, MaxProbeNotionalUSDT: config.EffectiveHermesProbeNotional(cfg), MaxActionNotionalUSDT: config.EffectiveHermesActionNotional(cfg), AllowedSymbols: allowed})
 	return decision, b, result, nil
 }
 

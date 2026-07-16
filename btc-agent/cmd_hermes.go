@@ -112,7 +112,7 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 		OperatorHalted:             snap.OperatorHalted,
 		DataHealthy:                snap.DoctorStatus == "DOCTOR_OK" || snap.DoctorStatus == "OK",
 		ReconcileClean:             snap.AuditVerdict != "DOCTOR_BLOCK",
-		OKXReady:                   snap.AuditVerdict == "APPROVED_REAL_ORDER" || snap.AuditVerdict == "APPROVED_DRY_RUN",
+		OKXReady:                   snap.DoctorStatus == "DOCTOR_OK" || snap.DoctorStatus == "OK",
 		PanicSelling:               strings.EqualFold(snap.BTCRegime, "PANIC_SELLING"),
 		PortfolioNotionalRemaining: config.EffectiveHermesPortfolioExposure(cfg),
 		AssetNotionalRemaining:     assetAllowance,

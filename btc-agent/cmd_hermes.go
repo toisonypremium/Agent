@@ -13,6 +13,7 @@ import (
 
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
+	"btc-agent/internal/freeapi"
 	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
@@ -34,6 +35,15 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		log.Printf("[Hermes] freshness warning: %v", err)
 	}
 	snap := buildHermesSnapshotWithTrigger(cfg, trigger)
+	if cfg.FreeAPI.Enabled {
+		apiCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+		report := freeapi.New(cfg).Run(apiCtx)
+		cancel()
+		if err := freeapi.Save(report, "reports"); err != nil {
+			log.Printf("[Hermes] free API report save warning: %v", err)
+		}
+		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f fear_greed=%d/%s eurusd=%.5f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, len(report.News), strings.Join(report.Missing, ","))
+	}
 	if plan, err := db.LatestPlan(); err == nil {
 		enrichHermesAssetsFromPlan(&snap, plan)
 	}

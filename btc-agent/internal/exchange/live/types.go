@@ -4,6 +4,25 @@ package live
 // Real order placement is not implemented here; liveguard builds a candidate
 // and reports readiness without calling an exchange order endpoint.
 
+type TradeFill struct {
+	InstID      string  `json:"inst_id"`
+	TradeID     string  `json:"trade_id"`
+	OrderID     string  `json:"order_id"`
+	Side        string  `json:"side"`
+	Price       float64 `json:"price"`
+	Quantity    float64 `json:"quantity"`
+	Fee         float64 `json:"fee"`
+	FeeCurrency string  `json:"fee_currency"`
+	Timestamp   int64   `json:"timestamp"`
+}
+
+type InventoryBasis struct {
+	Quantity float64
+	Cost     float64
+	AvgPrice float64
+	Complete bool
+}
+
 type Balance struct {
 	Asset    string  `json:"asset"`
 	Free     float64 `json:"free"`

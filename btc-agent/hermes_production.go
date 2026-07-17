@@ -74,7 +74,11 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if fp, ok := analysis.Microstructure.MMFootprint[strings.ToUpper(cfg.Data.Symbols.BTC)]; ok {
 		mmConfidence = fp.FootprintScore
 	}
-	utilization := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: cfg.Portfolio.TotalCapital, ExistingExposure: openExposure, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(cfg), MarketRegime: analysis.MarketRegime, AccumulationPhase: string(analysis.BTCAccumulation.Phase), PanicSelling: analysis.MarketRegime == "PANIC_SELLING"})
+	riskCfg := cfg
+	if eq, ee := db.EquityRiskState(); ee == nil && eq.CurrentEquity > 0 {
+		riskCfg.Portfolio.TotalCapital = eq.CurrentEquity
+	}
+	utilization := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: riskCfg.Portfolio.TotalCapital, ExistingExposure: openExposure, ReserveCashRatio: riskCfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(riskCfg), MarketRegime: analysis.MarketRegime, AccumulationPhase: string(analysis.BTCAccumulation.Phase), PanicSelling: analysis.MarketRegime == "PANIC_SELLING"})
 	liquidityQuality := map[string]float64{}
 	for _, asset := range plan.Assets {
 		q := 0.5
@@ -87,12 +91,12 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		OperatorHalted: halted || haltErr != nil, DataHealthy: dataHealth.Status != liveguard.DataHealthBlock,
 		ReconcileClean: reconcile.Status != liveguard.ReconcileBlock, OKXReady: placer != nil,
 		PanicSelling:               analysis.MarketRegime == "PANIC_SELLING",
-		PortfolioNotionalRemaining: math.Min(maxFloat(0, config.EffectiveLiveNotionalTotal(cfg)-openExposure), utilization.AvailableDeploymentUSDT),
+		PortfolioNotionalRemaining: math.Min(maxFloat(0, config.EffectiveLiveNotionalTotal(riskCfg)-openExposure), utilization.AvailableDeploymentUSDT),
 		AssetNotionalRemaining:     assetRemaining, Autonomous: cfg.HermesOperator.NormalizedMode() == "autonomous",
-		TotalCapital: cfg.Portfolio.TotalCapital, AccumulationPhase: string(analysis.BTCAccumulation.Phase),
+		TotalCapital: riskCfg.Portfolio.TotalCapital, AccumulationPhase: string(analysis.BTCAccumulation.Phase),
 		MarketRegime: analysis.MarketRegime, TrendScore: analysis.TrendScore, MMConfidence: mmConfidence,
 		DataQuality: analysis.BTCAccumulation.DataQuality, LiquidityQuality: liquidityQuality,
-		PerOrderCap: config.EffectiveLiveNotionalPerOrder(cfg),
+		PerOrderCap: config.EffectiveLiveNotionalPerOrder(riskCfg),
 	})
 	if cfg.HermesOperator.NormalizedMode() == "canary" && len(safety) > 1 {
 		safety = safety[:1]

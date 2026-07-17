@@ -127,6 +127,9 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if lookbackDays <= 0 {
 		lookbackDays = 90
 	}
+	if cfg.Risk.HermesVolatilityLookbackDays > lookbackDays {
+		lookbackDays = cfg.Risk.HermesVolatilityLookbackDays
+	}
 	for _, symbol := range cfg.Data.Symbols.Assets {
 		candles, err := db.LoadCandles(symbol, "1d", lookbackDays+1)
 		if err != nil {
@@ -170,6 +173,21 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 			if !assetLockUntil.IsZero() && time.Now().Before(assetLockUntil) {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes low-profit asset protection active for %s until %s (samples=%d expectancy=%.2f%% win_rate=%.1f%%)", decision.Action.Symbol, assetLockUntil.UTC().Format(time.RFC3339), perf.ClosedFills, perf.Expectancy*100, perf.WinRate*100))
+			}
+			if cfg.Risk.HermesVolatilityTargetAnnualPct > 0 {
+				if correlationDataErr != nil {
+					decision.Allowed = false
+					decision.Reasons = append(decision.Reasons, "Hermes volatility history unavailable")
+				} else {
+					vol := liveguard.EvaluateVolatilityTarget(liveguard.VolatilityTargetInput{RequestedNotional: decision.Action.RequestedNotionalUSDT, Candles: correlationCandles[strings.ToUpper(decision.Action.Symbol)], TargetAnnualVol: cfg.Risk.HermesVolatilityTargetAnnualPct, MinMultiplier: cfg.Risk.HermesVolatilityMinMultiplier, MaxMultiplier: 1, MinObservations: cfg.Risk.HermesVolatilityMinSamples})
+					if !vol.Allowed {
+						decision.Allowed = false
+						decision.Reasons = append(decision.Reasons, vol.Reasons...)
+					} else if vol.AdjustedNotional < decision.Action.RequestedNotionalUSDT {
+						decision.Action.RequestedNotionalUSDT = vol.AdjustedNotional
+						decision.Reasons = append(decision.Reasons, fmt.Sprintf("volatility targeting reduced order to %.2f USDT (annualized %.1f%%, multiplier %.2f)", vol.AdjustedNotional, vol.AnnualizedVol*100, vol.Multiplier))
+					}
+				}
 			}
 			if cfg.Risk.HermesCorrelationClusterCapPct > 0 {
 				if correlationDataErr != nil {

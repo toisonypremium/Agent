@@ -126,7 +126,22 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 				}
 			}
 		}
-		if positions, posErr := db.LivePositions(); posErr == nil && len(positions) > 0 {
+		positions, posErr := db.LivePositions()
+		if posErr == nil {
+			activeSymbols := map[string]bool{}
+			for _, p := range positions {
+				if p.Quantity > 0 {
+					activeSymbols[strings.ToUpper(p.Symbol)] = true
+				}
+			}
+			for sym := range state.PeakTracker.PeakBySymbol {
+				if !activeSymbols[sym] {
+					delete(state.PeakTracker.PeakBySymbol, sym)
+					delete(state.PeakTracker.TrailActive, sym)
+				}
+			}
+		}
+		if posErr == nil && len(positions) > 0 {
 			currentPrices := buildCurrentPricesFromDB(cfg, db)
 			exits := liveguard.EvaluateExits(cfg, positions, currentPrices, state.PeakTracker)
 			result.Exits = exits
@@ -152,6 +167,9 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 					result.Reasons = append(result.Reasons, "exit signal: "+ex.Symbol+" → "+string(ex.Action)+": "+ex.Reason)
 				}
 			}
+		}
+		if posErr == nil && len(positions) == 0 {
+			_ = db.SaveExitPeakStates(nil)
 		}
 	}
 

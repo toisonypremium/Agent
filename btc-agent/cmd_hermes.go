@@ -45,7 +45,7 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f fear_greed=%d/%s eurusd=%.5f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, len(report.News), strings.Join(report.Missing, ","))
 	}
 	if plan, err := db.LatestPlan(); err == nil {
-		enrichHermesAssetsFromPlan(cfg, &snap, plan)
+		enrichHermesAssetsFromPlan(cfg, db, &snap, plan)
 	}
 	caller := hermesCallerFromConfig(cfg)
 	narrativeStarted := time.Now()
@@ -95,7 +95,7 @@ func runHermesDecisionCycle(ctx context.Context, cfg config.Config, db *storage.
 	}
 	snap := buildHermesSnapshotWithTrigger(cfg, trigger)
 	if plan, err := db.LatestPlan(); err == nil {
-		enrichHermesAssetsFromPlan(cfg, &snap, plan)
+		enrichHermesAssetsFromPlan(cfg, db, &snap, plan)
 	}
 	return runHermesShadowDecision(ctx, cfg, snap, hermesCallerFromConfig(cfg), trigger)
 }
@@ -108,8 +108,14 @@ func logHermesLLMCall(purpose string, trigger hermesagent.HermesTrigger, started
 	log.Printf("[LLM_USAGE] purpose=%s trigger=%s/%s status=%s latency_ms=%d", purpose, trigger.Source, trigger.Reason, status, time.Since(started).Milliseconds())
 }
 
-func enrichHermesAssetsFromPlan(cfg config.Config, snap *hermesagent.HermesSnapshot, plan agent2.Plan) {
+func enrichHermesAssetsFromPlan(cfg config.Config, db *storage.DB, snap *hermesagent.HermesSnapshot, plan agent2.Plan) {
 	bySymbol := map[string]agent2.AssetPlan{}
+	performance := storage.HermesLossProtection{BySymbol: map[string]storage.HermesAssetPerformance{}}
+	if db != nil {
+		if p, err := db.HermesLossProtectionSnapshot(time.Unix(0, 0)); err == nil {
+			performance = p
+		}
+	}
 	for _, asset := range plan.Assets {
 		bySymbol[strings.ToUpper(asset.Symbol)] = asset
 	}
@@ -147,6 +153,8 @@ func enrichHermesAssetsFromPlan(cfg config.Config, snap *hermesagent.HermesSnaps
 		} else {
 			snap.Assets[i].ProbePolicy = "HOLD until deterministic probe envelope is valid"
 		}
+		perf := performance.BySymbol[strings.ToUpper(asset.Symbol)]
+		snap.Assets[i].QuantReasoning = hermesoperator.ComputeQuantReasoning(hermesoperator.QuantReasoningInput{Symbol: asset.Symbol, ProbeEligible: probeEligible, SetupScore: asset.SetupScore, MMScore: asset.MMScore, FlowScore: asset.AssetFlowScore, RotationScore: asset.RotationScore, LiquidityScore: asset.LiquidityQuality.Score, RewardRisk: asset.RewardRisk, EntryPrice: asset.RewardRiskDetail.Entry, Invalidation: asset.Invalidation, Target: target, MarketRegime: snap.BTCRegime, AccumulationPhase: snap.BTCPhase, DataQuality: snap.BTCMMDataQuality, HistoricalTrades: perf.ClosedFills, HistoricalWins: perf.WinningFills, HistoricalExpectancy: perf.Expectancy, TotalCapital: cfg.Portfolio.TotalCapital, MaxProbeCapitalPct: cfg.HermesOperator.MaxProbeNotionalPct, MaxProbeNotional: config.EffectiveHermesProbeNotional(cfg)})
 	}
 }
 

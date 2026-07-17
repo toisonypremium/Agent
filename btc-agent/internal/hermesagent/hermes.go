@@ -77,6 +77,7 @@ type HermesAsset struct {
 	NextTrigger    string   `json:"next_trigger,omitempty"`
 	ProbeEligible  bool     `json:"probe_eligible"`
 	ProbePolicy    string   `json:"probe_policy,omitempty"`
+	QuantReasoning any      `json:"quant_reasoning,omitempty"`
 }
 
 type HermesExit struct {

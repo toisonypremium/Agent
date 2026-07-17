@@ -174,10 +174,23 @@ func applyBTCGateToAsset(cfg config.Config, a agent1.MarketAnalysis, ap AssetPla
 			a.MarketRegime != "PANIC_SELLING" &&
 			a.FomoRisk != agent1.High &&
 			ap.RewardRisk >= cfg.Risk.ExceptionalRRBypassFallingKnife {
+			// Exceptional RR demotes falling-knife from a blanket asset hard block
+			// to a probe-only strategy constraint. Deterministic planner layers stay
+			// empty: only Hermes may request a confidence-sized PROBE_LIMIT, which
+			// must still pass price, liquidity, lifecycle, volatility, correlation,
+			// account, data and reconcile guards. OPEN/SCALE remain unavailable.
+			for i := range ap.Reasons {
+				if ap.Reasons[i].Code == ReasonFallingKnife {
+					ap.Reasons[i].Severity = ReasonSoftWait
+					ap.Reasons[i].Message = "BTC falling knife high: exceptional-RR probe only; reduce size and require deterministic confirmations"
+				}
+			}
+			ap.HardBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonHardBlock))
+			ap.SoftBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonSoftWait))
 			ap.State = StateScout
 			ap.Layers = nil
-			ap.Reason = fmt.Sprintf("exceptional RR %.2f >= %.1f: falling knife SCOUT, khong tao lenh", ap.RewardRisk, cfg.Risk.ExceptionalRRBypassFallingKnife)
-			ap.NextTrigger = "Exceptional RR bypass: theo doi entry tot hon; khong tao lenh den khi BTC het falling knife."
+			ap.Reason = fmt.Sprintf("exceptional RR %.2f >= %.1f: Hermes PROBE_LIMIT eligible, OPEN/SCALE blocked while falling knife is high", ap.RewardRisk, cfg.Risk.ExceptionalRRBypassFallingKnife)
+			ap.NextTrigger = "Hermes có thể mua thăm dò tỷ trọng nhỏ trong discount zone nếu giá, thanh khoản và xác nhận deterministic cùng đạt; không OPEN/SCALE đến khi BTC hết falling knife."
 			return ap
 		}
 		ap.State = StateNoTrade

@@ -106,12 +106,28 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		}
 	}
 	lastExitAt, lastExitErr := db.HermesLastExitAtBySymbol()
+	lossLookback := time.Duration(cfg.Risk.HermesLossLookbackHours) * time.Hour
+	if lossLookback <= 0 {
+		lossLookback = 7 * 24 * time.Hour
+	}
+	lossProtection, lossProtectionErr := db.HermesLossProtectionSnapshot(time.Now().Add(-lossLookback))
+	lossLockUntil := time.Time{}
+	if cfg.Risk.HermesMaxConsecutiveLosses > 0 && lossProtection.ConsecutiveLosses >= cfg.Risk.HermesMaxConsecutiveLosses {
+		lossLockUntil = lossProtection.LastLossAt.Add(time.Duration(cfg.Risk.HermesLossLockMinutes) * time.Minute)
+	}
 	filteredSafety := make([]liveguard.HermesActionDecision, 0, len(safety))
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.IncreasesExposure() {
 			if lastExitErr != nil {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, "Hermes exit history unavailable")
+			}
+			if lossProtectionErr != nil {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, "Hermes loss history unavailable")
+			} else if !lossLockUntil.IsZero() && time.Now().Before(lossLockUntil) {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes loss-streak protection active until %s", lossLockUntil.UTC().Format(time.RFC3339)))
 			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)

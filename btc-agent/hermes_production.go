@@ -15,6 +15,7 @@ import (
 	"btc-agent/internal/exchange/live"
 	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/market"
 	"btc-agent/internal/storage"
 )
 
@@ -120,6 +121,29 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if drawdownCap > 0 && lossProtection.MaxDrawdown >= drawdownCap && !lossProtection.LastCloseAt.IsZero() {
 		drawdownLockUntil = lossProtection.LastCloseAt.Add(time.Duration(cfg.Risk.HermesDrawdownLockMinutes) * time.Minute)
 	}
+	correlationCandles := map[string][]market.Candle{}
+	correlationDataErr := error(nil)
+	lookbackDays := cfg.Risk.HermesCorrelationLookbackDays
+	if lookbackDays <= 0 {
+		lookbackDays = 90
+	}
+	for _, symbol := range cfg.Data.Symbols.Assets {
+		candles, err := db.LoadCandles(symbol, "1d", lookbackDays+1)
+		if err != nil {
+			correlationDataErr = err
+			break
+		}
+		correlationCandles[strings.ToUpper(symbol)] = candles
+	}
+	correlationExposure := map[string]float64{}
+	for symbol, exposure := range assetExposure {
+		correlationExposure[strings.ToUpper(symbol)] += exposure
+	}
+	for _, order := range open {
+		if strings.EqualFold(order.Side, "BUY") && live.IsOpenStatus(order.Status) {
+			correlationExposure[strings.ToUpper(order.Symbol)] += order.Notional
+		}
+	}
 	filteredSafety := make([]liveguard.HermesActionDecision, 0, len(safety))
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.IncreasesExposure() {
@@ -146,6 +170,21 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 			if !assetLockUntil.IsZero() && time.Now().Before(assetLockUntil) {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes low-profit asset protection active for %s until %s (samples=%d expectancy=%.2f%% win_rate=%.1f%%)", decision.Action.Symbol, assetLockUntil.UTC().Format(time.RFC3339), perf.ClosedFills, perf.Expectancy*100, perf.WinRate*100))
+			}
+			if cfg.Risk.HermesCorrelationClusterCapPct > 0 {
+				if correlationDataErr != nil {
+					decision.Allowed = false
+					decision.Reasons = append(decision.Reasons, "Hermes correlation history unavailable")
+				} else {
+					corr := liveguard.EvaluateCorrelationBudget(liveguard.CorrelationBudgetInput{Symbol: decision.Action.Symbol, RequestedNotional: decision.Action.RequestedNotionalUSDT, ExistingExposure: correlationExposure, Candles: correlationCandles, Threshold: cfg.Risk.HermesCorrelationThreshold, ClusterCap: cfg.Portfolio.TotalCapital * cfg.Risk.HermesCorrelationClusterCapPct, MinObservations: cfg.Risk.HermesCorrelationMinSamples})
+					if !corr.Allowed {
+						decision.Allowed = false
+						decision.Reasons = append(decision.Reasons, corr.Reasons...)
+					} else if corr.AdjustedNotional < decision.Action.RequestedNotionalUSDT {
+						decision.Action.RequestedNotionalUSDT = corr.AdjustedNotional
+						decision.Reasons = append(decision.Reasons, fmt.Sprintf("correlation cluster budget limited order to %.2f USDT", corr.AdjustedNotional))
+					}
+				}
 			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)

@@ -101,6 +101,10 @@ type Config struct {
 		HermesLowProfitMinExpectancyPct float64 `yaml:"hermes_low_profit_min_expectancy_pct"`
 		HermesLowProfitMinWinRate       float64 `yaml:"hermes_low_profit_min_win_rate"`
 		HermesLowProfitLockMinutes      int     `yaml:"hermes_low_profit_lock_minutes"`
+		HermesCorrelationThreshold      float64 `yaml:"hermes_correlation_threshold"`
+		HermesCorrelationClusterCapPct  float64 `yaml:"hermes_correlation_cluster_cap_pct"`
+		HermesCorrelationLookbackDays   int     `yaml:"hermes_correlation_lookback_days"`
+		HermesCorrelationMinSamples     int     `yaml:"hermes_correlation_min_samples"`
 		NoFutures                       bool    `yaml:"no_futures"`
 		NoLeverage                      bool    `yaml:"no_leverage"`
 		SpotLimitOnly                   bool    `yaml:"spot_limit_only"`
@@ -627,6 +631,9 @@ func (c Config) Validate() error {
 	}
 	if c.Risk.HermesLowProfitMinWinRate < 0 || c.Risk.HermesLowProfitMinWinRate > 1 {
 		return errors.New("risk.hermes_low_profit_min_win_rate must be between 0 and 1")
+	}
+	if c.Risk.HermesCorrelationThreshold < 0 || c.Risk.HermesCorrelationThreshold > 1 || c.Risk.HermesCorrelationClusterCapPct < 0 || c.Risk.HermesCorrelationClusterCapPct > 1 || c.Risk.HermesCorrelationLookbackDays < 0 || c.Risk.HermesCorrelationMinSamples < 0 {
+		return errors.New("risk Hermes correlation protection values invalid")
 	}
 	if c.Data.BinanceBaseURL == "" || c.Data.Symbols.BTC == "" || len(c.Data.Symbols.Assets) == 0 || len(c.Data.Intervals) == 0 {
 		return errors.New("data source/symbols/intervals required")

@@ -45,6 +45,7 @@ func RunMonteCarloRobustness(w WalkForwardReport, iterations int, seed int64) (M
 	if len(samples) < 3 {
 		return MonteCarloReport{}, fmt.Errorf("not enough out-of-sample PnL observations; need 3 got %d", len(samples))
 	}
+	sort.Float64s(samples)
 	rng := rand.New(rand.NewSource(seed))
 	finals := make([]float64, iterations)
 	dds := make([]float64, iterations)

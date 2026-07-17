@@ -266,15 +266,57 @@ func parseOrderBook(data []byte) (liquidity.OrderBookSnapshot, error) {
 	return book, nil
 }
 
+const maxSpotFillHistoryPages = 20
+
 func (c *OKXClient) SpotFillHistory(ctx context.Context, instID string) ([]TradeFill, error) {
 	if instID == "" {
 		return nil, fmt.Errorf("instID required")
 	}
-	requestPath := "/api/v5/trade/fills-history?instType=SPOT&instId=" + url.QueryEscape(instID) + "&limit=100"
-	data, err := c.signedGet(ctx, requestPath)
-	if err != nil {
-		return nil, err
+	out := []TradeFill{}
+	seen := map[string]bool{}
+	after := ""
+	for page := 0; page < maxSpotFillHistoryPages; page++ {
+		requestPath := "/api/v5/trade/fills-history?instType=SPOT&instId=" + url.QueryEscape(instID) + "&limit=100"
+		if after != "" {
+			requestPath += "&after=" + url.QueryEscape(after)
+		}
+		data, err := c.signedGet(ctx, requestPath)
+		if err != nil {
+			return nil, err
+		}
+		fills, err := parseOKXTradeFills(data)
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range fills {
+			key := f.TradeID
+			if key == "" {
+				key = f.OrderID + "/" + strconv.FormatInt(f.Timestamp, 10) + "/" + formatNumber(f.Quantity)
+			}
+			if !seen[key] {
+				seen[key] = true
+				out = append(out, f)
+			}
+		}
+		if len(fills) < 100 {
+			break
+		}
+		next := fills[len(fills)-1].TradeID
+		if next == "" || next == after {
+			break
+		}
+		after = next
 	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Timestamp == out[j].Timestamp {
+			return out[i].TradeID < out[j].TradeID
+		}
+		return out[i].Timestamp < out[j].Timestamp
+	})
+	return out, nil
+}
+
+func parseOKXTradeFills(data []byte) ([]TradeFill, error) {
 	var raw struct {
 		Code string `json:"code"`
 		Msg  string `json:"msg"`
@@ -290,7 +332,7 @@ func (c *OKXClient) SpotFillHistory(ctx context.Context, instID string) ([]Trade
 			Ts      string `json:"ts"`
 		} `json:"data"`
 	}
-	if err = json.Unmarshal(data, &raw); err != nil {
+	if err := json.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("okx fill history decode failed: %w", err)
 	}
 	if raw.Code != "0" {
@@ -301,7 +343,6 @@ func (c *OKXClient) SpotFillHistory(ctx context.Context, instID string) ([]Trade
 		ts, _ := strconv.ParseInt(x.Ts, 10, 64)
 		out = append(out, TradeFill{InstID: x.InstID, TradeID: x.TradeID, OrderID: x.OrderID, Side: strings.ToUpper(x.Side), Price: firstParseFloat(x.FillPx), Quantity: firstParseFloat(x.FillSz), Fee: firstParseFloat(x.Fee), FeeCurrency: strings.ToUpper(x.FeeCcy), Timestamp: normalizeOKXUnixTime(ts)})
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
 	return out, nil
 }
 

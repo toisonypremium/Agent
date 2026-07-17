@@ -122,13 +122,13 @@ blocked may explain gates
 
 ## Exit manager status
 
-Exit automation added, report-only by default:
+Exit automation production status:
 
 ```text
-ExitConfig.Enabled=false (default)
+Production config ExitConfig.Enabled=true
 EvaluateExits wired into supervisor cycle
 ExitActions: HOLD / TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL
-PlaceSellLimitOrder: exists, not auto-called (operator must enable and wire)
+Autonomous exits route through ExecuteHermesReduceActionsWithOpen/ExecuteHermesExitLimitActionsWithOpen; spot limit SELL only
 OpenedAt tracked on LivePosition for accurate time-stop
 PeakTracker persists in-memory across supervisor cycles
 ```
@@ -137,7 +137,7 @@ To enable exit automation, set in config.yaml:
 
 ```yaml
 exit:
-  enabled: false              # keep false until operator review
+  enabled: true               # production; ownership/no-short/reconcile gated
   take_profit_pct: 0.30
   partial_exit_pct: 0.50
   trailing_activate_pct: 0.20

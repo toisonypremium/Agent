@@ -146,6 +146,12 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			_, _ = db.Exec(`INSERT INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('capital_utilization',?,?) ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at,payload_json=excluded.payload_json`, time.Now().Unix(), string(b))
 		}
 	}
+	telemetry, telemetryErr := collectExecutionTelemetry(ctx, cfg, db, time.Now())
+	if telemetryErr != nil {
+		result.Reasons = append(result.Reasons, "execution telemetry: "+telemetryErr.Error())
+	} else if telemetry.Status != "TELEMETRY_OK" {
+		result.Reasons = append(result.Reasons, telemetry.Summary)
+	}
 	if measured, e := db.UpdateExecutionMarkouts(time.Now()); e != nil {
 		result.Reasons = append(result.Reasons, "execution markouts: "+e.Error())
 	} else if measured > 0 {

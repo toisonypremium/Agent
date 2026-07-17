@@ -81,3 +81,71 @@ func (d *DB) ExecutionMarkoutSummary() string {
 	_ = d.QueryRow(`SELECT COUNT(*),COALESCE(AVG(markout_pct),0) FROM execution_markouts`).Scan(&n, &avg)
 	return fmt.Sprintf("markouts=%d avg=%.3f%%", n, avg*100)
 }
+
+// PendingMarkoutWindow identifies the minimum candle range needed to finish
+// immutable 1m/5m/15m/60m markouts for one owned fill event.
+type PendingMarkoutWindow struct {
+	Symbol string
+	From   time.Time
+	To     time.Time
+}
+
+func (d *DB) PendingExecutionMarkoutWindows(now time.Time) ([]PendingMarkoutWindow, error) {
+	rows, err := d.Query(`SELECT e.id,e.timestamp,UPPER(e.symbol)
+		FROM live_position_events e JOIN live_orders o ON o.client_order_id=e.client_order_id
+		WHERE o.source='HERMES_OPERATOR' ORDER BY e.id`)
+	if err != nil {
+		return nil, err
+	}
+	type event struct {
+		id, ts int64
+		symbol string
+	}
+	events := []event{}
+	for rows.Next() {
+		var e event
+		if err := rows.Scan(&e.id, &e.ts, &e.symbol); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		events = append(events, e)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	out := []PendingMarkoutWindow{}
+	for _, e := range events {
+		var count int
+		if err := d.QueryRow(`SELECT COUNT(*) FROM execution_markouts WHERE event_id=?`, e.id).Scan(&count); err != nil {
+			return nil, err
+		}
+		if count >= 4 {
+			continue
+		}
+		from := time.Unix(e.ts, 0).Add(-time.Minute)
+		to := time.Unix(e.ts, 0).Add(62 * time.Minute)
+		if to.After(now) {
+			to = now
+		}
+		if !to.Before(from) {
+			out = append(out, PendingMarkoutWindow{Symbol: e.symbol, From: from, To: to})
+		}
+	}
+	return out, nil
+}
+
+func (d *DB) LatestCandleCloseTime(symbol, interval string) (time.Time, bool, error) {
+	var ts int64
+	err := d.QueryRow(`SELECT close_time FROM candles WHERE symbol=? AND interval=? ORDER BY close_time DESC LIMIT 1`, strings.ToUpper(symbol), interval).Scan(&ts)
+	if err == sql.ErrNoRows {
+		return time.Time{}, false, nil
+	}
+	if err != nil {
+		return time.Time{}, false, err
+	}
+	return time.Unix(ts, 0), true, nil
+}

@@ -394,6 +394,10 @@ func normalizeExposure(in ExposureSnapshot) ExposureSnapshot {
 		OpenOrderNotionalUSDT: math.Max(0, finite(in.OpenOrderNotionalUSDT)),
 		Assets:                map[string]AssetExposure{},
 		Source:                strings.TrimSpace(in.Source),
+		LiveEquityUSDT:        math.Max(0, finite(in.LiveEquityUSDT)),
+		HermesTargetPct:       math.Max(0, finite(in.HermesTargetPct)),
+		HermesCapacityUSDT:    math.Max(0, finite(in.HermesCapacityUSDT)),
+		HermesCapacityState:   strings.TrimSpace(in.HermesCapacityState),
 	}
 	for symbol, value := range in.Assets {
 		out.Assets[strings.ToUpper(symbol)] = AssetExposure{

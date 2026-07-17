@@ -66,17 +66,17 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		openExposure += p.CostBasis
 		assetExposure[strings.ToUpper(p.Symbol)] += p.CostBasis
 	}
+	riskCfg := cfg
+	if eq, ee := db.EquityRiskState(); ee == nil && eq.CurrentEquity > 0 {
+		riskCfg.Portfolio.TotalCapital = eq.CurrentEquity
+	}
 	assetRemaining := map[string]float64{}
-	for _, symbol := range cfg.Data.Symbols.Assets {
-		assetRemaining[strings.ToUpper(symbol)] = maxFloat(0, config.EffectiveLiveNotionalPerAsset(cfg)-assetExposure[strings.ToUpper(symbol)])
+	for _, symbol := range riskCfg.Data.Symbols.Assets {
+		assetRemaining[strings.ToUpper(symbol)] = maxFloat(0, config.EffectiveLiveNotionalPerAsset(riskCfg)-assetExposure[strings.ToUpper(symbol)])
 	}
 	mmConfidence := 0.0
 	if fp, ok := analysis.Microstructure.MMFootprint[strings.ToUpper(cfg.Data.Symbols.BTC)]; ok {
 		mmConfidence = fp.FootprintScore
-	}
-	riskCfg := cfg
-	if eq, ee := db.EquityRiskState(); ee == nil && eq.CurrentEquity > 0 {
-		riskCfg.Portfolio.TotalCapital = eq.CurrentEquity
 	}
 	utilization := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: riskCfg.Portfolio.TotalCapital, ExistingExposure: openExposure, ReserveCashRatio: riskCfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(riskCfg), MarketRegime: analysis.MarketRegime, AccumulationPhase: string(analysis.BTCAccumulation.Phase), PanicSelling: analysis.MarketRegime == "PANIC_SELLING"})
 	liquidityQuality := map[string]float64{}

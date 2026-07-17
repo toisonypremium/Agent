@@ -197,6 +197,16 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 	if err != nil {
 		return err
 	}
+	// A malformed LLM exposure action must not become a silent HOLD when the
+	// deterministic quant brain has an explicit probe recommendation. Rebuild
+	// only quant-eligible PROBE_LIMIT actions, then run the same schema and
+	// safety validation again. Clean HOLD/WATCH decisions are preserved.
+	if len(validation.Reasons) > 0 && len(validation.Actions) == 0 {
+		if fallback, ok := deterministicHermesProbeFallback(snap, validation.Decision, policy); ok {
+			validation = hermesoperator.Validate(fallback, policy)
+			validation.Reasons = append([]string{"LLM exposure payload malformed; used deterministic quant probe fallback"}, validation.Reasons...)
+		}
+	}
 	safety := liveguard.EvaluateHermesActions(validation.Actions, liveguard.HermesSafetyContext{
 		OperatorHalted:             snap.OperatorHalted,
 		DataHealthy:                snap.DoctorStatus == "DOCTOR_OK" || snap.DoctorStatus == "OK",
@@ -210,6 +220,43 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 		MMConfidence: snap.BTCMMConfidence, DataQuality: snap.BTCMMDataQuality, PerOrderCap: config.EffectiveLiveNotionalPerOrder(cfg),
 	})
 	return saveJSONFile(hermesReportDir, "hermes_shadow_decision_latest.json", hermesShadowDecision{GeneratedAt: time.Now().UTC(), Mode: cfg.HermesOperator.NormalizedMode(), Validation: validation, Safety: safety})
+}
+
+func deterministicHermesProbeFallback(snap hermesagent.HermesSnapshot, decision hermesoperator.Decision, policy hermesoperator.ValidationPolicy) (hermesoperator.Decision, bool) {
+	if len(decision.Actions) > 0 && len(decision.Actions) > policy.MaxActions && policy.MaxActions > 0 {
+		return decision, false
+	}
+	for _, asset := range snap.Assets {
+		var q struct {
+			Eligible          bool    `json:"eligible"`
+			Recommendation    string  `json:"recommendation"`
+			Confidence        float64 `json:"confidence"`
+			SuggestedNotional float64 `json:"suggested_notional_usdt"`
+			Entry             float64 `json:"entry_price"`
+			Invalidation      float64 `json:"invalidation"`
+			Target            float64 `json:"target"`
+		}
+		b, _ := json.Marshal(asset.QuantReasoning)
+		if json.Unmarshal(b, &q) != nil || !q.Eligible || q.Recommendation != string(hermesoperator.IntentProbeLimit) {
+			continue
+		}
+		if q.Confidence < policy.MinConfidence || q.SuggestedNotional <= 0 || q.Entry <= 0 || q.Invalidation <= 0 || q.Target <= q.Entry {
+			continue
+		}
+		notional := q.SuggestedNotional
+		if policy.MaxProbeNotionalUSDT > 0 && notional > policy.MaxProbeNotionalUSDT {
+			notional = policy.MaxProbeNotionalUSDT
+		}
+		if policy.MaxActionNotionalUSDT > 0 && notional > policy.MaxActionNotionalUSDT {
+			notional = policy.MaxActionNotionalUSDT
+		}
+		if notional <= 0 {
+			continue
+		}
+		decision.Actions = []hermesoperator.Action{{Symbol: asset.Symbol, Intent: hermesoperator.IntentProbeLimit, Confidence: q.Confidence, EntryPrice: q.Entry, Invalidation: q.Invalidation, Target: q.Target, RequestedNotionalUSDT: notional, MaxLayers: 1, ReasonCodes: []string{"QUANT_BRAIN_FALLBACK", "EXCEPTIONAL_RR", "PROBE_ONLY"}}}
+		return decision, true
+	}
+	return decision, false
 }
 
 func hermesCallerFromConfig(cfg config.Config) hermesagent.JSONCaller {

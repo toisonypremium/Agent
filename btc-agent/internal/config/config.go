@@ -95,6 +95,8 @@ type Config struct {
 		HermesLossLookbackHours         int     `yaml:"hermes_loss_lookback_hours"`
 		HermesMaxConsecutiveLosses      int     `yaml:"hermes_max_consecutive_losses"`
 		HermesLossLockMinutes           int     `yaml:"hermes_loss_lock_minutes"`
+		HermesMaxRealizedDrawdownPct    float64 `yaml:"hermes_max_realized_drawdown_pct"`
+		HermesDrawdownLockMinutes       int     `yaml:"hermes_drawdown_lock_minutes"`
 		NoFutures                       bool    `yaml:"no_futures"`
 		NoLeverage                      bool    `yaml:"no_leverage"`
 		SpotLimitOnly                   bool    `yaml:"spot_limit_only"`
@@ -610,8 +612,11 @@ func (c Config) Validate() error {
 	if c.Risk.HermesReentryCooldownMinutes < 0 {
 		return errors.New("risk.hermes_reentry_cooldown_minutes cannot be negative")
 	}
-	if c.Risk.HermesLossLookbackHours < 0 || c.Risk.HermesMaxConsecutiveLosses < 0 || c.Risk.HermesLossLockMinutes < 0 {
+	if c.Risk.HermesLossLookbackHours < 0 || c.Risk.HermesMaxConsecutiveLosses < 0 || c.Risk.HermesLossLockMinutes < 0 || c.Risk.HermesDrawdownLockMinutes < 0 {
 		return errors.New("risk Hermes loss protection values cannot be negative")
+	}
+	if c.Risk.HermesMaxRealizedDrawdownPct < 0 || c.Risk.HermesMaxRealizedDrawdownPct > 1 {
+		return errors.New("risk.hermes_max_realized_drawdown_pct must be between 0 and 1")
 	}
 	if c.Data.BinanceBaseURL == "" || c.Data.Symbols.BTC == "" || len(c.Data.Symbols.Assets) == 0 || len(c.Data.Intervals) == 0 {
 		return errors.New("data source/symbols/intervals required")

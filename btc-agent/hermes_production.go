@@ -115,6 +115,11 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if cfg.Risk.HermesMaxConsecutiveLosses > 0 && lossProtection.ConsecutiveLosses >= cfg.Risk.HermesMaxConsecutiveLosses {
 		lossLockUntil = lossProtection.LastLossAt.Add(time.Duration(cfg.Risk.HermesLossLockMinutes) * time.Minute)
 	}
+	drawdownLockUntil := time.Time{}
+	drawdownCap := cfg.Portfolio.TotalCapital * cfg.Risk.HermesMaxRealizedDrawdownPct
+	if drawdownCap > 0 && lossProtection.MaxDrawdown >= drawdownCap && !lossProtection.LastCloseAt.IsZero() {
+		drawdownLockUntil = lossProtection.LastCloseAt.Add(time.Duration(cfg.Risk.HermesDrawdownLockMinutes) * time.Minute)
+	}
 	filteredSafety := make([]liveguard.HermesActionDecision, 0, len(safety))
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.IncreasesExposure() {
@@ -128,6 +133,10 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 			} else if !lossLockUntil.IsZero() && time.Now().Before(lossLockUntil) {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes loss-streak protection active until %s", lossLockUntil.UTC().Format(time.RFC3339)))
+			}
+			if !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil) {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes realized-drawdown protection active until %s (drawdown %.2f%%)", drawdownLockUntil.UTC().Format(time.RFC3339), lossProtection.MaxDrawdown/cfg.Portfolio.TotalCapital*100))
 			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)

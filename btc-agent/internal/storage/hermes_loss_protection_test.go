@@ -43,3 +43,32 @@ func TestHermesLossProtectionSnapshot(t *testing.T) {
 		t.Fatalf("profit did not reset streak: %+v", got)
 	}
 }
+
+func TestHermesLossProtectionDrawdownAndPreWindowEntry(t *testing.T) {
+	db, err := Open(t.TempDir() + "/dd.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().Unix()
+	seed := func(id, sym, side string, price float64, ts int64) {
+		_, e := db.Exec(`INSERT INTO live_orders(client_order_id,inst_id,symbol,side,type,price,quantity,notional,status,source) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, "ETH-USDT", sym, side, "limit", price, 1, price, live.StatusFilled, "HERMES_OPERATOR")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = db.SaveLivePositionEvent(live.LivePositionEvent{Timestamp: ts, ClientOrderID: id, Symbol: sym, Side: side, DeltaQuantity: 1, FillPrice: price, NotionalDelta: price, FeeCurrency: "USDT"}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	seed("b0", "ETHUSDT", "BUY", 100, now-1000)
+	seed("s0", "ETHUSDT", "SELL", 130, now-90)
+	seed("b1", "SOLUSDT", "BUY", 100, now-80)
+	seed("s1", "SOLUSDT", "SELL", 80, now-70)
+	got, e := db.HermesLossProtectionSnapshot(time.Unix(now-100, 0))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got.RollingRealizedPnL != 10 || got.PeakRealizedPnL != 30 || got.RealizedDrawdown != 20 || got.MaxDrawdown != 20 || got.ClosedSellFills != 2 {
+		t.Fatalf("bad drawdown replay: %+v", got)
+	}
+}

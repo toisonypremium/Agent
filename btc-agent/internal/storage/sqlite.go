@@ -62,6 +62,9 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS control_plane_proposals(decision_id TEXT PRIMARY KEY, caller TEXT NOT NULL, received_at INTEGER NOT NULL, payload_sha256 TEXT NOT NULL, payload_json TEXT NOT NULL, schema_verdict TEXT NOT NULL, policy_verdict TEXT NOT NULL, execution_verdict TEXT NOT NULL, reasons_json TEXT NOT NULL);`,
 		`CREATE INDEX IF NOT EXISTS idx_control_plane_proposals_received_at ON control_plane_proposals(received_at DESC);`,
 		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`,
+		`CREATE TABLE IF NOT EXISTS hermes_runtime_state(key TEXT PRIMARY KEY, updated_at INTEGER NOT NULL, payload_json TEXT NOT NULL);`,
+		`CREATE TABLE IF NOT EXISTS hermes_exit_peaks(symbol TEXT PRIMARY KEY, peak REAL NOT NULL, trail_active INTEGER NOT NULL, updated_at INTEGER NOT NULL);`,
+		`CREATE TABLE IF NOT EXISTS execution_markouts(event_id INTEGER NOT NULL, horizon_minutes INTEGER NOT NULL, mark_price REAL NOT NULL, markout_pct REAL NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(event_id,horizon_minutes));`,
 		`INSERT OR IGNORE INTO operator_settings(key, value) VALUES('halted', 'true');`}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {

@@ -295,7 +295,8 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 		}
 		return telegramCommandNext(scenario), true
 	case "/risk":
-		return renderHermesRisk(buildHermesOperationsBrief(cfg, "risk detail")), true
+		base := renderHermesRisk(buildHermesOperationsBrief(cfg, "risk detail"))
+		return base + "\n\n" + telegramProtectionStatus(cfg), true
 	case "/ask":
 		return "Dung: /ask <cau hoi cua ban>, vi du: /ask tai sao bot chua vao lenh?", true
 	case "/exits":
@@ -722,4 +723,44 @@ func loadTelegramCommandState() telegramCommandState {
 
 func saveTelegramCommandState(state telegramCommandState) error {
 	return reportio.WriteJSON("reports", "telegram_command_state.json", state)
+}
+
+func telegramProtectionStatus(cfg config.Config) string {
+	db, err := storage.Open(cfg.Storage.Path)
+	if err != nil {
+		return "Bảo vệ Hermes: chưa đọc được trạng thái."
+	}
+	defer db.Close()
+	items, err := db.ProtectionStatuses()
+	if err != nil {
+		return "Bảo vệ Hermes: chưa có trạng thái."
+	}
+	var b strings.Builder
+	b.WriteString("Bảo vệ Hermes đang hoạt động:\n")
+	active := 0
+	for _, p := range items {
+		if !p.Active {
+			continue
+		}
+		active++
+		fmt.Fprintf(&b, "- %s", p.Name)
+		if p.Symbol != "" {
+			fmt.Fprintf(&b, " (%s)", p.Symbol)
+		}
+		if !p.UnlockAt.IsZero() {
+			fmt.Fprintf(&b, " — mở lại lúc %s", p.UnlockAt.Local().Format("02/01 15:04"))
+		}
+		if p.Detail != "" {
+			fmt.Fprintf(&b, " — %s", p.Detail)
+		}
+		b.WriteString("\n")
+	}
+	if active == 0 {
+		b.WriteString("- Không có khóa tạm thời.\n")
+	}
+	if eq, e := db.EquityRiskState(); e == nil {
+		fmt.Fprintf(&b, "- Tài sản hiện tại %.2f USDT | đỉnh %.2f | giảm từ đỉnh %.2f%%\n", eq.CurrentEquity, eq.HighWaterMark, eq.DrawdownPct*100)
+	}
+	b.WriteString("- " + db.ExecutionMarkoutSummary())
+	return b.String()
 }

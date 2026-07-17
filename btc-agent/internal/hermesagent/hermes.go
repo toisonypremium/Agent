@@ -75,6 +75,8 @@ type HermesAsset struct {
 	RotationRank   int      `json:"rotation_rank,omitempty"`
 	RotationScore  float64  `json:"rotation_score,omitempty"`
 	NextTrigger    string   `json:"next_trigger,omitempty"`
+	ProbeEligible  bool     `json:"probe_eligible"`
+	ProbePolicy    string   `json:"probe_policy,omitempty"`
 }
 
 type HermesExit struct {

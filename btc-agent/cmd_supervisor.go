@@ -478,7 +478,11 @@ func updatePersistedTotalEquity(ctx context.Context, cfg config.Config, db *stor
 	}
 	for _, b := range balances {
 		if strings.EqualFold(b.Asset, "USDT") {
-			equity += b.Free
+			qty := b.Total
+			if qty <= 0 {
+				qty = b.Free
+			}
+			equity += qty
 		}
 	}
 	if equity <= 0 {
@@ -509,7 +513,11 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 	seen := map[string]bool{}
 	for _, b := range balances {
 		asset := strings.ToUpper(b.Asset)
-		if asset == "USDT" || asset == "USDC" || b.Free <= 0 {
+		accountQty := b.Total
+		if accountQty <= 0 {
+			accountQty = b.Free
+		}
+		if asset == "USDT" || asset == "USDC" || accountQty <= 0 {
 			continue
 		}
 		symbol := asset + "USDT"
@@ -521,10 +529,10 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 			dust++
 			continue
 		}
-		notional := b.Free * price
+		notional := accountQty * price
 		historyBasis := 0.0
 		if fills, fe := client.SpotFillHistory(ctx, live.OKXInstID(symbol)); fe == nil {
-			if rb := live.ReconstructInventoryBasis(fills, asset, b.Free); rb.Complete && rb.AvgPrice > 0 {
+			if rb := live.ReconstructInventoryBasis(fills, asset, accountQty); rb.Complete && rb.AvgPrice > 0 {
 				historyBasis = rb.AvgPrice
 			}
 		}
@@ -540,7 +548,7 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 			if historyBasis > 0 {
 				basis, source = historyBasis, "OKX_FILL_HISTORY_RECONSTRUCTED"
 			}
-			h = storage.HermesManagedHolding{Symbol: symbol, InstID: live.OKXInstID(symbol), Quantity: b.Free, AvgEntryPrice: basis, Source: source}
+			h = storage.HermesManagedHolding{Symbol: symbol, InstID: live.OKXInstID(symbol), Quantity: accountQty, AvgEntryPrice: basis, Source: source}
 			adopted++
 		} else {
 			newBasis := h.AvgEntryPrice
@@ -551,12 +559,12 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 				newBasis, newSource = b.AvgPrice, "OKX_ACCOUNT_AVG_PRICE"
 			}
 
-			qtyChanged := math.Abs(h.Quantity-b.Free) > math.Max(1e-12, math.Abs(h.Quantity)*1e-9)
+			qtyChanged := math.Abs(h.Quantity-accountQty) > math.Max(1e-12, math.Abs(h.Quantity)*1e-9)
 			basisChanged := math.Abs(h.AvgEntryPrice-newBasis) > math.Max(1e-12, math.Abs(h.AvgEntryPrice)*1e-9)
 			if !qtyChanged && !basisChanged {
 				continue
 			}
-			h.Quantity = b.Free
+			h.Quantity = accountQty
 			h.AvgEntryPrice = newBasis
 			h.Source = newSource
 			updated++

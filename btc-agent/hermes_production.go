@@ -105,12 +105,17 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 			openBuy[strings.ToUpper(order.Symbol)] = true
 		}
 	}
+	lastExitAt, lastExitErr := db.HermesLastExitAtBySymbol()
 	filteredSafety := make([]liveguard.HermesActionDecision, 0, len(safety))
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.IncreasesExposure() {
+			if lastExitErr != nil {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, "Hermes exit history unavailable")
+			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)
-			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)]})
+			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)], Now: time.Now(), LastExitAt: lastExitAt[strings.ToUpper(decision.Action.Symbol)], CooldownAfterExit: time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute})
 			if !lifecycle.Allowed {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, lifecycle.Reasons...)

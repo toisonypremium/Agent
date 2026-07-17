@@ -164,3 +164,25 @@ func (d *DB) HermesOwnedPositions() ([]live.LivePosition, error) {
 	}
 	return out, rows.Err()
 }
+
+// HermesLastExitAtBySymbol returns the latest persisted Hermes SELL fill per symbol.
+// It survives process restarts and is used by the strategy cooldown protection.
+func (d *DB) HermesLastExitAtBySymbol() (map[string]time.Time, error) {
+	rows, err := d.Query(`SELECT e.symbol, MAX(e.timestamp) FROM live_position_events e JOIN live_orders o ON o.client_order_id=e.client_order_id WHERE o.source='HERMES_OPERATOR' AND UPPER(e.side)='SELL' GROUP BY e.symbol`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var symbol string
+		var ts int64
+		if err := rows.Scan(&symbol, &ts); err != nil {
+			return nil, err
+		}
+		if ts > 0 {
+			out[strings.ToUpper(symbol)] = time.Unix(ts, 0)
+		}
+	}
+	return out, rows.Err()
+}

@@ -8,6 +8,7 @@ import (
 	"btc-agent/internal/market"
 	"strings"
 	"testing"
+	"time"
 )
 
 func lifecycleAsset() agent2.AssetPlan {
@@ -50,5 +51,17 @@ func TestHermesLifecycleScaleRequiresStrongConfirmation(t *testing.T) {
 	r := EvaluateHermesLifecycle(HermesLifecycleContext{Action: lifecycleAction(hermesoperator.IntentScaleLimit), Asset: a, AssetCap: 100, ExistingNotional: 30})
 	if r.Allowed || r.Confirmations >= r.Required {
 		t.Fatalf("weak scale allowed: %+v", r)
+	}
+}
+
+func TestHermesLifecycleReentryCooldown(t *testing.T) {
+	now := time.Date(2026, 7, 17, 2, 0, 0, 0, time.UTC)
+	r := EvaluateHermesLifecycle(HermesLifecycleContext{Action: lifecycleAction(hermesoperator.IntentProbeLimit), Asset: lifecycleAsset(), AssetCap: 100, Now: now, LastExitAt: now.Add(-time.Hour), CooldownAfterExit: 4 * time.Hour})
+	if r.Allowed || !strings.Contains(LifecycleReasonText(r.Reasons), "cooldown") {
+		t.Fatalf("cooldown did not block: %+v", r)
+	}
+	r = EvaluateHermesLifecycle(HermesLifecycleContext{Action: lifecycleAction(hermesoperator.IntentProbeLimit), Asset: lifecycleAsset(), AssetCap: 100, Now: now, LastExitAt: now.Add(-5 * time.Hour), CooldownAfterExit: 4 * time.Hour})
+	if !r.Allowed {
+		t.Fatalf("expired cooldown blocked: %+v", r)
 	}
 }

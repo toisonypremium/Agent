@@ -91,6 +91,7 @@ type Config struct {
 		AllowScoutInDowntrend           bool    `yaml:"allow_scout_in_downtrend"`
 		ExceptionalRRBypassFallingKnife float64 `yaml:"exceptional_rr_bypass_falling_knife"` // 0=disabled; >0 = min RR to demote falling knife hard block to SCOUT
 		DiscountZonePremiumPct          float64 `yaml:"discount_zone_premium_pct"`
+		HermesReentryCooldownMinutes    int     `yaml:"hermes_reentry_cooldown_minutes"`
 		NoFutures                       bool    `yaml:"no_futures"`
 		NoLeverage                      bool    `yaml:"no_leverage"`
 		SpotLimitOnly                   bool    `yaml:"spot_limit_only"`
@@ -602,6 +603,9 @@ func (c Config) Validate() error {
 	}
 	if c.Risk.DiscountZonePremiumPct < 0 {
 		return errors.New("risk.discount_zone_premium_pct cannot be negative")
+	}
+	if c.Risk.HermesReentryCooldownMinutes < 0 {
+		return errors.New("risk.hermes_reentry_cooldown_minutes cannot be negative")
 	}
 	if c.Data.BinanceBaseURL == "" || c.Data.Symbols.BTC == "" || len(c.Data.Symbols.Assets) == 0 || len(c.Data.Intervals) == 0 {
 		return errors.New("data source/symbols/intervals required")

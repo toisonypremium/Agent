@@ -3,6 +3,7 @@ package liveguard
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/hermesoperator"
@@ -12,11 +13,14 @@ import (
 // to enforce PROBE -> OPEN -> SCALE ordering. It complements, not replaces,
 // account/data/reconcile safety.
 type HermesLifecycleContext struct {
-	Action           hermesoperator.Action
-	Asset            agent2.AssetPlan
-	ExistingNotional float64
-	AssetCap         float64
-	HasOpenBuy       bool
+	Action            hermesoperator.Action
+	Asset             agent2.AssetPlan
+	ExistingNotional  float64
+	AssetCap          float64
+	HasOpenBuy        bool
+	Now               time.Time
+	LastExitAt        time.Time
+	CooldownAfterExit time.Duration
 }
 
 type HermesLifecycleResult struct {
@@ -33,6 +37,16 @@ func EvaluateHermesLifecycle(in HermesLifecycleContext) HermesLifecycleResult {
 		r.Allowed = true
 		return r
 	}
+	now := in.Now
+	if now.IsZero() {
+		now = time.Now()
+	}
+	if in.ExistingNotional <= 0 && in.CooldownAfterExit > 0 && !in.LastExitAt.IsZero() {
+		unlock := in.LastExitAt.Add(in.CooldownAfterExit)
+		if now.Before(unlock) {
+			r.Reasons = append(r.Reasons, fmt.Sprintf("re-entry cooldown active until %s", unlock.UTC().Format(time.RFC3339)))
+		}
+	}
 	if in.HasOpenBuy {
 		r.Reasons = append(r.Reasons, "pending buy order must resolve before next stage")
 	}
@@ -48,7 +62,6 @@ func EvaluateHermesLifecycle(in HermesLifecycleContext) HermesLifecycleResult {
 	if in.Asset.LiquidityQuality.Enabled && !in.Asset.LiquidityQuality.Pass {
 		r.Reasons = append(r.Reasons, "liquidity not safe")
 	}
-
 	confirm := 0
 	if in.Asset.MMScore >= 50 {
 		confirm++
@@ -105,5 +118,4 @@ func EvaluateHermesLifecycle(in HermesLifecycleContext) HermesLifecycleResult {
 	r.Allowed = len(r.Reasons) == 0
 	return r
 }
-
 func LifecycleReasonText(reasons []string) string { return strings.Join(reasons, "; ") }

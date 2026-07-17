@@ -187,3 +187,49 @@ func TestTelegramChunksPreferLineBoundaries(t *testing.T) {
 		t.Fatal("chunks did not preserve text")
 	}
 }
+
+func TestTelegramMenuIsCompactAndSelfHiding(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":9}}`))
+	}))
+	defer srv.Close()
+	old := telegramAPIBaseURL
+	telegramAPIBaseURL = srv.URL
+	defer func() { telegramAPIBaseURL = old }()
+	if _, err := TelegramSendMenu(context.Background(), "token", "chat", "menu"); err != nil {
+		t.Fatal(err)
+	}
+	m := body["reply_markup"].(map[string]any)
+	if m["one_time_keyboard"] != true || m["is_persistent"] != false {
+		t.Fatalf("keyboard must self-hide: %#v", m)
+	}
+	rows := m["keyboard"].([]any)
+	if len(rows) != 3 {
+		t.Fatalf("want 3 compact rows, got %d", len(rows))
+	}
+}
+
+func TestTelegramResponseRemovesKeyboard(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"ok":true,"result":{"message_id":10}}`))
+	}))
+	defer srv.Close()
+	old := telegramAPIBaseURL
+	telegramAPIBaseURL = srv.URL
+	defer func() { telegramAPIBaseURL = old }()
+	if _, err := TelegramSendAndHideKeyboard(context.Background(), "token", "chat", "đã chọn"); err != nil {
+		t.Fatal(err)
+	}
+	m := body["reply_markup"].(map[string]any)
+	if m["remove_keyboard"] != true {
+		t.Fatalf("keyboard not removed: %#v", m)
+	}
+}

@@ -116,7 +116,10 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 					result := runHermesTelegramReply(context.Background(), cfg, db, trigger)
 					telegramToken := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
 					telegramChatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
-					if err := notify.Telegram(ctx, telegramToken, telegramChatID, usertext.TelegramVietnamese(result)); err != nil {
+					if err := func() error {
+						_, e := notify.TelegramSendAndHideKeyboard(ctx, telegramToken, telegramChatID, usertext.TelegramVietnamese(result))
+						return e
+					}(); err != nil {
 						log.Printf("[TelegramCommands] hermes free-text reply error: %v", err)
 					} else {
 						log.Printf("[TelegramCommands] hermes free-text reply sent ok")
@@ -140,7 +143,10 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 				}
 				text, ok := buildReadOnlyTelegramCommandReplyWithConfig(cfg, cmd)
 				if ok {
-					if err := notify.Telegram(ctx, token, chatID, usertext.TelegramVietnamese(text)); err != nil {
+					if err := func() error {
+						_, e := notify.TelegramSendAndHideKeyboard(ctx, token, chatID, usertext.TelegramVietnamese(text))
+						return e
+					}(); err != nil {
 						log.Printf("[TelegramCommands] reply error [%s]: %v", cmd, err)
 						advance = false
 						return err
@@ -178,7 +184,7 @@ func normalizeTelegramCommand(text string) string {
 		"🗺 Kế hoạch": "/plan", "🕒 Lịch": "/schedule", "🌊 Dòng tiền": "/flow",
 		"🌐 Vĩ mô": "/macro", "🛡 Rủi ro": "/risk", "🎯 Điểm thoát": "/exits",
 		"💼 Vị thế": "/positions", "📋 Lệnh chờ": "/orders", "🧾 Nguồn dữ liệu": "/sources",
-		"⚙️ Menu": "/menu",
+		"⚙️ Menu": "/menu", "⌨️ Ẩn bàn phím": "/hide",
 	}
 	if cmd, ok := iconCommands[text]; ok {
 		return cmd
@@ -194,8 +200,12 @@ func normalizeTelegramCommand(text string) string {
 	if at := strings.Index(cmd, "@"); at >= 0 {
 		cmd = cmd[:at]
 	}
+	aliases := map[string]string{"/trangthai": "/status", "/lydo": "/why", "/kehoach": "/plan", "/lich": "/schedule", "/dongtien": "/flow", "/tienvi": "/macro", "/ruiro": "/risk", "/thoat": "/exits", "/vithe": "/positions", "/lenh": "/orders", "/coin": "/coins", "/dieukien": "/next"}
+	if translated, ok := aliases[cmd]; ok {
+		cmd = translated
+	}
 	switch cmd {
-	case "/menu", "/start", "/macro", "/sources", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
+	case "/menu", "/start", "/hide", "/anbanphim", "/trogiup", "/macro", "/sources", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -211,8 +221,10 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 	scenario, scenarioOK := loadScenarioReportFile()
 	supervisor, supervisorOK := loadLatestSupervisorReportFile()
 	switch cmd {
-	case "/help":
+	case "/help", "/trogiup":
 		return telegramCommandsHelp(), true
+	case "/hide", "/anbanphim":
+		return "Đã ẩn bàn phím. Gõ /menu khi cần mở lại.", true
 	case "/macro":
 		return telegramCommandFreeAPI(false), true
 	case "/sources":
@@ -229,25 +241,25 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 		return renderHermesFlow(buildHermesOperationsBrief(cfg, "flow detail")), true
 	case "/coins":
 		if !scenarioOK {
-			return "Chưa có scenario report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có bản đánh giá thị trường. Hãy chờ bot giám sát chạy thêm một lượt.", true
 		}
 		return telegramCommandCoins(scenario), true
 	case "/filters":
 		filterReport, ok := loadFilterAttributionReportFile()
 		if !ok {
-			return "Chưa có filter attribution report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có báo cáo các điều kiện đang chặn. Hãy chờ bot cập nhật.", true
 		}
 		return telegramCommandFilters(filterReport), true
 	case "/scorecard":
 		report, ok := loadTechnicalScorecardReportFile()
 		if !ok {
-			return "Chưa có technical scorecard report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có bảng điểm kỹ thuật. Hãy chờ bot cập nhật.", true
 		}
 		return telegramCommandScorecard(report), true
 	case "/allocation", "/capital":
 		report, ok := loadCapitalPlanResearchReportFile()
 		if !ok {
-			return "Chưa có capital plan research report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có kế hoạch phân bổ vốn. Hãy chờ bot cập nhật.", true
 		}
 		return telegramCommandAllocation(report), true
 	case "/universe":
@@ -270,35 +282,35 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 		return telegramCommandTrigger(report), true
 	case "/orders":
 		if !snapshotOK || !scenarioOK {
-			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có dữ liệu trạng thái mới. Hãy chờ bot cập nhật.", true
 		}
 		return telegramCommandOrders(snapshot, scenario), true
 	case "/positions":
 		positionReport, ok := loadLivePositionReportFile()
 		if !ok {
-			return "Chưa có live position report. Chạy reconcile/positions hoặc chờ supervisor cập nhật.", true
+			return "Chưa có báo cáo tài sản đang giữ. Hãy chờ bot đối soát tài khoản.", true
 		}
 		return telegramCommandPositions(positionReport), true
 	case "/doctor":
 		if !snapshotOK {
-			return "Chưa có bot_state report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có dữ liệu sức khỏe hệ thống. Hãy chờ bot cập nhật.", true
 		}
 		return telegramCommandDoctor(snapshot), true
 	case "/supervisor":
 		if !snapshotOK {
-			return "Chưa có bot_state report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có dữ liệu sức khỏe hệ thống. Hãy chờ bot cập nhật.", true
 		}
 		return telegramCommandSupervisor(snapshot, supervisor, supervisorOK), true
 	case "/next":
 		if !scenarioOK {
-			return "Chưa có scenario report. Chờ live supervisor chạy một chu kỳ.", true
+			return "Chưa có bản đánh giá thị trường. Hãy chờ bot giám sát chạy thêm một lượt.", true
 		}
 		return telegramCommandNext(scenario), true
 	case "/risk":
 		base := renderHermesRisk(buildHermesOperationsBrief(cfg, "risk detail"))
 		return base + "\n\n" + telegramProtectionStatus(cfg), true
 	case "/ask":
-		return "Dung: /ask <cau hoi cua ban>, vi du: /ask tai sao bot chua vao lenh?", true
+		return "Dùng: /ask <câu hỏi>, ví dụ: /ask tại sao bot chưa vào lệnh?", true
 	case "/exits":
 		brief := buildHermesOperationsBrief(cfg, "exit state")
 		return telegramCommandExits(brief.Hermes), true
@@ -330,38 +342,26 @@ func hermesTelegramMenuText(cfg config.Config) string {
 	if tz == "" {
 		tz = "Asia/Ho_Chi_Minh"
 	}
-	return fmt.Sprintf("TRUNG TÂM ĐIỀU HÀNH HERMES\n\nChạm vào biểu tượng bên dưới để xem thông tin.\n\n📊 Trạng thái · 🧠 Phân tích · ❓ Lý do\n🗺 Kế hoạch · 🕒 Lịch · 🌊 Dòng tiền\n🌐 Vĩ mô · 🛡 Rủi ro · 🎯 Điểm thoát\n💼 Vị thế · 📋 Lệnh chờ · 🧾 Nguồn dữ liệu\n\nLịch tự động: 07:00, 13:00, mỗi 4 giờ và 23:00 (%s).\nTelegram chỉ dùng để xem; Hermes tự vận hành qua các lớp bảo vệ tài khoản.", tz)
+	return fmt.Sprintf("HERMES — MENU NHANH\n\nChọn một mục bên dưới. Bàn phím sẽ tự ẩn sau khi chọn.\nGõ /anbanphim để ẩn ngay; /menu để mở lại.\n\nBot chỉ nhận lệnh xem thông tin, không nhận lệnh mua bán qua Telegram.\nMúi giờ: %s.", tz)
 }
 func telegramCommandsHelp() string {
-	return strings.TrimSpace(`BTC Agent — lệnh Telegram read-only
-/menu — mở menu điều hành Hermes
-/start — mở menu điều hành Hermes
-/status — trạng thái bot
-/why — Hermes giải thích quyết định gần nhất
-/plan — kế hoạch vận hành Hermes
-/schedule — lịch bot cụ thể
-/flow — MM footprint, CVD, taker, orderbook và liquidity
-/coins — từng coin
-/filters — bộ lọc đang chặn gì
-/scorecard — bảng điểm kỹ thuật
-/allocation — phân bổ vốn nghiên cứu
-/capital — tóm tắt vốn nghiên cứu
-/universe — universe research coin
-/dashboard — bảng điều khiển quyết định
-/trigger — trigger tiếp theo
-/orders — lệnh đang mở và desired
-/positions — vị thế live đang ghi nhận
-/doctor — live doctor
-/supervisor — live supervisor
-/next — điều kiện kích hoạt tiếp theo
-/risk — risk governor và caps
-/hermes — Hermes AI analysis tổng hợp
-/h — tắt tắt /hermes
-/ask <câu hỏi> — Hermes trả lời câu hỏi trực tiếp
-/exits — exit signals hiện tại
-/audit — live-auto-audit verdict
+	return strings.TrimSpace(`HERMES — TRỢ GIÚP
+/menu — mở menu nhanh
+/anbanphim — ẩn bàn phím
+/trangthai — tình trạng bot và quyền đặt lệnh
+/lydo — vì sao bot chưa hành động
+/kehoach — kế hoạch dùng vốn
+/lich — lịch hoạt động
+/dongtien — dòng tiền lớn và thanh khoản
+/tienvi — bối cảnh kinh tế và tâm lý
+/ruiro — các lớp bảo vệ vốn
+/thoat — tình trạng chốt lời/cắt lỗ
+/vithe — tài sản đang giữ
+/lenh — lệnh đang chờ
+/coin — tình trạng từng đồng
+/dieukien — điều kiện hành động tiếp theo
 
-Không có lệnh đặt mua/bán qua Telegram. Telegram là operator console; Hermes autonomous thực thi qua safety/reconcile/final assertions.`) + "\n"
+Telegram chỉ dùng để xem. Hermes không nhận lệnh mua hoặc bán tại đây.`) + "\n"
 }
 
 func telegramCommandStatus(s BotRuntimeSnapshot, r ScenarioReport) string {
@@ -495,7 +495,7 @@ func telegramCommandTrigger(r DecisionDashboardReport) string {
 	b.WriteString("BTC Agent — Trigger tiếp theo\n")
 	b.WriteString("Next: " + emptyStringDefault(r.NextTrigger, "n/a") + "\n")
 	if len(r.Blockers) > 0 {
-		b.WriteString("Blockers:\n")
+		b.WriteString("Các lý do đang chặn:\n")
 		for _, blocker := range firstStrings(r.Blockers, 5) {
 			b.WriteString("- " + blocker + "\n")
 		}
@@ -506,7 +506,7 @@ func telegramCommandTrigger(r DecisionDashboardReport) string {
 			b.WriteString("- " + action + "\n")
 		}
 	}
-	b.WriteString("Read-only: trigger không đặt lệnh, không bypass ACTIVE_LIMIT.\n")
+	b.WriteString("Chỉ dùng để xem: điều kiện này không tự đặt lệnh và không bỏ qua bước kiểm tra cuối.\n")
 	return b.String()
 }
 
@@ -527,24 +527,24 @@ func telegramCommandPositions(r liveguard.LiveLedgerReport) string {
 			b.WriteString("- " + item + "\n")
 		}
 	}
-	b.WriteString("Read-only: Telegram không đóng/mở vị thế.\n")
+	b.WriteString("Telegram chỉ dùng để xem, không đóng hoặc mở vị thế.\n")
 	return b.String()
 }
 
 func telegramCommandDoctor(s BotRuntimeSnapshot) string {
-	return fmt.Sprintf("BTC Agent — Doctor\nStatus: %s\nSummary: %s\nData: %s\nReconcile: %s\nRisk: %s\n", emptyStringDefault(s.DoctorStatus, "unknown"), emptyStringDefault(s.DoctorSummary, "none"), emptyStringDefault(s.DataHealthSummary, "unknown"), emptyStringDefault(s.ReconcileSafetySummary, "unknown"), emptyStringDefault(s.RiskGovernorSummary, "unknown"))
+	return fmt.Sprintf("HERMES — SỨC KHỎE HỆ THỐNG\nTình trạng: %s\nTóm tắt: %s\nDữ liệu: %s\nĐối soát tài khoản: %s\nBảo vệ vốn: %s\n", emptyStringDefault(s.DoctorStatus, "chưa rõ"), emptyStringDefault(s.DoctorSummary, "không có"), emptyStringDefault(s.DataHealthSummary, "chưa rõ"), emptyStringDefault(s.ReconcileSafetySummary, "chưa rõ"), emptyStringDefault(s.RiskGovernorSummary, "chưa rõ"))
 }
 
 func telegramCommandSupervisor(s BotRuntimeSnapshot, supervisor liveguard.SupervisorResult, ok bool) string {
 	var b strings.Builder
-	b.WriteString("BTC Agent — Supervisor\n")
-	b.WriteString(fmt.Sprintf("Status: %s | action=%s | alive=%v\n", emptyStringDefault(s.SupervisorStatus, "unknown"), emptyStringDefault(s.SupervisorAction, "unknown"), s.SupervisorAlive))
-	b.WriteString("Summary: " + emptyStringDefault(s.SupervisorSummary, "none") + "\n")
+	b.WriteString("HERMES — GIÁM SÁT HOẠT ĐỘNG\n")
+	b.WriteString(fmt.Sprintf("Tình trạng: %s | Việc vừa làm: %s | Đang hoạt động: %s\n", emptyStringDefault(s.SupervisorStatus, "chưa rõ"), emptyStringDefault(s.SupervisorAction, "chưa rõ"), vietnameseBool(s.SupervisorAlive)))
+	b.WriteString("Tóm tắt: " + emptyStringDefault(s.SupervisorSummary, "không có") + "\n")
 	if ok && supervisor.Managed != nil {
 		m := supervisor.Managed
-		b.WriteString(fmt.Sprintf("Managed: %s desired=%d placed=%d canceled=%d replaced=%d blocked=%d\n", m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
+		b.WriteString(fmt.Sprintf("Quản lý lệnh: %s | Dự kiến %d | Đã đặt %d | Đã hủy %d | Đã thay %d | Bị chặn %d\n", m.Status, len(m.Desired), len(m.Placed), len(m.Canceled), len(m.Replaced), len(m.Blocked)))
 	}
-	b.WriteString("Next supervisor: " + emptyStringDefault(s.NextLiveSupervisorCycle, "unknown") + "\n")
+	b.WriteString("Lần kiểm tra tiếp theo: " + emptyStringDefault(s.NextLiveSupervisorCycle, "chưa rõ") + "\n")
 	return b.String()
 }
 
@@ -568,15 +568,15 @@ func telegramCommandRisk(s BotRuntimeSnapshot, r ScenarioReport) string {
 	var b strings.Builder
 	b.WriteString("BTC Agent — Risk\n")
 	b.WriteString(fmt.Sprintf("BTC risk=%s | falling=%s | fomo=%s\n", s.BTC.RiskLevel, s.BTC.FallingKnifeRisk, s.BTC.FomoRisk))
-	b.WriteString("Risk governor: " + emptyStringDefault(s.RiskGovernorSummary, "unknown") + "\n")
+	b.WriteString("Bộ bảo vệ vốn: " + emptyStringDefault(s.RiskGovernorSummary, "chưa rõ") + "\n")
 	if len(s.RiskGovernorWarnings) > 0 {
-		b.WriteString("Warnings:\n")
+		b.WriteString("Cảnh báo:\n")
 		for _, item := range firstStrings(s.RiskGovernorWarnings, 4) {
 			b.WriteString("- " + item + "\n")
 		}
 	}
 	if len(r.Blockers) > 0 {
-		b.WriteString("Blockers:\n")
+		b.WriteString("Các lý do đang chặn:\n")
 		for _, item := range firstStrings(r.Blockers, 6) {
 			b.WriteString("- " + item + "\n")
 		}
@@ -763,4 +763,11 @@ func telegramProtectionStatus(cfg config.Config) string {
 	}
 	b.WriteString("- " + db.ExecutionMarkoutSummary())
 	return b.String()
+}
+
+func vietnameseBool(v bool) string {
+	if v {
+		return "có"
+	}
+	return "không"
 }

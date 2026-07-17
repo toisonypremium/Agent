@@ -37,7 +37,7 @@ func TestTelegramChatAllowedExactMatch(t *testing.T) {
 
 func TestTelegramCommandsHelpIsReadOnly(t *testing.T) {
 	text := telegramCommandsHelp()
-	for _, want := range []string{"/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "Không có lệnh đặt mua/bán"} {
+	for _, want := range []string{"/menu", "/anbanphim", "/trangthai", "/lydo", "/kehoach", "/dongtien", "/ruiro", "/vithe", "/lenh", "không nhận lệnh mua hoặc bán"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("help missing %q:\n%s", want, text)
 		}
@@ -67,7 +67,7 @@ func TestTelegramCommandFiltersIsReadOnly(t *testing.T) {
 func TestTelegramCommandPositionsIsReadOnly(t *testing.T) {
 	report := liveguard.LiveLedgerReport{GeneratedAt: time.Now(), Summary: "no live positions recorded"}
 	text := telegramCommandPositions(report)
-	for _, want := range []string{"BTC Agent — Positions", "Không có vị thế live", "Read-only"} {
+	for _, want := range []string{"BTC Agent — Positions", "Không có vị thế live", "Telegram chỉ dùng để xem"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("positions reply missing %q:\n%s", want, text)
 		}
@@ -117,7 +117,7 @@ func TestTelegramCommandDashboardIsReadOnly(t *testing.T) {
 func TestTelegramCommandTriggerIsReadOnly(t *testing.T) {
 	report := DecisionDashboardReport{NextTrigger: "Chờ BTC ALLOWED", Blockers: []string{"plan chưa ACTIVE_LIMIT"}, Actions: []string{"Đứng ngoài"}}
 	text := telegramCommandTrigger(report)
-	for _, want := range []string{"BTC Agent — Trigger", "Chờ BTC ALLOWED", "Read-only", "không bypass ACTIVE_LIMIT"} {
+	for _, want := range []string{"BTC Agent — Trigger", "Chờ BTC ALLOWED", "Chỉ dùng để xem", "không bỏ qua bước kiểm tra cuối"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("trigger reply missing %q:\n%s", want, text)
 		}
@@ -126,7 +126,7 @@ func TestTelegramCommandTriggerIsReadOnly(t *testing.T) {
 
 func TestHermesTelegramMenuText(t *testing.T) {
 	text := hermesTelegramMenuText(config.Config{})
-	for _, want := range []string{"TRUNG TÂM ĐIỀU HÀNH HERMES", "📊 Trạng thái", "🧠 Phân tích", "❓ Lý do", "🗺 Kế hoạch", "🕒 Lịch", "🌊 Dòng tiền", "🛡 Rủi ro", "🎯 Điểm thoát"} {
+	for _, want := range []string{"HERMES — MENU NHANH", "Bàn phím sẽ tự ẩn", "/anbanphim", "/menu", "không nhận lệnh mua bán"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("menu missing %q: %s", want, text)
 		}
@@ -138,7 +138,7 @@ func TestNormalizeTelegramIconMenuButtons(t *testing.T) {
 		"📊 Trạng thái": "/status", "🧠 Phân tích": "/hermes", "❓ Lý do": "/why",
 		"🗺 Kế hoạch": "/plan", "🕒 Lịch": "/schedule", "🌊 Dòng tiền": "/flow",
 		"🌐 Vĩ mô": "/macro", "🛡 Rủi ro": "/risk", "🎯 Điểm thoát": "/exits",
-		"💼 Vị thế": "/positions", "📋 Lệnh chờ": "/orders", "🧾 Nguồn dữ liệu": "/sources", "⚙️ Menu": "/menu",
+		"💼 Vị thế": "/positions", "📋 Lệnh chờ": "/orders", "🧾 Nguồn dữ liệu": "/sources", "⚙️ Menu": "/menu", "⌨️ Ẩn bàn phím": "/hide",
 	}
 	for label, want := range cases {
 		if got := normalizeTelegramCommand(label); got != want {
@@ -147,5 +147,14 @@ func TestNormalizeTelegramIconMenuButtons(t *testing.T) {
 	}
 	if got := normalizeTelegramCommand("nút lạ"); got != "" {
 		t.Fatalf("unknown icon text accepted: %q", got)
+	}
+}
+
+func TestNormalizeTelegramVietnameseAliases(t *testing.T) {
+	cases := map[string]string{"/trangthai": "/status", "/lydo": "/why", "/kehoach": "/plan", "/lich": "/schedule", "/dongtien": "/flow", "/tienvi": "/macro", "/ruiro": "/risk", "/thoat": "/exits", "/vithe": "/positions", "/lenh": "/orders", "/coin": "/coins", "/dieukien": "/next", "/anbanphim": "/anbanphim"}
+	for in, want := range cases {
+		if got := normalizeTelegramCommand(in); got != want {
+			t.Errorf("%s: got %s want %s", in, got, want)
+		}
 	}
 }

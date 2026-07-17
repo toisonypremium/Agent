@@ -48,8 +48,8 @@ func TestBuildDeterministicHasRequiredSectionsAndSafety(t *testing.T) {
 		"Phân tích ngày=OK",
 		"Không ĐỦ ĐIỀU KIỆN ĐẶT LỆNH: không đặt lệnh",
 		"mở khóa=",
-		"MM=NO_EDGE",
-		"Liq=D",
+		"dòng tiền lớn=CHƯA CÓ LỢI THẾ RÕ",
+		"thanh khoản=D",
 		"Không hợp đồng tương lai",
 	} {
 		if !strings.Contains(text, want) {

@@ -46,8 +46,8 @@ func Telegram(ctx context.Context, token, chatID, text string) error {
 	return err
 }
 
-// TelegramSendMenu sends a Hermes operations message with a persistent command keyboard.
-// Buttons are regular slash-command text, so the existing read-only command router handles them.
+// TelegramSendMenu sends a compact, one-use command keyboard. Telegram hides it after a selection.
+// Responses also explicitly remove the keyboard so it never occupies the screen persistently.
 func TelegramSendMenu(ctx context.Context, token, chatID, text string) (SendResult, error) {
 	if strings.TrimSpace(token) == "" {
 		return SendResult{}, fmt.Errorf("%w: missing telegram token", ErrTelegramConfig)
@@ -60,14 +60,14 @@ func TelegramSendMenu(ctx context.Context, token, chatID, text string) (SendResu
 		"text":    text,
 		"reply_markup": map[string]any{
 			"keyboard": [][]map[string]string{
-				{{"text": "📊 Trạng thái"}, {"text": "🧠 Phân tích"}, {"text": "❓ Lý do"}},
-				{{"text": "🗺 Kế hoạch"}, {"text": "🕒 Lịch"}, {"text": "🌊 Dòng tiền"}},
-				{{"text": "🌐 Vĩ mô"}, {"text": "🛡 Rủi ro"}, {"text": "🎯 Điểm thoát"}},
-				{{"text": "💼 Vị thế"}, {"text": "📋 Lệnh chờ"}, {"text": "🧾 Nguồn dữ liệu"}},
-				{{"text": "⚙️ Menu"}},
+				{{"text": "📊 Trạng thái"}, {"text": "❓ Lý do"}, {"text": "🗺 Kế hoạch"}},
+				{{"text": "💼 Vị thế"}, {"text": "📋 Lệnh chờ"}, {"text": "🛡 Rủi ro"}},
+				{{"text": "🧠 Phân tích"}, {"text": "🕒 Lịch"}, {"text": "⌨️ Ẩn bàn phím"}},
 			},
-			"resize_keyboard": true,
-			"is_persistent":   true,
+			"resize_keyboard":         true,
+			"one_time_keyboard":       true,
+			"is_persistent":           false,
+			"input_field_placeholder": "Chọn nhanh hoặc dùng /trogiup",
 		},
 	})
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBaseURL, token), bytes.NewReader(body))
@@ -89,6 +89,45 @@ func TelegramSendMenu(ctx context.Context, token, chatID, text string) (SendResu
 	}
 	_ = json.Unmarshal(data, &raw)
 	return SendResult{MessageID: raw.Result.MessageID}, nil
+}
+
+// TelegramSendAndHideKeyboard sends a response and explicitly removes the menu keyboard.
+func TelegramSendAndHideKeyboard(ctx context.Context, token, chatID, text string) (SendResult, error) {
+	if strings.TrimSpace(token) == "" {
+		return SendResult{}, fmt.Errorf("%w: missing telegram token", ErrTelegramConfig)
+	}
+	if strings.TrimSpace(chatID) == "" {
+		return SendResult{}, fmt.Errorf("%w: missing telegram chat_id", ErrTelegramConfig)
+	}
+	chunks := telegramChunks(text)
+	var result SendResult
+	for i, chunk := range chunks {
+		payload := map[string]any{"chat_id": chatID, "text": chunk}
+		if i == 0 {
+			payload["reply_markup"] = map[string]any{"remove_keyboard": true}
+		}
+		body, _ := json.Marshal(payload)
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/sendMessage", telegramAPIBaseURL, token), bytes.NewReader(body))
+		if err != nil {
+			return result, err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, data, err := doWithRetry(req, token)
+		if err != nil {
+			return result, err
+		}
+		if resp.StatusCode/100 != 2 {
+			return result, fmt.Errorf("telegram send http %d: %s", resp.StatusCode, telegramRedact(string(bytes.TrimSpace(data)), token))
+		}
+		var raw struct {
+			Result struct {
+				MessageID int `json:"message_id"`
+			} `json:"result"`
+		}
+		_ = json.Unmarshal(data, &raw)
+		result.MessageID = raw.Result.MessageID
+	}
+	return result, nil
 }
 
 // TelegramSend sends a new message and returns message_id + error.

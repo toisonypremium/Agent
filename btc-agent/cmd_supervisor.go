@@ -115,6 +115,13 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			}
 		}
 	}
+	if cfg.HermesOperator.CanExecute() && !halted {
+		if adopted, updated, dust, e := syncHermesManagedPortfolio(ctx, cfg, db); e != nil {
+			result.Reasons = append(result.Reasons, "portfolio sync: "+e.Error())
+		} else if adopted+updated > 0 {
+			result.Reasons = append(result.Reasons, fmt.Sprintf("portfolio sync: adopted=%d updated=%d dust=%d", adopted, updated, dust))
+		}
+	}
 	if measured, e := db.UpdateExecutionMarkouts(time.Now()); e != nil {
 		result.Reasons = append(result.Reasons, "execution markouts: "+e.Error())
 	} else if measured > 0 {
@@ -152,6 +159,18 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		}
 		if posErr == nil && len(positions) > 0 {
 			currentPrices := buildCurrentPricesFromDB(cfg, db)
+			if client, e := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv); e == nil {
+				for _, p := range positions {
+					sym := strings.ToUpper(p.Symbol)
+					if currentPrices[sym] <= 0 {
+						if price, pe := client.SpotLastPrice(ctx, sym); pe == nil {
+							currentPrices[sym] = price
+						} else {
+							result.Reasons = append(result.Reasons, "managed holding price unavailable: "+sym)
+						}
+					}
+				}
+			}
 			exits := liveguard.EvaluateExits(cfg, positions, currentPrices, state.PeakTracker)
 			result.Exits = exits
 			if err := saveExitPeakTracker(state.PeakTracker); err != nil {
@@ -405,6 +424,18 @@ func updatePersistedTotalEquity(ctx context.Context, cfg config.Config, db *stor
 		return err
 	}
 	prices := buildCurrentPricesFromDB(cfg, db)
+	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
+	if err != nil {
+		return err
+	}
+	for _, p := range positions {
+		sym := strings.ToUpper(p.Symbol)
+		if prices[sym] <= 0 {
+			if price, e := client.SpotLastPrice(ctx, sym); e == nil {
+				prices[sym] = price
+			}
+		}
+	}
 	equity := 0.0
 	for _, p := range positions {
 		if price := prices[strings.ToUpper(p.Symbol)]; price > 0 {
@@ -420,10 +451,6 @@ func updatePersistedTotalEquity(ctx context.Context, cfg config.Config, db *stor
 			equity += n
 		}
 	}
-	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
-	if err != nil {
-		return err
-	}
 	balances, err := client.AccountBalance(ctx)
 	if err != nil {
 		return err
@@ -438,4 +465,69 @@ func updatePersistedTotalEquity(ctx context.Context, cfg config.Config, db *stor
 	}
 	_, err = db.UpdateEquityRiskState(equity, time.Now())
 	return err
+}
+
+func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *storage.DB) (int, int, int, error) {
+	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	balances, err := client.AccountBalance(ctx)
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	current, err := db.HermesManagedHoldings()
+	if err != nil {
+		return 0, 0, 0, err
+	}
+	existing := map[string]storage.HermesManagedHolding{}
+	for _, h := range current {
+		existing[h.Symbol] = h
+	}
+	adopted, updated, dust := 0, 0, 0
+	seen := map[string]bool{}
+	for _, b := range balances {
+		asset := strings.ToUpper(b.Asset)
+		if asset == "USDT" || asset == "USDC" || b.Free <= 0 {
+			continue
+		}
+		symbol := asset + "USDT"
+		price := b.AvgPrice
+		if price <= 0 {
+			price, _ = client.SpotLastPrice(ctx, symbol)
+		}
+		if price <= 0 {
+			dust++
+			continue
+		}
+		notional := b.Free * price
+		h, ok := existing[symbol]
+		// Ignore exchange dust; material balances are delegated by the operator request.
+		if !ok && notional < 1 {
+			dust++
+			continue
+		}
+		seen[symbol] = true
+		if !ok {
+			h = storage.HermesManagedHolding{Symbol: symbol, InstID: live.OKXInstID(symbol), Quantity: b.Free, AvgEntryPrice: price, Source: "OKX_ACCOUNT_ADOPTION"}
+			adopted++
+		} else {
+			h.Quantity = b.Free
+			if b.AvgPrice > 0 {
+				h.AvgEntryPrice = b.AvgPrice
+			}
+			updated++
+		}
+		if err := db.SaveHermesManagedHolding(h); err != nil {
+			return adopted, updated, dust, err
+		}
+	}
+	for symbol := range existing {
+		if !seen[symbol] {
+			if err := db.DeleteHermesManagedHolding(symbol); err != nil {
+				return adopted, updated, dust, err
+			}
+		}
+	}
+	return adopted, updated, dust, nil
 }

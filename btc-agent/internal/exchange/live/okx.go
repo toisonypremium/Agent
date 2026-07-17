@@ -313,6 +313,8 @@ func parseBalances(data []byte) ([]Balance, error) {
 				AvailBal string `json:"availBal"`
 				AvailEq  string `json:"availEq"`
 				CashBal  string `json:"cashBal"`
+				Eq       string `json:"eq"`
+				AvgPx    string `json:"avgPx"`
 			} `json:"details"`
 		} `json:"data"`
 	}
@@ -329,7 +331,7 @@ func parseBalances(data []byte) ([]Balance, error) {
 			if detail.CCY == "" {
 				continue
 			}
-			out = append(out, Balance{Asset: strings.ToUpper(detail.CCY), Free: free})
+			out = append(out, Balance{Asset: strings.ToUpper(detail.CCY), Free: free, Equity: firstParseFloat(detail.Eq, detail.CashBal), AvgPrice: firstParseFloat(detail.AvgPx)})
 		}
 	}
 	return out, nil
@@ -625,4 +627,41 @@ func sanitizeClientOrderID(id string) string {
 		s = s[:32]
 	}
 	return s
+}
+
+// SpotLastPrice reads the public OKX ticker and has no order authority.
+func (c *OKXClient) SpotLastPrice(ctx context.Context, symbol string) (float64, error) {
+	instID := OKXInstID(strings.ToUpper(strings.TrimSpace(symbol)))
+	requestPath := "/api/v5/market/ticker?instId=" + url.QueryEscape(instID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+requestPath, nil)
+	if err != nil {
+		return 0, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("okx ticker request: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return 0, fmt.Errorf("okx ticker http %d", resp.StatusCode)
+	}
+	var raw struct {
+		Code string `json:"code"`
+		Msg  string `json:"msg"`
+		Data []struct {
+			Last string `json:"last"`
+		} `json:"data"`
+	}
+	if json.Unmarshal(data, &raw) != nil || raw.Code != "0" || len(raw.Data) == 0 {
+		return 0, fmt.Errorf("okx ticker unavailable for %s: %s", instID, raw.Msg)
+	}
+	price, err := strconv.ParseFloat(raw.Data[0].Last, 64)
+	if err != nil || price <= 0 {
+		return 0, fmt.Errorf("invalid OKX ticker for %s", instID)
+	}
+	return price, nil
 }

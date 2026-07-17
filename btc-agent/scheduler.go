@@ -328,6 +328,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		doctor, err := runLiveDoctor(shutdownCtx, cfg, db)
 		if err != nil {
 			log.Printf("[Scheduler] Live doctor error: %v", err)
+			latestDoctor = unavailableDoctorResult(err)
 		} else {
 			latestDoctor = &doctor
 			log.Printf("[Scheduler] Live doctor status: %s", doctor.Summary)
@@ -699,4 +700,10 @@ func enforceStartupReconcileRecovery(db *storage.DB, result liveguard.ReconcileR
 	}
 	log.Printf("[Scheduler] Startup recovery fail-closed: reason=%s status=%s; Hermes demoted and operator halt active", reason, result.Safety.Status)
 	return nil
+}
+
+func unavailableDoctorResult(err error) *liveguard.RuntimeDoctorResult {
+	r := &liveguard.RuntimeDoctorResult{GeneratedAt: time.Now().UTC(), Status: liveguard.DoctorBlock, Blockers: []string{"live doctor unavailable: " + err.Error()}}
+	r.RefreshSummary()
+	return r
 }

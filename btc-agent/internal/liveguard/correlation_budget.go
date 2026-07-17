@@ -16,6 +16,8 @@ type CorrelationBudgetInput struct {
 	Threshold         float64
 	ClusterCap        float64
 	MinObservations   int
+	DownsideThreshold float64
+	RegimeMultiplier  float64
 }
 type CorrelationBudgetResult struct {
 	Allowed             bool               `json:"allowed"`
@@ -35,6 +37,10 @@ func EvaluateCorrelationBudget(in CorrelationBudgetInput) CorrelationBudgetResul
 	if in.MinObservations < 10 {
 		in.MinObservations = 30
 	}
+	if in.RegimeMultiplier <= 0 || in.RegimeMultiplier > 1 {
+		in.RegimeMultiplier = 1
+	}
+	in.ClusterCap *= in.RegimeMultiplier
 	r.CorrelationExposure = in.ExistingExposure[symbol]
 	for other, exposure := range in.ExistingExposure {
 		other = strings.ToUpper(other)
@@ -42,9 +48,19 @@ func EvaluateCorrelationBudget(in CorrelationBudgetInput) CorrelationBudgetResul
 			continue
 		}
 		corr, n := AlignedReturnCorrelation(in.Candles[symbol], in.Candles[other])
+		downCorr, downN := AlignedDownsideCorrelation(in.Candles[symbol], in.Candles[other])
 		if n < in.MinObservations {
 			r.Allowed = false
 			r.Reasons = append(r.Reasons, fmt.Sprintf("correlation history insufficient for %s/%s: %d", symbol, other, n))
+			continue
+		}
+		downMin := in.MinObservations / 3
+		if downMin < 10 {
+			downMin = 10
+		}
+		if downN >= downMin && in.DownsideThreshold > 0 && downCorr >= in.DownsideThreshold {
+			r.Correlated[other] = downCorr
+			r.CorrelationExposure += exposure
 			continue
 		}
 		if corr >= in.Threshold {
@@ -111,4 +127,36 @@ func meanCorrelation(x []float64) float64 {
 		s += v
 	}
 	return s / float64(len(x))
+}
+
+func AlignedDownsideCorrelation(a, b []market.Candle) (float64, int) {
+	ma := returnsByTime(a)
+	mb := returnsByTime(b)
+	keys := []int64{}
+	for k, x := range ma {
+		if y, ok := mb[k]; ok && x < 0 && y < 0 {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	n := len(keys)
+	if n < 2 {
+		return 0, n
+	}
+	xa, xb := make([]float64, n), make([]float64, n)
+	for i, k := range keys {
+		xa[i], xb[i] = ma[k], mb[k]
+	}
+	av, bv := meanCorrelation(xa), meanCorrelation(xb)
+	num, da, db := 0.0, 0.0, 0.0
+	for i := range xa {
+		x, y := xa[i]-av, xb[i]-bv
+		num += x * y
+		da += x * x
+		db += y * y
+	}
+	if da == 0 || db == 0 {
+		return 0, n
+	}
+	return num / math.Sqrt(da*db), n
 }

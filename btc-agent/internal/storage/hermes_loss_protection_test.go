@@ -107,3 +107,30 @@ func TestHermesLossProtectionIncludesBuyAndSellFees(t *testing.T) {
 		t.Fatalf("fees not realized: %+v", got)
 	}
 }
+
+func TestHermesLossProtectionConvertsBaseFee(t *testing.T) {
+	db, e := Open(t.TempDir() + "/basefee.db")
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer db.Close()
+	now := time.Now().Unix()
+	seed := func(id, side string, fee float64) {
+		_, e := db.Exec(`INSERT INTO live_orders(client_order_id,inst_id,symbol,side,type,price,quantity,notional,status,source) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, "ETH-USDT", "ETHUSDT", side, "limit", 100, 1, 100, live.StatusFilled, "HERMES_OPERATOR")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = db.SaveLivePositionEvent(live.LivePositionEvent{Timestamp: now, ClientOrderID: id, Symbol: "ETHUSDT", Side: side, DeltaQuantity: 1, FillPrice: 100, NotionalDelta: 100, FeeDelta: fee, FeeCurrency: "ETH"}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	seed("b", "BUY", -.01)
+	seed("s", "SELL", -.01)
+	got, e := db.HermesLossProtectionSnapshot(time.Unix(now-1, 0))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got.RollingRealizedPnL != -2 {
+		t.Fatalf("base fee conversion: %+v", got)
+	}
+}

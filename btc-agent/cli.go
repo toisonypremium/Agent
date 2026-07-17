@@ -144,6 +144,13 @@ func run(ctx context.Context, args []string) error {
 		return runReconcileLiveOrders(ctx, cfg, db)
 	case "live-positions":
 		return runLivePositions(cfg, db)
+	case "event-replay":
+		r, err := db.ReplayHermesState()
+		if err != nil {
+			return err
+		}
+		fmt.Printf("events=%d checksum=%s positions=%+v\n", r.Events, r.Checksum, r.Positions)
+		return nil
 	case "telegram-commands":
 		return runTelegramCommands(ctx, cfg, db)
 	case "scheduler-heartbeat-check":
@@ -165,7 +172,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|operations-plan|market-watch|ops-events|microstructure-fetch|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|hermes-canary-readiness|live-auto-audit|live-doctor|research-doctor|research-brief|research-expert|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|telegram-commands|scheduler-heartbeat-check|maintenance|control-plane-snapshot|control-plane-validate-proposal|control-plane-submit-proposal|control-plane-proposal-result|control-plane-recent-proposals|control-plane-request-halt|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>|--proposal-file <path>|--decision-id <id>|--caller <name>|--reason-code <code>|--summary <text>]")
+	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|operations-plan|market-watch|ops-events|microstructure-fetch|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|hermes-canary-readiness|live-auto-audit|live-doctor|research-doctor|research-brief|research-expert|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|event-replay|telegram-commands|scheduler-heartbeat-check|maintenance|control-plane-snapshot|control-plane-validate-proposal|control-plane-submit-proposal|control-plane-proposal-result|control-plane-recent-proposals|control-plane-request-halt|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>|--proposal-file <path>|--decision-id <id>|--caller <name>|--reason-code <code>|--summary <text>]")
 }
 
 func argValue(args []string, key string) string {

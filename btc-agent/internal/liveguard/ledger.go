@@ -51,8 +51,12 @@ func BuildPositionEvent(previous live.LiveFillSnapshot, status live.OrderStatus,
 		symbol = previous.Symbol
 	}
 
+	eventTS := now.Unix()
+	if status.UpdatedAt > 0 {
+		eventTS = status.UpdatedAt
+	}
 	return live.LivePositionEvent{
-		Timestamp:     now.Unix(),
+		Timestamp:     eventTS,
 		ClientOrderID: status.ClientOrderID,
 		OrderID:       status.OrderID,
 		InstID:        status.InstID,

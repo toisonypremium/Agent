@@ -106,11 +106,25 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			}
 		}
 	}
+	if measured, e := db.UpdateExecutionMarkouts(time.Now()); e != nil {
+		result.Reasons = append(result.Reasons, "execution markouts: "+e.Error())
+	} else if measured > 0 {
+		result.Reasons = append(result.Reasons, fmt.Sprintf("execution markouts measured=%d", measured))
+	}
+	if e := updatePersistedTotalEquity(ctx, cfg, db); e != nil {
+		result.Reasons = append(result.Reasons, "persist total equity: "+e.Error())
+	}
 	// Evaluate and execute deterministic exits after the managed cycle.
 	// Exits use the Hermes-owned ledger and the same reconcile-safe sell executor.
 	if cfg.Exit.Enabled {
 		if state.PeakTracker == nil {
 			state.PeakTracker = loadExitPeakTracker()
+			if persisted, e := db.ExitPeakStates(); e == nil {
+				for _, item := range persisted {
+					state.PeakTracker.PeakBySymbol[item.Symbol] = item.Peak
+					state.PeakTracker.TrailActive[item.Symbol] = item.TrailActive
+				}
+			}
 		}
 		if positions, posErr := db.LivePositions(); posErr == nil && len(positions) > 0 {
 			currentPrices := buildCurrentPricesFromDB(cfg, db)
@@ -118,6 +132,13 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.Exits = exits
 			if err := saveExitPeakTracker(state.PeakTracker); err != nil {
 				result.Reasons = append(result.Reasons, "persist exit peak tracker: "+err.Error())
+			}
+			peakStates := []storage.ExitPeakState{}
+			for sym, peak := range state.PeakTracker.PeakBySymbol {
+				peakStates = append(peakStates, storage.ExitPeakState{Symbol: sym, Peak: peak, TrailActive: state.PeakTracker.TrailActive[sym], UpdatedAt: time.Now()})
+			}
+			if err := db.SaveExitPeakStates(peakStates); err != nil {
+				result.Reasons = append(result.Reasons, "persist exit peak DB: "+err.Error())
 			}
 			if !dryRun && cfg.HermesOperator.CanExecute() && !halted {
 				if exitResult, err := executeAutonomousExits(ctx, cfg, db, exits, currentOpenOrders(db)); err != nil {
@@ -349,4 +370,45 @@ func currentOpenOrders(db *storage.DB) []live.OrderStatus {
 		return nil
 	}
 	return orders
+}
+
+func updatePersistedTotalEquity(ctx context.Context, cfg config.Config, db *storage.DB) error {
+	positions, err := db.LivePositions()
+	if err != nil {
+		return err
+	}
+	prices := buildCurrentPricesFromDB(cfg, db)
+	equity := 0.0
+	for _, p := range positions {
+		if price := prices[strings.ToUpper(p.Symbol)]; price > 0 {
+			equity += p.Quantity * price
+		}
+	}
+	for _, o := range currentOpenOrders(db) {
+		if strings.EqualFold(o.Side, "BUY") {
+			n := o.Notional
+			if n <= 0 {
+				n = o.Price * o.Quantity
+			}
+			equity += n
+		}
+	}
+	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
+	if err != nil {
+		return err
+	}
+	balances, err := client.AccountBalance(ctx)
+	if err != nil {
+		return err
+	}
+	for _, b := range balances {
+		if strings.EqualFold(b.Asset, "USDT") {
+			equity += b.Free
+		}
+	}
+	if equity <= 0 {
+		return fmt.Errorf("calculated total equity is not positive")
+	}
+	_, err = db.UpdateEquityRiskState(equity, time.Now())
+	return err
 }

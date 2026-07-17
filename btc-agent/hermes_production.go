@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -121,6 +122,16 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if drawdownCap > 0 && lossProtection.MaxDrawdown >= drawdownCap && !lossProtection.LastCloseAt.IsZero() {
 		drawdownLockUntil = lossProtection.LastCloseAt.Add(time.Duration(cfg.Risk.HermesDrawdownLockMinutes) * time.Minute)
 	}
+	protections := []storage.ProtectionStatus{{Name: "loss_streak", Active: !lossLockUntil.IsZero() && time.Now().Before(lossLockUntil), UnlockAt: lossLockUntil, Detail: fmt.Sprintf("%d consecutive losses", lossProtection.ConsecutiveLosses)}, {Name: "realized_drawdown", Active: !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil), UnlockAt: drawdownLockUntil, Detail: fmt.Sprintf("%.2f USDT", lossProtection.MaxDrawdown)}}
+	if eq, e := db.EquityRiskState(); e == nil {
+		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.HermesMaxRealizedDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
+	}
+	for symbol, exited := range lastExitAt {
+		unlock := exited.Add(time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute)
+		if time.Now().Before(unlock) {
+			protections = append(protections, storage.ProtectionStatus{Name: "reentry_cooldown", Symbol: symbol, Active: true, UnlockAt: unlock})
+		}
+	}
 	correlationCandles := map[string][]market.Candle{}
 	correlationDataErr := error(nil)
 	lookbackDays := cfg.Risk.HermesCorrelationLookbackDays
@@ -161,6 +172,13 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes loss-streak protection active until %s", lossLockUntil.UTC().Format(time.RFC3339)))
 			}
+			if eq, e := db.EquityRiskState(); e != nil && e != sql.ErrNoRows {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, "Hermes equity high-water state unavailable")
+			} else if e == nil && cfg.Risk.HermesMaxRealizedDrawdownPct > 0 && eq.DrawdownPct >= cfg.Risk.HermesMaxRealizedDrawdownPct {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes total-equity drawdown protection active (%.2f%% from high-water mark)", eq.DrawdownPct*100))
+			}
 			if !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil) {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes realized-drawdown protection active until %s (drawdown %.2f%%)", drawdownLockUntil.UTC().Format(time.RFC3339), lossProtection.MaxDrawdown/cfg.Portfolio.TotalCapital*100))
@@ -171,6 +189,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 				assetLockUntil = perf.LastCloseAt.Add(time.Duration(cfg.Risk.HermesLowProfitLockMinutes) * time.Minute)
 			}
 			if !assetLockUntil.IsZero() && time.Now().Before(assetLockUntil) {
+				protections = append(protections, storage.ProtectionStatus{Name: "low_profit", Symbol: decision.Action.Symbol, Active: true, UnlockAt: assetLockUntil, Detail: fmt.Sprintf("expectancy %.2f%%", perf.Expectancy*100)})
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes low-profit asset protection active for %s until %s (samples=%d expectancy=%.2f%% win_rate=%.1f%%)", decision.Action.Symbol, assetLockUntil.UTC().Format(time.RFC3339), perf.ClosedFills, perf.Expectancy*100, perf.WinRate*100))
 			}
@@ -194,7 +213,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 					decision.Allowed = false
 					decision.Reasons = append(decision.Reasons, "Hermes correlation history unavailable")
 				} else {
-					corr := liveguard.EvaluateCorrelationBudget(liveguard.CorrelationBudgetInput{Symbol: decision.Action.Symbol, RequestedNotional: decision.Action.RequestedNotionalUSDT, ExistingExposure: correlationExposure, Candles: correlationCandles, Threshold: cfg.Risk.HermesCorrelationThreshold, ClusterCap: cfg.Portfolio.TotalCapital * cfg.Risk.HermesCorrelationClusterCapPct, MinObservations: cfg.Risk.HermesCorrelationMinSamples})
+					corr := liveguard.EvaluateCorrelationBudget(liveguard.CorrelationBudgetInput{Symbol: decision.Action.Symbol, RequestedNotional: decision.Action.RequestedNotionalUSDT, ExistingExposure: correlationExposure, Candles: correlationCandles, Threshold: cfg.Risk.HermesCorrelationThreshold, ClusterCap: cfg.Portfolio.TotalCapital * cfg.Risk.HermesCorrelationClusterCapPct, MinObservations: cfg.Risk.HermesCorrelationMinSamples, DownsideThreshold: cfg.Risk.HermesCorrelationThreshold, RegimeMultiplier: hermesCorrelationRegimeMultiplier(analysis)})
 					if !corr.Allowed {
 						decision.Allowed = false
 						decision.Reasons = append(decision.Reasons, corr.Reasons...)
@@ -219,6 +238,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		}
 		filteredSafety = append(filteredSafety, decision)
 	}
+	_ = db.SaveProtectionStatuses(protections, time.Now())
 	safety = filteredSafety
 	reducing := make([]liveguard.HermesActionDecision, 0)
 	for _, decision := range safety {
@@ -304,4 +324,14 @@ func executeHermesReducingBatch(ctx context.Context, cfg config.Config, db *stor
 	out.DataHealth, out.ReconcileSafety, out.RiskGovernor = dataHealth, reconcile, risk
 	out.Summary = fmt.Sprintf("HERMES_REDUCE_BATCH: actions=%d canceled=%d placed=%d blocked=%d", len(decisions), len(out.Canceled), len(out.Placed), len(out.Blocked))
 	return out
+}
+
+func hermesCorrelationRegimeMultiplier(a agent1.MarketAnalysis) float64 {
+	if strings.EqualFold(string(a.RiskLevel), "HIGH") || strings.Contains(strings.ToUpper(a.MarketRegime), "DOWNTREND") {
+		return 0.65
+	}
+	if strings.EqualFold(string(a.RiskLevel), "MEDIUM") {
+		return 0.80
+	}
+	return 1
 }

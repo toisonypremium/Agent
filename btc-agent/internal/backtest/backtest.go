@@ -59,6 +59,7 @@ type Result struct {
 	LayerAudit                    LayerAuditResult              `json:"layer_audit"`
 	ExitAudit                     ExitAuditResult               `json:"exit_audit"`
 	WalkForwardReport             WalkForwardReport             `json:"walk_forward_report"`
+	MonteCarloReport              MonteCarloReport              `json:"monte_carlo_report"`
 	Summary                       string                        `json:"summary"`
 }
 
@@ -658,12 +659,21 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("22. Strategy Intelligence Summary\n")
+	b.WriteString("22. Monte Carlo Robustness Laboratory\n")
+	if !r.MonteCarloReport.Enabled {
+		b.WriteString("- Monte Carlo: skipped / insufficient out-of-sample observations.\n\n")
+	} else {
+		b.WriteString("- " + r.MonteCarloReport.Summary + "\n")
+		b.WriteString(fmt.Sprintf("- PnL p05/median/p95: %.2f / %.2f / %.2f | drawdown p50/p95: %.2f / %.2f\n", r.MonteCarloReport.P05FinalPnL, r.MonteCarloReport.MedianFinalPnL, r.MonteCarloReport.P95FinalPnL, r.MonteCarloReport.P50MaxDrawdown, r.MonteCarloReport.P95MaxDrawdown))
+		b.WriteString("- Research only; no production parameter or order authority changed.\n\n")
+	}
+
+	b.WriteString("23. Strategy Intelligence Summary\n")
 	b.WriteString("- Research only; no live config changed; no order authority changed. WATCH/SCOUT/ARMED must not create orders.\n")
 	b.WriteString(strategyIntelligenceSummary(r))
 	b.WriteString("\n")
 
-	b.WriteString("23. Kết luận\n")
+	b.WriteString("24. Kết luận\n")
 	b.WriteString("- " + r.Summary + "\n")
 	b.WriteString("- Đây là audit rule bằng dữ liệu quá khứ, không phải cam kết lợi nhuận. Mẫu ít thì chỉ dùng để debug rule. Agent 2 simulation chưa mô hình take-profit.\n")
 	return b.String()

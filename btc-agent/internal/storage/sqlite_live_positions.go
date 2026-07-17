@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -35,6 +36,13 @@ func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosi
 	pos, found, err := livePositionBySymbol(tx, event.Symbol)
 	if err != nil {
 		return live.LivePosition{}, err
+	}
+	managed := HermesManagedHolding{}
+	var managedAdoptedAt, managedUpdatedAt int64
+	_ = tx.QueryRow(`SELECT symbol,inst_id,quantity,avg_entry_price,adopted_at,updated_at,source FROM hermes_managed_holdings WHERE symbol=?`, strings.ToUpper(event.Symbol)).Scan(&managed.Symbol, &managed.InstID, &managed.Quantity, &managed.AvgEntryPrice, &managedAdoptedAt, &managedUpdatedAt, &managed.Source)
+	if managed.Quantity > pos.Quantity {
+		pos = managedPosition(managed)
+		found = true
 	}
 	if !found {
 		pos = live.LivePosition{Symbol: event.Symbol, InstID: event.InstID}
@@ -68,6 +76,15 @@ func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosi
 		}
 	default:
 		return live.LivePosition{}, fmt.Errorf("unsupported live position side %q", event.Side)
+	}
+	if event.Side == "SELL" && managed.Symbol != "" {
+		remaining := managed.Quantity - event.DeltaQuantity
+		if remaining < 1e-12 {
+			remaining = 0
+		}
+		if _, err := tx.Exec(`UPDATE hermes_managed_holdings SET quantity=?,updated_at=? WHERE symbol=?`, remaining, event.Timestamp, managed.Symbol); err != nil {
+			return live.LivePosition{}, err
+		}
 	}
 	if pos.Quantity > 0 {
 		pos.AvgEntryPrice = pos.CostBasis / pos.Quantity
@@ -129,7 +146,28 @@ func (d *DB) LivePositions() ([]live.LivePosition, error) {
 		}
 		out = append(out, pos)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	managed, err := d.HermesManagedHoldings()
+	if err != nil {
+		return nil, err
+	}
+	bySymbol := map[string]int{}
+	for i := range out {
+		bySymbol[strings.ToUpper(out[i].Symbol)] = i
+	}
+	for _, h := range managed {
+		if i, ok := bySymbol[h.Symbol]; ok {
+			if h.Quantity > out[i].Quantity {
+				out[i] = managedPosition(h)
+			}
+			continue
+		}
+		out = append(out, managedPosition(h))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
+	return out, nil
 }
 
 // HermesOwnedPositions derives net quantity from immutable position events
@@ -162,7 +200,28 @@ func (d *DB) HermesOwnedPositions() ([]live.LivePosition, error) {
 		}
 		out = append(out, pos)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	managed, err := d.HermesManagedHoldings()
+	if err != nil {
+		return nil, err
+	}
+	bySymbol := map[string]int{}
+	for i := range out {
+		bySymbol[strings.ToUpper(out[i].Symbol)] = i
+	}
+	for _, h := range managed {
+		if i, ok := bySymbol[h.Symbol]; ok {
+			if h.Quantity > out[i].Quantity {
+				out[i] = managedPosition(h)
+			}
+			continue
+		}
+		out = append(out, managedPosition(h))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
+	return out, nil
 }
 
 // HermesLastExitAtBySymbol returns the latest persisted Hermes SELL fill per symbol.

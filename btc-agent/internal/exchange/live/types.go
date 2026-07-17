@@ -5,8 +5,10 @@ package live
 // and reports readiness without calling an exchange order endpoint.
 
 type Balance struct {
-	Asset string  `json:"asset"`
-	Free  float64 `json:"free"`
+	Asset    string  `json:"asset"`
+	Free     float64 `json:"free"`
+	Equity   float64 `json:"equity,omitempty"`
+	AvgPrice float64 `json:"avg_price,omitempty"`
 }
 
 type InstrumentFilter struct {

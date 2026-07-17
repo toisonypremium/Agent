@@ -204,6 +204,11 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 					}
 				}
 			}
+			// Reserve accepted notional in-memory so later actions in this same
+			// decision cannot independently consume the same cluster capacity.
+			if decision.Allowed {
+				correlationExposure[strings.ToUpper(decision.Action.Symbol)] += decision.Action.RequestedNotionalUSDT
+			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)
 			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)], Now: time.Now(), LastExitAt: lastExitAt[strings.ToUpper(decision.Action.Symbol)], CooldownAfterExit: time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute})

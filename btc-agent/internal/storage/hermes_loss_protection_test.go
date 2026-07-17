@@ -80,3 +80,30 @@ func TestHermesLossProtectionDrawdownAndPreWindowEntry(t *testing.T) {
 		t.Fatalf("bad drawdown replay: %+v", got)
 	}
 }
+
+func TestHermesLossProtectionIncludesBuyAndSellFees(t *testing.T) {
+	db, err := Open(t.TempDir() + "/fees.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().Unix()
+	seed := func(id, side string, fee float64, ts int64) {
+		_, e := db.Exec(`INSERT INTO live_orders(client_order_id,inst_id,symbol,side,type,price,quantity,notional,status,source) VALUES(?,?,?,?,?,?,?,?,?,?)`, id, "ETH-USDT", "ETHUSDT", side, "limit", 100, 1, 100, live.StatusFilled, "HERMES_OPERATOR")
+		if e != nil {
+			t.Fatal(e)
+		}
+		if e = db.SaveLivePositionEvent(live.LivePositionEvent{Timestamp: ts, ClientOrderID: id, Symbol: "ETHUSDT", Side: side, DeltaQuantity: 1, FillPrice: 100, NotionalDelta: 100, FeeDelta: fee, FeeCurrency: "USDT"}); e != nil {
+			t.Fatal(e)
+		}
+	}
+	seed("buy", "BUY", -1, now-20)
+	seed("sell", "SELL", -1, now-10)
+	got, e := db.HermesLossProtectionSnapshot(time.Unix(now-30, 0))
+	if e != nil {
+		t.Fatal(e)
+	}
+	if got.RollingRealizedPnL != -2 || got.ConsecutiveLosses != 1 || got.BySymbol["ETHUSDT"].Expectancy != -2.0/101.0 {
+		t.Fatalf("fees not realized: %+v", got)
+	}
+}

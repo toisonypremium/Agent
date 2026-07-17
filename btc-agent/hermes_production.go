@@ -47,6 +47,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		return blockedHermesCycle(plan, dryRun, "Hermes decision did not pass validation"), true
 	}
 	if len(audit.Validation.Actions) == 0 {
+		saveBaseProtectionStatus(db, cfg)
 		return noActionHermesCycle(plan, dryRun, "valid Hermes HOLD/WATCH decision; no action requested"), true
 	}
 	halted, haltErr := db.IsHalted()
@@ -334,4 +335,44 @@ func hermesCorrelationRegimeMultiplier(a agent1.MarketAnalysis) float64 {
 		return 0.80
 	}
 	return 1
+}
+
+// saveBaseProtectionStatus persists a lightweight protection snapshot
+// containing only the portfolio-level locks (loss streak, drawdown, equity, cooldowns).
+// Called on HOLD/WATCH cycles where the full decision loop is skipped.
+func saveBaseProtectionStatus(db *storage.DB, cfg config.Config) {
+	lossLookback := time.Duration(cfg.Risk.HermesLossLookbackHours) * time.Hour
+	if lossLookback <= 0 {
+		lossLookback = 7 * 24 * time.Hour
+	}
+	lossProtection, lossProtectionErr := db.HermesLossProtectionSnapshot(time.Now().Add(-lossLookback))
+	if lossProtectionErr != nil {
+		return
+	}
+	lossLockUntil := time.Time{}
+	if cfg.Risk.HermesMaxConsecutiveLosses > 0 && lossProtection.ConsecutiveLosses >= cfg.Risk.HermesMaxConsecutiveLosses {
+		lossLockUntil = lossProtection.LastLossAt.Add(time.Duration(cfg.Risk.HermesLossLockMinutes) * time.Minute)
+	}
+	drawdownLockUntil := time.Time{}
+	drawdownCap := cfg.Portfolio.TotalCapital * cfg.Risk.HermesMaxRealizedDrawdownPct
+	if drawdownCap > 0 && lossProtection.MaxDrawdown >= drawdownCap && !lossProtection.LastCloseAt.IsZero() {
+		drawdownLockUntil = lossProtection.LastCloseAt.Add(time.Duration(cfg.Risk.HermesDrawdownLockMinutes) * time.Minute)
+	}
+	protections := []storage.ProtectionStatus{
+		{Name: "loss_streak", Active: !lossLockUntil.IsZero() && time.Now().Before(lossLockUntil), UnlockAt: lossLockUntil, Detail: fmt.Sprintf("%d consecutive losses", lossProtection.ConsecutiveLosses)},
+		{Name: "realized_drawdown", Active: !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil), UnlockAt: drawdownLockUntil, Detail: fmt.Sprintf("%.2f USDT", lossProtection.MaxDrawdown)},
+	}
+	if eq, e := db.EquityRiskState(); e == nil {
+		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.HermesMaxRealizedDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
+	}
+	lastExitAt, err := db.HermesLastExitAtBySymbol()
+	if err == nil {
+		for symbol, exited := range lastExitAt {
+			unlock := exited.Add(time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute)
+			if time.Now().Before(unlock) {
+				protections = append(protections, storage.ProtectionStatus{Name: "reentry_cooldown", Symbol: symbol, Active: true, UnlockAt: unlock})
+			}
+		}
+	}
+	_ = db.SaveProtectionStatuses(protections, time.Now())
 }

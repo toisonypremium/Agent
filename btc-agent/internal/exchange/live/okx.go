@@ -416,7 +416,8 @@ func parseBalances(data []byte) ([]Balance, error) {
 			if detail.CCY == "" {
 				continue
 			}
-			out = append(out, Balance{Asset: strings.ToUpper(detail.CCY), Free: free, Equity: firstParseFloat(detail.Eq, detail.CashBal), AvgPrice: firstParseFloat(detail.AvgPx)})
+			total := firstParseFloat(detail.CashBal, detail.Eq, detail.AvailBal)
+			out = append(out, Balance{Asset: strings.ToUpper(detail.CCY), Free: free, Total: total, Equity: firstParseFloat(detail.Eq, detail.CashBal), AvgPrice: firstParseFloat(detail.AvgPx)})
 		}
 	}
 	return out, nil

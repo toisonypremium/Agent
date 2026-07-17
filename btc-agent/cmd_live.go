@@ -759,15 +759,19 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		if liveBalances, berr := client.AccountBalance(ctx); berr == nil {
 			equity := 0.0
 			for _, b := range liveBalances {
+				qty := b.Total
+				if qty <= 0 {
+					qty = b.Free
+				}
 				if strings.EqualFold(b.Asset, "USDT") {
-					equity += b.Free
+					equity += qty
 					continue
 				}
-				if b.Free <= 0 {
+				if qty <= 0 {
 					continue
 				}
-				if price, pe := client.SpotLastPrice(ctx, strings.ToUpper(b.Asset)+"USDT"); pe == nil && b.Free*price >= 1 {
-					equity += b.Free * price
+				if price, pe := client.SpotLastPrice(ctx, strings.ToUpper(b.Asset)+"USDT"); pe == nil && qty*price >= 1 {
+					equity += qty * price
 				}
 			}
 			if equity > 0 {

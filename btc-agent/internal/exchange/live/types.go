@@ -26,6 +26,7 @@ type InventoryBasis struct {
 type Balance struct {
 	Asset    string  `json:"asset"`
 	Free     float64 `json:"free"`
+	Total    float64 `json:"total"`
 	Equity   float64 `json:"equity,omitempty"`
 	AvgPrice float64 `json:"avg_price,omitempty"`
 }

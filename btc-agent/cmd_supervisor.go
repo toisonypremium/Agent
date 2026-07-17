@@ -533,10 +533,17 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 			h = storage.HermesManagedHolding{Symbol: symbol, InstID: live.OKXInstID(symbol), Quantity: b.Free, AvgEntryPrice: price, Source: "OKX_ACCOUNT_ADOPTION"}
 			adopted++
 		} else {
-			h.Quantity = b.Free
+			newBasis := h.AvgEntryPrice
 			if b.AvgPrice > 0 {
-				h.AvgEntryPrice = b.AvgPrice
+				newBasis = b.AvgPrice
 			}
+			qtyChanged := math.Abs(h.Quantity-b.Free) > math.Max(1e-12, math.Abs(h.Quantity)*1e-9)
+			basisChanged := math.Abs(h.AvgEntryPrice-newBasis) > math.Max(1e-12, math.Abs(h.AvgEntryPrice)*1e-9)
+			if !qtyChanged && !basisChanged {
+				continue
+			}
+			h.Quantity = b.Free
+			h.AvgEntryPrice = newBasis
 			updated++
 		}
 		if err := db.SaveHermesManagedHolding(h); err != nil {

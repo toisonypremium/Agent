@@ -531,3 +531,50 @@ func TestExceptionalRRBypassDoesNotBypassPanicSelling(t *testing.T) {
 		}
 	}
 }
+
+func TestExceptionalRRDemotesOnlyFallingKnifeToProbeSoftWait(t *testing.T) {
+	cfg := testConfig()
+	cfg.Risk.ExceptionalRRBypassFallingKnife = 6
+	a := allowedAnalysis()
+	a.FallingKnifeRisk = agent1.High
+	a.MarketRegime = "MARKDOWN"
+	a.FomoRisk = agent1.Low
+	got := applyBTCGateToAsset(cfg, a, AssetPlan{Symbol: "RENDERUSDT", State: StateNoTrade, RewardRisk: 8})
+	if got.State != StateScout {
+		t.Fatalf("expected SCOUT: %+v", got)
+	}
+	for _, b := range got.HardBlockers {
+		if strings.Contains(strings.ToLower(b), "falling knife") {
+			t.Fatalf("falling knife remained hard: %+v", got)
+		}
+	}
+	found := false
+	for _, b := range got.SoftBlockers {
+		if strings.Contains(strings.ToLower(b), "probe only") {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing probe-only soft constraint: %+v", got)
+	}
+	if len(got.Layers) != 0 {
+		t.Fatalf("planner must not create deterministic order layers: %+v", got.Layers)
+	}
+}
+func TestExceptionalRRDoesNotDemotePanicOrFOMO(t *testing.T) {
+	cfg := testConfig()
+	cfg.Risk.ExceptionalRRBypassFallingKnife = 6
+	a := allowedAnalysis()
+	a.FallingKnifeRisk = agent1.High
+	a.MarketRegime = "PANIC_SELLING"
+	got := applyBTCGateToAsset(cfg, a, AssetPlan{Symbol: "RENDERUSDT", RewardRisk: 20})
+	if got.State != StateNoTrade || len(got.HardBlockers) == 0 {
+		t.Fatalf("panic must remain hard: %+v", got)
+	}
+	a.MarketRegime = "MARKDOWN"
+	a.FomoRisk = agent1.High
+	got = applyBTCGateToAsset(cfg, a, AssetPlan{Symbol: "RENDERUSDT", RewardRisk: 20})
+	if got.State != StateNoTrade || len(got.HardBlockers) == 0 {
+		t.Fatalf("FOMO must remain hard: %+v", got)
+	}
+}

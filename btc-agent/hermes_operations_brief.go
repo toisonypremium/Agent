@@ -14,6 +14,7 @@ import (
 	"btc-agent/internal/freeapi"
 	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/microstructure"
+	researchpkg "btc-agent/internal/research"
 )
 
 type HermesBriefSource struct {
@@ -44,6 +45,18 @@ type HermesBriefAllocation struct {
 	Symbol                                              string
 	CeilingPct, CurrentPct, ProbePct, OpenPct, ScalePct float64
 	State, Condition                                    string
+	HardBlockers, SoftBlockers                          []string
+}
+type HermesBriefMicro struct {
+	Symbol                                                                                        string
+	TakerBuyPct, CVDUSD, BookImbalance, BidDepthUSD, AskDepthUSD, SpreadBps, FundingPct, BasisPct float64
+	BuyPressure, CVDTrend, BookBias                                                               string
+	Absorption, Supportive, Risky                                                                 bool
+}
+type HermesBriefExpert struct {
+	Synthesis, Risk, Confidence string
+	Bull, Base, Bear            researchpkg.Scenario
+	Catalysts, Actions          []string
 }
 type HermesOperationsBrief struct {
 	GeneratedAt     time.Time
@@ -64,6 +77,10 @@ type HermesOperationsBrief struct {
 	Allocations     []HermesBriefAllocation
 	ReservePct      float64
 	PortfolioCapPct float64
+	Micro           []HermesBriefMicro
+	Expert          HermesBriefExpert
+	FreshCount      int
+	StaleCount      int
 }
 
 func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperationsBrief {
@@ -90,6 +107,37 @@ func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperations
 		b.Missing = append(b.Missing, "scenario")
 	}
 	b.Hermes = buildHermesSnapshot(cfg)
+	var auditPlan struct {
+		Plan struct {
+			Assets []struct {
+				Symbol       string `json:"symbol"`
+				DiscountZone struct {
+					Low  float64 `json:"low"`
+					High float64 `json:"high"`
+				} `json:"discount_zone"`
+				Invalidation     float64 `json:"invalidation"`
+				RewardRiskDetail struct {
+					Target float64 `json:"target"`
+				} `json:"reward_risk_detail"`
+				NextTrigger string `json:"next_trigger"`
+			} `json:"assets"`
+		} `json:"plan"`
+	}
+	if readReport("live_auto_audit_latest.json", &auditPlan) {
+		for i := range b.Hermes.Assets {
+			for _, p := range auditPlan.Plan.Assets {
+				if p.Symbol == b.Hermes.Assets[i].Symbol {
+					b.Hermes.Assets[i].EntryZoneLow = p.DiscountZone.Low
+					b.Hermes.Assets[i].EntryZoneHigh = p.DiscountZone.High
+					b.Hermes.Assets[i].Invalidation = p.Invalidation
+					b.Hermes.Assets[i].Target = p.RewardRiskDetail.Target
+					if b.Hermes.Assets[i].NextTrigger == "" {
+						b.Hermes.Assets[i].NextTrigger = p.NextTrigger
+					}
+				}
+			}
+		}
+	}
 	if x, ok := loadHermesReportFile(); ok {
 		b.HermesReport = x
 		b.Sources = append(b.Sources, sourceStatus("hermes", x.GeneratedAt, "latest autonomous analysis"))
@@ -102,7 +150,10 @@ func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperations
 			b.MM = append(b.MM, HermesBriefMM{sym, x.Verdict, x.FootprintScore, x.DataQuality, x.CoreSignalCount, x.CurrentAskPressure, x.Reasons})
 		}
 		sort.Slice(b.MM, func(i, j int) bool { return b.MM[i].Symbol < b.MM[j].Symbol })
-		b.Sources = append(b.Sources, sourceStatus("microstructure", ms.GeneratedAt, "CVD/taker/orderbook/funding/basis"))
+		for _, q := range ms.Summary.Snapshots {
+			b.Micro = append(b.Micro, HermesBriefMicro{q.Symbol, q.SpotFlow.TakerBuyRatio * 100, q.SpotFlow.CVDQuoteUSDT, q.OrderBook.Imbalance, q.OrderBook.BidDepthUSDT, q.OrderBook.AskDepthUSDT, q.OrderBook.SpreadBps, q.Futures.FundingRate * 100, q.Futures.BasisPct, q.Signals.BuyPressure, q.Signals.CVDTrend, q.Signals.OrderBookBias, q.Signals.AbsorptionHint, q.Signals.Supportive, q.Signals.Risky})
+		}
+		b.Sources = append(b.Sources, sourceStatusMax("microstructure", ms.GeneratedAt, "giao dịch chủ động, CVD, sổ lệnh, funding và basis", 30))
 	} else {
 		b.Missing = append(b.Missing, "microstructure")
 	}
@@ -117,15 +168,16 @@ func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperations
 		b.Missing = append(b.Missing, "research brief")
 	}
 	var expert struct {
-		GeneratedAt      time.Time `json:"generated_at"`
-		Summary          string    `json:"summary"`
-		ExecutiveSummary string    `json:"executive_summary"`
+		Report   researchpkg.ExpertReport   `json:"report"`
+		Analysis researchpkg.ExpertAnalysis `json:"analysis"`
 	}
-	if readReport("expert_report_latest.json", &expert) {
-		b.MacroSummary = firstBrief(expert.ExecutiveSummary, expert.Summary)
-		b.Sources = append(b.Sources, sourceStatus("expert macro", expert.GeneratedAt, "macro/policy/geopolitics"))
+	if readReport("expert_report_latest.json", &expert) && !expert.Report.GeneratedAt.IsZero() {
+		b.MacroSummary = firstBrief(expert.Analysis.Synthesis, expert.Report.Summary)
+		b.Expert = HermesBriefExpert{expert.Analysis.Synthesis, expert.Analysis.RiskAssessment, expert.Analysis.ConfidenceLevel, expert.Analysis.BullCase, expert.Analysis.BaseCase, expert.Analysis.BearCase, expert.Analysis.KeyCatalysts, expert.Analysis.ActionRecommendations}
+		b.ResearchSummary = firstBrief(expert.Report.ResearchSummary, b.ResearchSummary)
+		b.Sources = append(b.Sources, sourceStatusMax("expert macro", expert.Report.GeneratedAt, "vĩ mô, chính sách, tin tức và ba kịch bản", 360))
 	} else {
-		b.Missing = append(b.Missing, "expert macro/political")
+		b.Missing = append(b.Missing, "phân tích vĩ mô chuyên sâu")
 	}
 	var api freeapi.Report
 	if readReport("freeapi_latest.json", &api) {
@@ -142,13 +194,28 @@ func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperations
 			capPct = max
 		}
 		confidence := asset.Readiness
-		probe := math.Min(capPct, cfg.HermesOperator.MaxProbeNotionalPct*100*confidence)
-		open := math.Min(capPct, probe*2)
-		scale := math.Min(capPct, open*1.5)
-		if strings.Contains(strings.ToUpper(asset.State), "NO_TRADE") {
-			probe, open, scale = 0, 0, 0
+		if confidence > 1 {
+			confidence /= 100
 		}
-		b.Allocations = append(b.Allocations, HermesBriefAllocation{asset.Symbol, capPct, 0, probe, open, scale, asset.State, asset.NextTrigger})
+		confidence = math.Max(0, math.Min(1, confidence))
+		probe := math.Min(capPct, cfg.HermesOperator.MaxProbeNotionalPct*100*math.Max(0.25, confidence))
+		open := math.Min(capPct, probe*2)
+		scale := capPct
+		currentPct := 0.0
+		var hard, soft []string
+		for _, coin := range b.Bot.PerCoin {
+			if coin.Symbol == asset.Symbol {
+				if cfg.Portfolio.TotalCapital > 0 {
+					currentPct = coin.PendingNotional / cfg.Portfolio.TotalCapital * 100
+				}
+				hard = coin.HardBlockers
+				soft = coin.SoftBlockers
+				if asset.NextTrigger == "" {
+					asset.NextTrigger = coin.NextTrigger
+				}
+			}
+		}
+		b.Allocations = append(b.Allocations, HermesBriefAllocation{Symbol: asset.Symbol, CeilingPct: capPct, CurrentPct: currentPct, ProbePct: probe, OpenPct: open, ScalePct: scale, State: asset.State, Condition: asset.NextTrigger, HardBlockers: hard, SoftBlockers: soft})
 		acc := HermesBriefZone{Symbol: asset.Symbol, Kind: "ACCUMULATION_CANDIDATE", Low: asset.EntryZoneLow, High: asset.EntryZoneHigh, Invalidation: fmt.Sprintf("$%.4f", asset.Invalidation), Trigger: asset.NextTrigger}
 		if asset.EntryZoneLow > 0 && asset.EntryZoneHigh > 0 {
 			acc.Score += 25
@@ -203,6 +270,39 @@ func buildHermesOperationsBrief(cfg config.Config, kind string) HermesOperations
 		}
 		dist.Confidence = dist.Score / 100
 		b.Zones = append(b.Zones, dist)
+	}
+	if b.Bot.DataHealthStatus == "" {
+		var h struct {
+			GeneratedAt     time.Time `json:"generated_at"`
+			Status, Summary string
+		}
+		if readReport("live_doctor_latest.json", &h) {
+			b.Bot.DataHealthStatus = h.Status
+			b.Bot.DataHealthSummary = h.Summary
+			b.Sources = append(b.Sources, sourceStatusMax("kiểm tra hệ thống", h.GeneratedAt, "sức khỏe dữ liệu và kết nối", 30))
+		}
+	}
+	if b.Bot.ReconcileSafetyStatus == "" {
+		var r struct {
+			GeneratedAt time.Time `json:"generated_at"`
+			Summary     string    `json:"summary"`
+			Safety      struct {
+				Status  string `json:"status"`
+				Summary string `json:"summary"`
+			} `json:"safety"`
+		}
+		if readReport("live_reconcile_latest.json", &r) {
+			b.Bot.ReconcileSafetyStatus = r.Safety.Status
+			b.Bot.ReconcileSafetySummary = firstBrief(r.Safety.Summary, r.Summary)
+			b.Sources = append(b.Sources, sourceStatusMax("đối soát tài khoản", r.GeneratedAt, "lệnh và vị thế trên sàn", 30))
+		}
+	}
+	for _, q := range b.Sources {
+		if q.Fresh {
+			b.FreshCount++
+		} else {
+			b.StaleCount++
+		}
 	}
 	return b
 }
@@ -332,21 +432,57 @@ func renderHermesExecutive(b HermesOperationsBrief) string {
 
 func renderHermesPlan(b HermesOperationsBrief) string {
 	var x strings.Builder
-	x.WriteString("HERMES — KẾ HOẠCH PHÂN BỔ VỐN\n")
-	fmt.Fprintf(&x, "Giữ dự phòng %.1f%% vốn; tổng mức triển khai không vượt %.1f%%.\n", b.ReservePct, b.PortfolioCapPct)
+	x.WriteString("HERMES — KẾ HOẠCH PHÂN TÍCH THỰC CHIẾN\n")
+	fmt.Fprintf(&x, "Cập nhật %s | Dữ liệu còn mới %d, đã cũ %d\n\n", b.LocalTime, b.FreshCount, b.StaleCount)
+	fmt.Fprintf(&x, "1. KẾT LUẬN VÀ HÀNH ĐỘNG LÚC NÀY\n%s\nBTC $%.0f, thị trường %s; xu hướng %.1f/100; dòng tiền %s %.2f; rủi ro %s.\n", briefAction(b), b.Bot.BTC.Price, viTerm(b.Bot.BTC.Regime), b.Bot.BTC.TrendScore, viTerm(b.Bot.BTC.FlowBias), b.Bot.BTC.FlowScore, viTerm(string(b.Bot.BTC.RiskLevel)))
+	fmt.Fprintf(&x, "Lý do thực tế: giá cần nằm trong vùng mua, tỷ lệ lãi/rủi ro phải đạt chuẩn, dòng tiền lớn và sổ lệnh phải cùng xác nhận. Chỉ một tín hiệu tốt chưa đủ để dùng vốn.\n\n")
+	fmt.Fprintf(&x, "2. BỐI CẢNH TOÀN THỊ TRƯỜNG\nVốn hóa %.2f nghìn tỷ USD | Khối lượng 24h %.1f tỷ USD | BTC chiếm %.2f%%.\nTâm lý %d/100 — %s | EUR/USD %.4f.\nBTC tuần/ngày/4 giờ: %s/%s/%s. Hỗ trợ %s; vùng cản %s; mốc sai kịch bản %s.\n\n", b.Global.MarketCapUSD/1e12, b.Global.VolumeUSD/1e9, b.Global.BTCDominance, b.Global.FearGreed, viTerm(b.Global.FearGreedLabel), b.Global.EURUSD, viTerm(b.Bot.BTC.WeeklyBias), viTerm(b.Bot.BTC.DailyBias), viTerm(b.Bot.BTC.FourHourBias), briefZone("", b.Bot.BTC.SupportZone.Low, b.Bot.BTC.SupportZone.High), briefZone("", b.Bot.BTC.ResistanceZone.Low, b.Bot.BTC.ResistanceZone.High), briefZone("", b.Bot.BTC.InvalidationZone.Low, b.Bot.BTC.InvalidationZone.High))
+	x.WriteString("3. DÒNG TIỀN THỰC TẾ VÀ SỔ LỆNH\n")
+	for _, m := range b.Micro {
+		fmt.Fprintf(&x, "- %s: bên mua chủ động %.1f%%; CVD %+.0f USD; lệch sổ lệnh %+.2f; độ sâu mua/bán %.0fK/%.0fK USD; spread %.3f bps.\n  Funding %.4f%%; basis %+.3f%%; CVD %s; sổ lệnh %s; hấp thụ: %s; tín hiệu hỗ trợ: %s.\n", m.Symbol, m.TakerBuyPct, m.CVDUSD, m.BookImbalance, m.BidDepthUSD/1000, m.AskDepthUSD/1000, m.SpreadBps, m.FundingPct, m.BasisPct, viTerm(m.CVDTrend), viTerm(m.BookBias), yesNo(m.Absorption), yesNo(m.Supportive))
+	}
+	fmt.Fprintf(&x, "\n4. NGÂN SÁCH VÀ NGUYÊN TẮC GIẢI NGÂN\nGiữ dự phòng %.1f%%; tổng vốn triển khai không vượt %.1f%%. Không giải ngân đủ một lần.\n", b.ReservePct, b.PortfolioCapPct)
 	for _, a := range b.Allocations {
-		fmt.Fprintf(&x, "\n%s — %s\nTỷ trọng tối đa %.1f%%; hiện dùng %.1f%%.\nKhi đủ tín hiệu: thăm dò %.1f%% → mở vị thế %.1f%% → tăng thêm tối đa %.1f%%.\nCần chờ: %s\n", a.Symbol, viTerm(a.State), a.CeilingPct, a.CurrentPct, a.ProbePct, a.OpenPct, a.ScalePct, a.Condition)
-	}
-	x.WriteString("\nCÁC VÙNG GIÁ QUAN TRỌNG\n")
-	for _, z := range b.Zones {
-		kind := "có thể gom"
-		if strings.Contains(z.Kind, "DISTRIBUTION") {
-			kind = "có thể phân phối/chốt giảm"
+		fmt.Fprintf(&x, "\n%s — %s, tối đa %.1f%% vốn; đang dùng/chờ %.1f%%.\nNếu đủ xác nhận: thăm dò %.1f%% → xác nhận lần hai %.1f%% → mức tối đa %.1f%%.\n", a.Symbol, viTerm(a.State), a.CeilingPct, a.CurrentPct, a.ProbePct, a.OpenPct, a.ScalePct)
+		if len(a.HardBlockers) > 0 {
+			fmt.Fprintf(&x, "Chưa hành động vì: %s.\n", briefCut(strings.Join(a.HardBlockers, "; "), 260))
 		}
-		fmt.Fprintf(&x, "- %s: vùng %s $%.4f–$%.4f, độ tin cậy %.0f%%. Chờ: %s\n", z.Symbol, kind, z.Low, z.High, z.Confidence*100, briefCut(z.Trigger, 150))
+		if len(a.SoftBlockers) > 0 {
+			fmt.Fprintf(&x, "Điểm còn yếu: %s.\n", briefCut(strings.Join(a.SoftBlockers, "; "), 320))
+		}
+		fmt.Fprintf(&x, "Điều kiện gần nhất: %s\n", humanPlanText(a.Condition))
 	}
-	fmt.Fprintf(&x, "\nKịch bản chính: %s\nNếu tốt lên: %s\nNếu xấu đi: %s\n", b.Scenario.BTC.BaseCase, b.Scenario.BTC.BullUnlock, b.Scenario.BTC.BearInvalidation)
+	x.WriteString("\n5. VÙNG MUA, MỐC DỪNG VÀ VÙNG CHỐT\n")
+	for _, a := range b.Hermes.Assets {
+		dist := zoneFor(b.Zones, a.Symbol, "DISTRIBUTION")
+		acc := zoneFor(b.Zones, a.Symbol, "ACCUMULATION")
+		fmt.Fprintf(&x, "- %s: vùng xem xét mua $%.4f–$%.4f (điểm %.0f/100); mốc sai $%.4f; mục tiêu/vùng xem xét chốt $%.4f (điểm phân phối %.0f/100); lãi/rủi ro %.2f lần.\n  Không mua nếu giá chưa vào vùng hoặc mất mốc sai. Chỉ tăng tỷ trọng sau khi giữ được vùng và dòng tiền tiếp tục xác nhận.\n", a.Symbol, a.EntryZoneLow, a.EntryZoneHigh, acc.Score, a.Invalidation, a.Target, dist.Score, a.RR)
+	}
+	fmt.Fprintf(&x, "\n6. BA KỊCH BẢN CÓ XÁC SUẤT\nKịch bản chính %.0f%%: %s\nKịch bản tốt %.0f%%: %s\nKịch bản xấu %.0f%%: %s\nMức tin cậy của phân tích tin tức: %s.\n", probPct(b.Expert.Base.Probability), firstBrief(b.Expert.Base.Conditions, b.Scenario.BTC.BaseCase), probPct(b.Expert.Bull.Probability), firstBrief(b.Expert.Bull.Conditions, b.Scenario.BTC.BullUnlock), probPct(b.Expert.Bear.Probability), firstBrief(b.Expert.Bear.Conditions, b.Scenario.BTC.BearInvalidation), viTerm(b.Expert.Confidence))
+	fmt.Fprintf(&x, "\n7. TIN TỨC TÁC ĐỘNG ĐẾN KẾ HOẠCH\n%s\nRủi ro được ghi nhận: %s\nChất xúc tác: %s\nLưu ý: tin tức chỉ điều chỉnh mức thận trọng; giá, dòng tiền, thanh khoản và mốc sai kịch bản mới quyết định giải ngân.\n", briefCut(firstBrief(b.Expert.Synthesis, b.MacroSummary, "Chưa có tổng hợp tin đáng tin cậy."), 500), briefCut(firstBrief(b.Expert.Risk, "chưa có cảnh báo mới"), 300), briefCut(firstBrief(strings.Join(b.Expert.Catalysts, "; "), "chưa có chất xúc tác rõ"), 300))
+	fmt.Fprintf(&x, "\n8. THỨ TỰ HERMES SẼ LÀM\n1) Chờ giá vào vùng có lợi thế. 2) Kiểm tra BTC không còn rơi mạnh. 3) Xác nhận CVD, lực mua và sổ lệnh. 4) Kiểm tra tỷ lệ lãi/rủi ro. 5) Mua thăm dò theo %% vốn. 6) Chỉ tăng thêm khi vùng mua được giữ vững. 7) Giảm/chốt tại mục tiêu hoặc thoát khi mốc sai bị phá.\n\nTrạng thái an toàn: dữ liệu %s; đối soát %s; lệnh chờ %d; vị thế %d.\n", viTerm(b.Bot.DataHealthStatus), viTerm(b.Bot.ReconcileSafetyStatus), b.Bot.OpenLiveOrders, b.Bot.LivePositions)
+	if len(b.Missing) > 0 {
+		fmt.Fprintf(&x, "Dữ liệu còn thiếu: %s. Phần thiếu không được dùng để nâng độ tin cậy.\n", strings.Join(b.Missing, ", "))
+	}
 	return x.String()
+}
+func humanPlanText(v string) string {
+	r := strings.NewReplacer("panic/falling knife/FOMO hard risk", "nhịp rơi mạnh và nguy cơ mua đuổi", "Exceptional RR bypass", "Tỷ lệ lợi nhuận/rủi ro đặc biệt tốt", "theo doi entry tot hon", "tiếp tục chờ vùng mua tốt hơn", "khong tao lenh", "không tạo lệnh", "den khi BTC het", "đến khi BTC hết", "setup", "kế hoạch vào lệnh", "falling knife", "giá đang rơi mạnh")
+	return r.Replace(v)
+}
+func zoneFor(zones []HermesBriefZone, symbol, kind string) HermesBriefZone {
+	for _, z := range zones {
+		if z.Symbol == symbol && strings.Contains(z.Kind, kind) {
+			return z
+		}
+	}
+	return HermesBriefZone{}
+}
+func probPct(v float64) float64 {
+	if v <= 1 {
+		return v * 100
+	}
+	return v
 }
 
 func renderHermesWhy(b HermesOperationsBrief) string {

@@ -90,7 +90,9 @@ func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
 }
 
 func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
-	rows, err := d.Query(`SELECT client_order_id, order_id, inst_id, symbol, type, side, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action FROM live_orders WHERE status IN ('PLANNED', 'SUBMITTED', 'PARTIAL_FILL', 'LIVE_OPEN', 'PARTIALLY_FILLED')`)
+	rows, err := d.Query(`SELECT o.client_order_id, o.order_id, o.inst_id, o.symbol, o.type, o.side, o.price, o.quantity, o.notional, o.status, o.submitted_at, o.updated_at, o.layer_index, o.source, o.invalidation_price, o.expires_at, o.decision_reason, o.last_management_action, COALESCE(f.filled_quantity,0), COALESCE(f.avg_price,0)
+		FROM live_orders o LEFT JOIN live_fills f ON f.client_order_id=o.client_order_id
+		WHERE o.status IN ('PLANNED', 'SUBMITTED', 'PARTIAL_FILL', 'LIVE_OPEN', 'PARTIALLY_FILLED')`)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +103,7 @@ func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
 		var symbol, source, decisionReason, lastAction sql.NullString
 		var notional, invalidation sql.NullFloat64
 		var submittedAt, layerIndex, expiresAt sql.NullInt64
-		if err := rows.Scan(&o.ClientOrderID, &o.OrderID, &o.InstID, &symbol, &o.OrderType, &o.Side, &o.Price, &o.Quantity, &notional, &o.Status, &submittedAt, &o.UpdatedAt, &layerIndex, &source, &invalidation, &expiresAt, &decisionReason, &lastAction); err != nil {
+		if err := rows.Scan(&o.ClientOrderID, &o.OrderID, &o.InstID, &symbol, &o.OrderType, &o.Side, &o.Price, &o.Quantity, &notional, &o.Status, &submittedAt, &o.UpdatedAt, &layerIndex, &source, &invalidation, &expiresAt, &decisionReason, &lastAction, &o.FilledQuantity, &o.AvgPrice); err != nil {
 			return nil, err
 		}
 		if symbol.Valid {

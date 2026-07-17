@@ -2,6 +2,7 @@ package storage
 
 import (
 	"fmt"
+	"math"
 	"path/filepath"
 	"testing"
 	"time"
@@ -261,5 +262,26 @@ func TestManagedLiveOrderStorageRoundTrip(t *testing.T) {
 	got := open[0]
 	if got.Symbol != "ETHUSDT" || got.LayerIndex != 2 || got.Source != meta.Source || got.InvalidationPrice != 88 || got.DecisionReason != "active layer" || got.LastManagementAction != "placed" {
 		t.Fatalf("bad metadata: %+v", got)
+	}
+}
+
+func TestOpenLiveOrdersHydratesPartialFillSnapshot(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "partial.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SaveManagedLiveOrder("c-partial", "o1", "BTC-USDT", "BTCUSDT", "SELL", "limit", 50000, .01, 500, live.StatusPartialFill, live.OrderStatus{Source: "HERMES_OPERATOR"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveLiveFillSnapshot(live.LiveFillSnapshot{ClientOrderID: "c-partial", OrderID: "o1", InstID: "BTC-USDT", Symbol: "BTCUSDT", Side: "SELL", FilledQuantity: .004, AvgPrice: 50010}); err != nil {
+		t.Fatal(err)
+	}
+	orders, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(orders) != 1 || math.Abs(orders[0].FilledQuantity-.004) > 1e-12 || math.Abs(orders[0].AvgPrice-50010) > 1e-12 {
+		t.Fatalf("partial fill not hydrated: %+v", orders)
 	}
 }

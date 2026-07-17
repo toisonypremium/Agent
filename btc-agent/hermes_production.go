@@ -322,6 +322,11 @@ func executeHermesReducingBatch(ctx context.Context, cfg config.Config, db *stor
 		out.Placed = append(out.Placed, one.Placed...)
 		out.Blocked = append(out.Blocked, one.Blocked...)
 		out.Reasons = append(out.Reasons, one.Reasons...)
+		for _, placed := range one.Placed {
+			if strings.EqualFold(placed.Desired.Side, "SELL") && placed.Desired.Quantity > 0 {
+				open = append(open, live.OrderStatus{ClientOrderID: placed.PlaceResult.ClientOrderID, OrderID: placed.PlaceResult.OrderID, InstID: placed.Desired.InstID, Symbol: placed.Desired.Symbol, Side: "SELL", Quantity: placed.Desired.Quantity, Price: placed.Desired.Price, Status: live.StatusSubmitted, Source: placed.Desired.Source})
+			}
+		}
 	}
 	if dryRun {
 		out.Status = liveguard.ManagedCycleDryRun

@@ -289,6 +289,11 @@ func executeAutonomousExits(ctx context.Context, cfg config.Config, db *storage.
 		}
 		result.Placed = append(result.Placed, cycle.Placed...)
 		result.Blocked = append(result.Blocked, cycle.Blocked...)
+		for _, placed := range cycle.Placed {
+			if strings.EqualFold(placed.Desired.Side, "SELL") && placed.Desired.Quantity > 0 {
+				open = append(open, live.OrderStatus{ClientOrderID: placed.PlaceResult.ClientOrderID, OrderID: placed.PlaceResult.OrderID, InstID: placed.Desired.InstID, Symbol: placed.Desired.Symbol, Side: "SELL", Quantity: placed.Desired.Quantity, Price: placed.Desired.Price, Status: live.StatusSubmitted, Source: placed.Desired.Source})
+			}
+		}
 	}
 	if len(result.Blocked) > 0 {
 		result.Status = liveguard.ManagedCyclePartial

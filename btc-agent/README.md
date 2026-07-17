@@ -378,7 +378,7 @@ No real order was placed.
 - Done: `EvaluateExits` with TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL.
 - Done: `PeakTracker` persists across supervisor cycles.
 - Done: `OpenedAt` on `LivePosition` for accurate time-stop.
-- Done: Wired into supervisor cycle (report-only; `exit.enabled=false` default). Auto exit execution is not enabled.
+- Done: Wired into supervisor through Hermes-owned limit SELL execution. Production `exit.enabled=true`; ownership, no-short, operator halt, reconcile and residual reservation gates remain mandatory.
 - Done: `live-auto-audit` scheduled in scheduler loop (`audit_interval_minutes`).
 
 ### Current Hermes control plane

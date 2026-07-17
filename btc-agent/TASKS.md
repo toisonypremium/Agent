@@ -6,7 +6,7 @@
 - [ ] Use full verification gate before reporting implementation work done.
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
 - [ ] Milestone C: prove BTC accumulation false-positive/drawdown improvement in walk-forward before any live sizing change.
-- [ ] Wire `PlaceSellLimitOrder` when operator decides to enable auto exit execution (currently report-only).
+- [x] Wire autonomous exits through Hermes-owned, no-short, reconcile-safe limit SELL lifecycle with residual reservation.
 
 ## Done
 

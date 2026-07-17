@@ -23,7 +23,19 @@ func NewBinance(base string) *BinanceClient {
 }
 
 func (c *BinanceClient) Klines(ctx context.Context, symbol, interval string, limit int) ([]market.Candle, error) {
+	return c.KlinesRange(ctx, symbol, interval, limit, time.Time{}, time.Time{})
+}
+
+// KlinesRange fetches public candles in a bounded time window. It has no
+// account credentials and no order authority.
+func (c *BinanceClient) KlinesRange(ctx context.Context, symbol, interval string, limit int, start, end time.Time) ([]market.Candle, error) {
 	q := url.Values{"symbol": {strings.ToUpper(symbol)}, "interval": {interval}, "limit": {strconv.Itoa(limit)}}
+	if !start.IsZero() {
+		q.Set("startTime", strconv.FormatInt(start.UnixMilli(), 10))
+	}
+	if !end.IsZero() {
+		q.Set("endTime", strconv.FormatInt(end.UnixMilli(), 10))
+	}
 	var raw [][]json.RawMessage
 	if err := c.get(ctx, "/api/v3/klines?"+q.Encode(), &raw); err != nil {
 		return nil, err

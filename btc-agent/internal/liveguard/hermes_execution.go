@@ -51,6 +51,8 @@ func ExecuteHermesDesiredOrders(ctx context.Context, cfg config.Config, plan age
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
+		d = WithStrategyEvidence(cfg, d)
+		decision.Desired = d
 		clientID := hermesClientOrderID(d)
 		if err := recorder.ReserveManagedLiveOrder(clientID, d, decision.Reason); err != nil {
 			decision.Action = "block"
@@ -325,6 +327,8 @@ func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decis
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
+		desired = WithStrategyEvidence(cfg, desired)
+		decision.Desired = desired
 		clientID := hermesClientOrderID(desired)
 		if err := recorder.ReserveManagedLiveOrder(clientID, desired, decision.Reason); err != nil {
 			decision.Action, decision.Reason, decision.Error = "block", "duplicate or reserve failed", err.Error()

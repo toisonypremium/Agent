@@ -157,6 +157,9 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 	} else if measured > 0 {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("execution markouts measured=%d", measured))
 	}
+	if e := saveExecutionEvidenceReport(db, time.Now()); e != nil {
+		result.Reasons = append(result.Reasons, "execution evidence: "+e.Error())
+	}
 	// Evaluate and execute deterministic exits after the managed cycle.
 	// Exits use the Hermes-owned ledger and the same reconcile-safe sell executor.
 	if cfg.Exit.Enabled {

@@ -3,6 +3,7 @@ package liveguard
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -218,16 +219,46 @@ func ExecuteHermesCancelActions(ctx context.Context, cfg config.Config, decision
 // HERMES_OPERATOR-owned ledger position. Requested quantity is capped at owned
 // quantity and floored to the exchange step size, so this path cannot short.
 func ExecuteHermesReduceActions(ctx context.Context, cfg config.Config, decisionID string, decisions []HermesActionDecision, ownedPositions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
-	return executeHermesOwnedSellActions(ctx, cfg, decisionID, "REDUCE", decisions, ownedPositions, filters, placer, recorder, dryRun)
+	return ExecuteHermesReduceActionsWithOpen(ctx, cfg, decisionID, decisions, ownedPositions, nil, filters, placer, recorder, dryRun)
+}
+
+// ExecuteHermesReduceActionsWithOpen reserves only uncommitted inventory. A
+// partially-filled or live SELL already owns its remaining quantity; subtracting
+// that residual prevents overlapping exits from collectively exceeding ownership.
+func ExecuteHermesReduceActionsWithOpen(ctx context.Context, cfg config.Config, decisionID string, decisions []HermesActionDecision, ownedPositions []live.LivePosition, openOrders []live.OrderStatus, filters []live.InstrumentFilter, placer OrderPlacer, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
+	return executeHermesOwnedSellActions(ctx, cfg, decisionID, "REDUCE", decisions, ownedPositions, openOrders, filters, placer, recorder, dryRun)
 }
 
 // ExecuteHermesExitLimitActions exits an owned position using the same
 // no-short, filter-normalized, restart-recoverable lifecycle as REDUCE.
 func ExecuteHermesExitLimitActions(ctx context.Context, cfg config.Config, decisionID string, decisions []HermesActionDecision, ownedPositions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
-	return executeHermesOwnedSellActions(ctx, cfg, decisionID, "EXIT_LIMIT", decisions, ownedPositions, filters, placer, recorder, dryRun)
+	return ExecuteHermesExitLimitActionsWithOpen(ctx, cfg, decisionID, decisions, ownedPositions, nil, filters, placer, recorder, dryRun)
 }
 
-func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decisionID, intent string, decisions []HermesActionDecision, ownedPositions []live.LivePosition, filters []live.InstrumentFilter, placer OrderPlacer, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
+// ExecuteHermesExitLimitActionsWithOpen applies the same residual reservation
+// invariant as REDUCE. Existing SELL quantity remains reserved until exchange
+// reconciliation makes that order terminal.
+func ExecuteHermesExitLimitActionsWithOpen(ctx context.Context, cfg config.Config, decisionID string, decisions []HermesActionDecision, ownedPositions []live.LivePosition, openOrders []live.OrderStatus, filters []live.InstrumentFilter, placer OrderPlacer, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
+	return executeHermesOwnedSellActions(ctx, cfg, decisionID, "EXIT_LIMIT", decisions, ownedPositions, openOrders, filters, placer, recorder, dryRun)
+}
+
+func openSellResidualQuantity(symbol string, openOrders []live.OrderStatus) float64 {
+	reserved := 0.0
+	for _, order := range openOrders {
+		orderSymbol := strings.ToUpper(firstNonEmptyString(order.Symbol, live.InternalSymbol(order.InstID)))
+		if orderSymbol != symbol || !strings.EqualFold(order.Side, "SELL") || !live.IsOpenStatus(order.Status) {
+			continue
+		}
+		filled := math.Max(order.FilledQuantity, order.AccumulatedFillSz)
+		remaining := order.Quantity - filled
+		if remaining > 0 {
+			reserved += remaining
+		}
+	}
+	return reserved
+}
+
+func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decisionID, intent string, decisions []HermesActionDecision, ownedPositions []live.LivePosition, openOrders []live.OrderStatus, filters []live.InstrumentFilter, placer OrderPlacer, recorder ManagedOrderRecorder, dryRun bool) ManagedCycleResult {
 	result := ManagedCycleResult{Status: ManagedCycleCompleted, DryRun: dryRun}
 	if !cfg.HermesOperator.CanExecute() && !dryRun {
 		result.Status = ManagedCycleBlocked
@@ -254,6 +285,15 @@ func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decis
 			continue
 		}
 		pos := matches[0]
+		reservedQty := openSellResidualQuantity(symbol, openOrders)
+		availableQty := pos.Quantity - reservedQty
+		if availableQty <= fillEpsilon {
+			decision.Action = "block"
+			decision.Reason = fmt.Sprintf("Hermes %s has no unreserved owned quantity; owned=%.12f reserved_sell=%.12f", intent, pos.Quantity, reservedQty)
+			decision.AuditTrail = []string{fmt.Sprintf("owned_qty=%.12f", pos.Quantity), fmt.Sprintf("reserved_sell_qty=%.12f", reservedQty), "residual_tracker=retained"}
+			result.Blocked = append(result.Blocked, decision)
+			continue
+		}
 		filter, ok := findFilter(symbol, filters)
 		if !ok {
 			decision.Action, decision.Reason = "block", "instrument filter not found"
@@ -262,19 +302,19 @@ func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decis
 		}
 		price := floorToStep(action.EntryPrice, filter.TickSize)
 		qty := action.RequestedNotionalUSDT / action.EntryPrice
-		if qty > pos.Quantity {
-			qty = pos.Quantity
+		if qty > availableQty {
+			qty = availableQty
 		}
 		qty = floorToStep(qty, filter.StepSize)
 		notional := price * qty
-		if price <= 0 || qty <= 0 || qty > pos.Quantity+fillEpsilon || (filter.MinSize > 0 && qty < filter.MinSize) || (filter.MinNotional > 0 && notional < filter.MinNotional) {
+		if price <= 0 || qty <= 0 || qty > availableQty+fillEpsilon || (filter.MinSize > 0 && qty < filter.MinSize) || (filter.MinNotional > 0 && notional < filter.MinNotional) {
 			decision.Action, decision.Reason = "block", intent+" quantity failed owned-position or instrument limits"
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
 		desired := ManagedDesiredOrder{Symbol: symbol, InstID: firstNonEmptyString(pos.InstID, filter.InstID, live.OKXInstID(symbol)), Side: "SELL", Type: "limit", Price: price, Quantity: qty, Notional: notional, PostOnly: false, Source: "HERMES_OPERATOR", DecisionReason: strings.Join(action.ReasonCodes, ","), DecisionID: decisionID, Intent: intent, AllocationReason: "Hermes owned-position " + strings.ToLower(intent)}
 		decision.Desired = desired
-		decision.AuditTrail = []string{"decision_id=" + decisionID, "intent=" + intent, "ownership=HERMES_OPERATOR", fmt.Sprintf("owned_qty=%.12f", pos.Quantity), fmt.Sprintf("sell_qty=%.12f", qty), "no_short=true"}
+		decision.AuditTrail = []string{"decision_id=" + decisionID, "intent=" + intent, "ownership=HERMES_OPERATOR", fmt.Sprintf("owned_qty=%.12f", pos.Quantity), fmt.Sprintf("reserved_sell_qty=%.12f", reservedQty), fmt.Sprintf("available_qty=%.12f", availableQty), fmt.Sprintf("sell_qty=%.12f", qty), "no_short=true"}
 		if dryRun {
 			decision.Action = "would_" + strings.ToLower(intent)
 			result.Placed = append(result.Placed, decision)

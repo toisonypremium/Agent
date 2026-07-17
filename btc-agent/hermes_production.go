@@ -308,13 +308,13 @@ func executeHermesReducingBatch(ctx context.Context, cfg config.Config, db *stor
 			if ownedErr != nil {
 				one = blockedHermesCycle(plan, dryRun, "Hermes owned-position ledger unavailable")
 			} else {
-				one = liveguard.ExecuteHermesReduceActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, placer, db, dryRun)
+				one = liveguard.ExecuteHermesReduceActionsWithOpen(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, open, filters, placer, db, dryRun)
 			}
 		case hermesoperator.IntentExitLimit:
 			if ownedErr != nil {
 				one = blockedHermesCycle(plan, dryRun, "Hermes owned-position ledger unavailable")
 			} else {
-				one = liveguard.ExecuteHermesExitLimitActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, placer, db, dryRun)
+				one = liveguard.ExecuteHermesExitLimitActionsWithOpen(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, open, filters, placer, db, dryRun)
 			}
 		}
 		out.Desired = append(out.Desired, one.Desired...)

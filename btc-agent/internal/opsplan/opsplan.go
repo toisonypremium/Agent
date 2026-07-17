@@ -83,6 +83,10 @@ type ExposureSnapshot struct {
 	OpenOrderNotionalUSDT float64                  `json:"open_order_notional_usdt"`
 	Assets                map[string]AssetExposure `json:"assets,omitempty"`
 	Source                string                   `json:"source,omitempty"`
+	LiveEquityUSDT        float64                  `json:"live_equity_usdt,omitempty"`
+	HermesTargetPct       float64                  `json:"hermes_target_pct,omitempty"`
+	HermesCapacityUSDT    float64                  `json:"hermes_conditional_capacity_usdt,omitempty"`
+	HermesCapacityState   string                   `json:"hermes_capacity_state,omitempty"`
 }
 
 type AssetExposure struct {
@@ -91,20 +95,23 @@ type AssetExposure struct {
 }
 
 type CapitalPlan struct {
-	TotalCapitalUSDT           float64            `json:"total_capital_usdt"`
-	ReserveCashUSDT            float64            `json:"reserve_cash_usdt"`
-	InvestableCapitalUSDT      float64            `json:"investable_capital_usdt"`
-	CycleDeploymentCapUSDT     float64            `json:"cycle_deployment_cap_usdt"`
-	ExistingPositionUSDT       float64            `json:"existing_position_usdt"`
-	OpenOrderNotionalUSDT      float64            `json:"open_order_notional_usdt"`
-	AlreadyCommittedUSDT       float64            `json:"already_committed_usdt"`
-	AvailableCycleCapacityUSDT float64            `json:"available_cycle_capacity_usdt"`
-	ExecutableNowUSDT          float64            `json:"executable_now_usdt"`
-	OpportunityReservedUSDT    float64            `json:"opportunity_reserved_usdt"`
-	UnusedCycleCapacityUSDT    float64            `json:"unused_cycle_capacity_usdt"`
-	ExposureSource             string             `json:"exposure_source,omitempty"`
-	Assets                     []AssetCapitalPlan `json:"assets"`
-	Policy                     string             `json:"policy"`
+	TotalCapitalUSDT              float64            `json:"total_capital_usdt"`
+	ReserveCashUSDT               float64            `json:"reserve_cash_usdt"`
+	InvestableCapitalUSDT         float64            `json:"investable_capital_usdt"`
+	CycleDeploymentCapUSDT        float64            `json:"cycle_deployment_cap_usdt"`
+	ExistingPositionUSDT          float64            `json:"existing_position_usdt"`
+	OpenOrderNotionalUSDT         float64            `json:"open_order_notional_usdt"`
+	AlreadyCommittedUSDT          float64            `json:"already_committed_usdt"`
+	AvailableCycleCapacityUSDT    float64            `json:"available_cycle_capacity_usdt"`
+	ExecutableNowUSDT             float64            `json:"executable_now_usdt"`
+	OpportunityReservedUSDT       float64            `json:"opportunity_reserved_usdt"`
+	UnusedCycleCapacityUSDT       float64            `json:"unused_cycle_capacity_usdt"`
+	ExposureSource                string             `json:"exposure_source,omitempty"`
+	HermesConditionalCapacityUSDT float64            `json:"hermes_conditional_capacity_usdt,omitempty"`
+	HermesTargetDeploymentPct     float64            `json:"hermes_target_deployment_pct,omitempty"`
+	HermesCapacityState           string             `json:"hermes_capacity_state,omitempty"`
+	Assets                        []AssetCapitalPlan `json:"assets"`
+	Policy                        string             `json:"policy"`
 }
 
 type AssetCapitalPlan struct {
@@ -361,20 +368,23 @@ func buildCapitalPlan(cfg config.Config, analysis agent1.MarketAnalysis, plan ag
 		return assets[i].Symbol < assets[j].Symbol
 	})
 	return CapitalPlan{
-		TotalCapitalUSDT:           round2(total),
-		ReserveCashUSDT:            round2(reserve),
-		InvestableCapitalUSDT:      round2(investable),
-		CycleDeploymentCapUSDT:     round2(cycleCap),
-		ExistingPositionUSDT:       round2(exposure.PositionCostUSDT),
-		OpenOrderNotionalUSDT:      round2(exposure.OpenOrderNotionalUSDT),
-		AlreadyCommittedUSDT:       round2(committed),
-		AvailableCycleCapacityUSDT: round2(availableCapacity),
-		ExecutableNowUSDT:          round2(executableTotal),
-		OpportunityReservedUSDT:    round2(opportunityTotal),
-		UnusedCycleCapacityUSDT:    round2(math.Max(0, availableCapacity-opportunityTotal)),
-		ExposureSource:             exposure.Source,
-		Assets:                     assets,
-		Policy:                     "Vị thế và lệnh mở được trừ trước; chỉ ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED mới có ngân sách thực thi. WATCH/SCOUT/ARMED chỉ là ngân sách cơ hội, không tạo lệnh.",
+		TotalCapitalUSDT:              round2(total),
+		ReserveCashUSDT:               round2(reserve),
+		InvestableCapitalUSDT:         round2(investable),
+		CycleDeploymentCapUSDT:        round2(cycleCap),
+		ExistingPositionUSDT:          round2(exposure.PositionCostUSDT),
+		OpenOrderNotionalUSDT:         round2(exposure.OpenOrderNotionalUSDT),
+		AlreadyCommittedUSDT:          round2(committed),
+		AvailableCycleCapacityUSDT:    round2(availableCapacity),
+		ExecutableNowUSDT:             round2(executableTotal),
+		OpportunityReservedUSDT:       round2(opportunityTotal),
+		UnusedCycleCapacityUSDT:       round2(math.Max(0, availableCapacity-opportunityTotal)),
+		ExposureSource:                exposure.Source,
+		HermesConditionalCapacityUSDT: round2(exposure.HermesCapacityUSDT),
+		HermesTargetDeploymentPct:     exposure.HermesTargetPct,
+		HermesCapacityState:           exposure.HermesCapacityState,
+		Assets:                        assets,
+		Policy:                        "Legacy planner executable budget requires ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED. Hermes conditional capacity is reported separately; exceptional-RR probes still require quant, lifecycle and live safety and are not implied by legacy executable_now.",
 	}
 }
 

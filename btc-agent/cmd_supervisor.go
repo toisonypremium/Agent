@@ -123,6 +123,9 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.Reasons = append(result.Reasons, fmt.Sprintf("portfolio sync: adopted=%d updated=%d dust=%d", adopted, updated, dust))
 		}
 	}
+	if e := updatePersistedTotalEquity(ctx, cfg, db); e != nil {
+		result.Reasons = append(result.Reasons, "persist total equity: "+e.Error())
+	}
 	if positions, e := db.LivePositions(); e == nil {
 		exposure := 0.0
 		for _, p := range positions {
@@ -147,9 +150,6 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		result.Reasons = append(result.Reasons, "execution markouts: "+e.Error())
 	} else if measured > 0 {
 		result.Reasons = append(result.Reasons, fmt.Sprintf("execution markouts measured=%d", measured))
-	}
-	if e := updatePersistedTotalEquity(ctx, cfg, db); e != nil {
-		result.Reasons = append(result.Reasons, "persist total equity: "+e.Error())
 	}
 	// Evaluate and execute deterministic exits after the managed cycle.
 	// Exits use the Hermes-owned ledger and the same reconcile-safe sell executor.
@@ -522,6 +522,12 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 			continue
 		}
 		notional := b.Free * price
+		historyBasis := 0.0
+		if fills, fe := client.SpotFillHistory(ctx, live.OKXInstID(symbol)); fe == nil {
+			if rb := live.ReconstructInventoryBasis(fills, asset, b.Free); rb.Complete && rb.AvgPrice > 0 {
+				historyBasis = rb.AvgPrice
+			}
+		}
 		h, ok := existing[symbol]
 		// Ignore exchange dust; material balances are delegated by the operator request.
 		if !ok && notional < 1 {
@@ -530,13 +536,21 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 		}
 		seen[symbol] = true
 		if !ok {
-			h = storage.HermesManagedHolding{Symbol: symbol, InstID: live.OKXInstID(symbol), Quantity: b.Free, AvgEntryPrice: price, Source: "OKX_ACCOUNT_ADOPTION"}
+			basis, source := price, "OKX_ACCOUNT_ADOPTION_MARK"
+			if historyBasis > 0 {
+				basis, source = historyBasis, "OKX_FILL_HISTORY_RECONSTRUCTED"
+			}
+			h = storage.HermesManagedHolding{Symbol: symbol, InstID: live.OKXInstID(symbol), Quantity: b.Free, AvgEntryPrice: basis, Source: source}
 			adopted++
 		} else {
 			newBasis := h.AvgEntryPrice
-			if b.AvgPrice > 0 {
-				newBasis = b.AvgPrice
+			newSource := h.Source
+			if historyBasis > 0 {
+				newBasis, newSource = historyBasis, "OKX_FILL_HISTORY_RECONSTRUCTED"
+			} else if b.AvgPrice > 0 {
+				newBasis, newSource = b.AvgPrice, "OKX_ACCOUNT_AVG_PRICE"
 			}
+
 			qtyChanged := math.Abs(h.Quantity-b.Free) > math.Max(1e-12, math.Abs(h.Quantity)*1e-9)
 			basisChanged := math.Abs(h.AvgEntryPrice-newBasis) > math.Max(1e-12, math.Abs(h.AvgEntryPrice)*1e-9)
 			if !qtyChanged && !basisChanged {
@@ -544,6 +558,7 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 			}
 			h.Quantity = b.Free
 			h.AvgEntryPrice = newBasis
+			h.Source = newSource
 			updated++
 		}
 		if err := db.SaveHermesManagedHolding(h); err != nil {

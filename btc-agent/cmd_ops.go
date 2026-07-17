@@ -57,6 +57,23 @@ func loadOperationsExposure(cfg config.Config, db *storage.DB) (opsplan.Exposure
 		exposure.Assets[symbol] = item
 		exposure.OpenOrderNotionalUSDT += notional
 	}
+	if eq, e := db.EquityRiskState(); e == nil {
+		exposure.LiveEquityUSDT = eq.CurrentEquity
+	}
+	var ts int64
+	var payload string
+	if e := db.QueryRow(`SELECT updated_at,payload_json FROM hermes_runtime_state WHERE key='capital_utilization'`).Scan(&ts, &payload); e == nil {
+		var u struct {
+			Target   float64 `json:"target_deployment_pct"`
+			Capacity float64 `json:"available_deployment_usdt"`
+			State    string  `json:"state"`
+		}
+		if json.Unmarshal([]byte(payload), &u) == nil {
+			exposure.HermesTargetPct = u.Target
+			exposure.HermesCapacityUSDT = u.Capacity
+			exposure.HermesCapacityState = u.State
+		}
+	}
 	return exposure, nil
 }
 
@@ -64,6 +81,9 @@ func saveOperationsPlan(cfg config.Config, db *storage.DB, analysis agent1.Marke
 	exposure, err := loadOperationsExposure(cfg, db)
 	if err != nil {
 		return opsplan.Report{}, err
+	}
+	if exposure.LiveEquityUSDT > 0 {
+		cfg.Portfolio.TotalCapital = exposure.LiveEquityUSDT
 	}
 	report := opsplan.Build(cfg, analysis, p, exposure)
 	if err := reportio.WriteJSON("reports", "operations_plan_latest.json", report); err != nil {

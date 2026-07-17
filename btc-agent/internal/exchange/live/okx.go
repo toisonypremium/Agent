@@ -9,9 +9,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -262,6 +264,89 @@ func parseOrderBook(data []byte) (liquidity.OrderBookSnapshot, error) {
 		}
 	}
 	return book, nil
+}
+
+func (c *OKXClient) SpotFillHistory(ctx context.Context, instID string) ([]TradeFill, error) {
+	if instID == "" {
+		return nil, fmt.Errorf("instID required")
+	}
+	requestPath := "/api/v5/trade/fills-history?instType=SPOT&instId=" + url.QueryEscape(instID) + "&limit=100"
+	data, err := c.signedGet(ctx, requestPath)
+	if err != nil {
+		return nil, err
+	}
+	var raw struct {
+		Code string `json:"code"`
+		Msg  string `json:"msg"`
+		Data []struct {
+			InstID  string `json:"instId"`
+			TradeID string `json:"tradeId"`
+			OrderID string `json:"ordId"`
+			Side    string `json:"side"`
+			FillPx  string `json:"fillPx"`
+			FillSz  string `json:"fillSz"`
+			Fee     string `json:"fee"`
+			FeeCcy  string `json:"feeCcy"`
+			Ts      string `json:"ts"`
+		} `json:"data"`
+	}
+	if err = json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("okx fill history decode failed: %w", err)
+	}
+	if raw.Code != "0" {
+		return nil, fmt.Errorf("okx fill history code %s: %s", raw.Code, raw.Msg)
+	}
+	out := make([]TradeFill, 0, len(raw.Data))
+	for _, x := range raw.Data {
+		ts, _ := strconv.ParseInt(x.Ts, 10, 64)
+		out = append(out, TradeFill{InstID: x.InstID, TradeID: x.TradeID, OrderID: x.OrderID, Side: strings.ToUpper(x.Side), Price: firstParseFloat(x.FillPx), Quantity: firstParseFloat(x.FillSz), Fee: firstParseFloat(x.Fee), FeeCurrency: strings.ToUpper(x.FeeCcy), Timestamp: normalizeOKXUnixTime(ts)})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp < out[j].Timestamp })
+	return out, nil
+}
+
+// ReconstructInventoryBasis applies average-cost accounting to chronological
+// spot fills. Complete is true only when history explains the current quantity.
+func ReconstructInventoryBasis(fills []TradeFill, baseAsset string, currentQty float64) InventoryBasis {
+	baseAsset = strings.ToUpper(baseAsset)
+	q, cost := 0.0, 0.0
+	for _, f := range fills {
+		if f.Price <= 0 || f.Quantity <= 0 {
+			continue
+		}
+		if strings.EqualFold(f.Side, "BUY") {
+			net := f.Quantity
+			if f.FeeCurrency == baseAsset && f.Fee < 0 {
+				net += f.Fee
+			}
+			if net <= 0 {
+				continue
+			}
+			quoteCost := f.Quantity * f.Price
+			if f.FeeCurrency == "USDT" && f.Fee < 0 {
+				quoteCost -= f.Fee
+			}
+			q += net
+			cost += quoteCost
+		} else if strings.EqualFold(f.Side, "SELL") {
+			sold := math.Min(q, f.Quantity)
+			if q > 0 {
+				cost -= cost * (sold / q)
+			}
+			q -= sold
+			if q < 1e-12 {
+				q = 0
+				cost = 0
+			}
+		}
+	}
+	tol := math.Max(1e-8, currentQty*0.001)
+	complete := currentQty > 0 && math.Abs(q-currentQty) <= tol
+	avg := 0.0
+	if q > 0 {
+		avg = cost / q
+	}
+	return InventoryBasis{Quantity: q, Cost: cost, AvgPrice: avg, Complete: complete}
 }
 
 func (c *OKXClient) AccountBalance(ctx context.Context) ([]Balance, error) {

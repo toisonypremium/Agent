@@ -147,6 +147,10 @@ func (d *DB) LivePositions() ([]live.LivePosition, error) {
 		out = append(out, pos)
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
 		return nil, err
 	}
 	managed, err := d.HermesManagedHoldings()

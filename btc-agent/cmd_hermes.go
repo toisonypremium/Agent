@@ -45,7 +45,7 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f fear_greed=%d/%s eurusd=%.5f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, len(report.News), strings.Join(report.Missing, ","))
 	}
 	if plan, err := db.LatestPlan(); err == nil {
-		enrichHermesAssetsFromPlan(&snap, plan)
+		enrichHermesAssetsFromPlan(cfg, &snap, plan)
 	}
 	caller := hermesCallerFromConfig(cfg)
 	narrativeStarted := time.Now()
@@ -95,7 +95,7 @@ func runHermesDecisionCycle(ctx context.Context, cfg config.Config, db *storage.
 	}
 	snap := buildHermesSnapshotWithTrigger(cfg, trigger)
 	if plan, err := db.LatestPlan(); err == nil {
-		enrichHermesAssetsFromPlan(&snap, plan)
+		enrichHermesAssetsFromPlan(cfg, &snap, plan)
 	}
 	return runHermesShadowDecision(ctx, cfg, snap, hermesCallerFromConfig(cfg), trigger)
 }
@@ -108,7 +108,7 @@ func logHermesLLMCall(purpose string, trigger hermesagent.HermesTrigger, started
 	log.Printf("[LLM_USAGE] purpose=%s trigger=%s/%s status=%s latency_ms=%d", purpose, trigger.Source, trigger.Reason, status, time.Since(started).Milliseconds())
 }
 
-func enrichHermesAssetsFromPlan(snap *hermesagent.HermesSnapshot, plan agent2.Plan) {
+func enrichHermesAssetsFromPlan(cfg config.Config, snap *hermesagent.HermesSnapshot, plan agent2.Plan) {
 	bySymbol := map[string]agent2.AssetPlan{}
 	for _, asset := range plan.Assets {
 		bySymbol[strings.ToUpper(asset.Symbol)] = asset
@@ -137,6 +137,16 @@ func enrichHermesAssetsFromPlan(snap *hermesagent.HermesSnapshot, plan agent2.Pl
 		snap.Assets[i].RotationRank = asset.RotationRank
 		snap.Assets[i].RotationScore = asset.RotationScore
 		snap.Assets[i].NextTrigger = asset.NextTrigger
+		probeEligible := asset.State == agent2.StateScout && asset.DiscountZone.Valid() && asset.Invalidation > 0 && asset.RewardRisk >= cfg.Risk.ExceptionalRRBypassFallingKnife
+		if asset.LiquidityQuality.Enabled && !asset.LiquidityQuality.Pass {
+			probeEligible = false
+		}
+		snap.Assets[i].ProbeEligible = probeEligible
+		if probeEligible {
+			snap.Assets[i].ProbePolicy = "PROBE_LIMIT only: soft MM/flow/relative-strength/rotation weakness reduces confidence and size; never OPEN/SCALE while falling knife is high"
+		} else {
+			snap.Assets[i].ProbePolicy = "HOLD until deterministic probe envelope is valid"
+		}
 	}
 }
 

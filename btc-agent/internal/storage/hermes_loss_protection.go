@@ -56,6 +56,11 @@ func (d *DB) HermesLossProtectionSnapshot(since time.Time) (HermesLossProtection
 		if side == "BUY" {
 			v.qty += qty
 			v.cost += notional
+			// OKX reports paid USDT fees as negative. Add their absolute cost
+			// to inventory so close PnL includes both entry and exit fees.
+			if strings.EqualFold(feeCCY, "USDT") {
+				v.cost -= fee
+			}
 			inv[symbol] = v
 			continue
 		}

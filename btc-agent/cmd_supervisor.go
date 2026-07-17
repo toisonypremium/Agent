@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -120,6 +121,22 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.Reasons = append(result.Reasons, "portfolio sync: "+e.Error())
 		} else if adopted+updated > 0 {
 			result.Reasons = append(result.Reasons, fmt.Sprintf("portfolio sync: adopted=%d updated=%d dust=%d", adopted, updated, dust))
+		}
+	}
+	if positions, e := db.LivePositions(); e == nil {
+		exposure := 0.0
+		for _, p := range positions {
+			exposure += math.Max(0, p.CostBasis)
+		}
+		openBuy := 0.0
+		for _, o := range currentOpenOrders(db) {
+			if strings.EqualFold(o.Side, "BUY") {
+				openBuy += math.Max(o.Notional, o.Price*o.Quantity)
+			}
+		}
+		util := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: cfg.Portfolio.TotalCapital, ExistingExposure: exposure, OpenBuyNotional: openBuy, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(cfg), MarketRegime: latestMarketRegime(db), AccumulationPhase: latestAccumulationPhase(db)})
+		if b, je := json.Marshal(util); je == nil {
+			_, _ = db.Exec(`INSERT INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('capital_utilization',?,?) ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at,payload_json=excluded.payload_json`, time.Now().Unix(), string(b))
 		}
 	}
 	if measured, e := db.UpdateExecutionMarkouts(time.Now()); e != nil {
@@ -530,4 +547,17 @@ func syncHermesManagedPortfolio(ctx context.Context, cfg config.Config, db *stor
 		}
 	}
 	return adopted, updated, dust, nil
+}
+
+func latestMarketRegime(db *storage.DB) string {
+	if a, e := db.LatestAnalysis(); e == nil {
+		return a.MarketRegime
+	}
+	return ""
+}
+func latestAccumulationPhase(db *storage.DB) string {
+	if a, e := db.LatestAnalysis(); e == nil {
+		return string(a.BTCAccumulation.Phase)
+	}
+	return ""
 }

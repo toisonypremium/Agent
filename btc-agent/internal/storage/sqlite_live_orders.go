@@ -34,8 +34,8 @@ func (d *DB) ReserveManagedLiveOrder(clientOrderID string, desired liveguard.Man
 		expiresAt = desired.ExpiresAt.Unix()
 	}
 	_, err := d.Exec(
-		`INSERT INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-		clientOrderID, "", desired.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusPlanned, now, now, desired.LayerIndex, desired.Source, desired.InvalidationPrice, expiresAt, desired.DecisionReason, "planned: "+reason,
+		`INSERT INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action, decision_id, intent, strategy_version, config_hash) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		clientOrderID, "", desired.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusPlanned, now, now, desired.LayerIndex, desired.Source, desired.InvalidationPrice, expiresAt, desired.DecisionReason, "planned: "+reason, desired.DecisionID, desired.Intent, desired.StrategyVersion, desired.ConfigHash,
 	)
 	return err
 }

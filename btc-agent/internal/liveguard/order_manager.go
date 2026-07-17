@@ -53,6 +53,8 @@ type ManagedDesiredOrder struct {
 	LayerReason       string      `json:"layer_reason,omitempty"`
 	DecisionID        string      `json:"decision_id,omitempty"`
 	Intent            string      `json:"intent,omitempty"`
+	StrategyVersion   string      `json:"strategy_version,omitempty"`
+	ConfigHash        string      `json:"config_hash,omitempty"`
 }
 
 type ManagedOrderDecision struct {
@@ -258,6 +260,8 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 			openNotionalTotal += desiredOrder.Notional
 			continue
 		}
+		desiredOrder = WithStrategyEvidence(cfg, desiredOrder)
+		decision.Desired = desiredOrder
 		clientID := clientOrderID(desiredOrder.Symbol)
 		if recorder != nil {
 			if err := recorder.ReserveManagedLiveOrder(clientID, desiredOrder, decision.Reason); err != nil {

@@ -82,6 +82,10 @@ func (d *DB) Migrate() error {
 		{"expires_at", "INTEGER"},
 		{"decision_reason", "TEXT"},
 		{"last_management_action", "TEXT"},
+		{"decision_id", "TEXT"},
+		{"intent", "TEXT"},
+		{"strategy_version", "TEXT"},
+		{"config_hash", "TEXT"},
 	} {
 		if err := d.ensureColumn("live_orders", col.name, col.def); err != nil {
 			return err

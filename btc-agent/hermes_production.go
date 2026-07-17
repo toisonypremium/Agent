@@ -138,6 +138,15 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes realized-drawdown protection active until %s (drawdown %.2f%%)", drawdownLockUntil.UTC().Format(time.RFC3339), lossProtection.MaxDrawdown/cfg.Portfolio.TotalCapital*100))
 			}
+			perf := lossProtection.BySymbol[strings.ToUpper(decision.Action.Symbol)]
+			assetLockUntil := time.Time{}
+			if cfg.Risk.HermesLowProfitMinSamples > 0 && perf.ClosedFills >= cfg.Risk.HermesLowProfitMinSamples && perf.Expectancy <= cfg.Risk.HermesLowProfitMinExpectancyPct && perf.WinRate < cfg.Risk.HermesLowProfitMinWinRate {
+				assetLockUntil = perf.LastCloseAt.Add(time.Duration(cfg.Risk.HermesLowProfitLockMinutes) * time.Minute)
+			}
+			if !assetLockUntil.IsZero() && time.Now().Before(assetLockUntil) {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes low-profit asset protection active for %s until %s (samples=%d expectancy=%.2f%% win_rate=%.1f%%)", decision.Action.Symbol, assetLockUntil.UTC().Format(time.RFC3339), perf.ClosedFills, perf.Expectancy*100, perf.WinRate*100))
+			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)
 			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)], Now: time.Now(), LastExitAt: lastExitAt[strings.ToUpper(decision.Action.Symbol)], CooldownAfterExit: time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute})

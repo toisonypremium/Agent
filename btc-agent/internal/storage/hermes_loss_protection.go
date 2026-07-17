@@ -5,15 +5,28 @@ import (
 	"time"
 )
 
+type HermesAssetPerformance struct {
+	Symbol       string    `json:"symbol"`
+	ClosedFills  int       `json:"closed_fills"`
+	WinningFills int       `json:"winning_fills"`
+	LosingFills  int       `json:"losing_fills"`
+	RealizedPnL  float64   `json:"realized_pnl"`
+	ClosedCost   float64   `json:"closed_cost"`
+	WinRate      float64   `json:"win_rate"`
+	Expectancy   float64   `json:"expectancy"`
+	LastCloseAt  time.Time `json:"last_close_at,omitempty"`
+}
+
 type HermesLossProtection struct {
-	ConsecutiveLosses  int       `json:"consecutive_losses"`
-	LastLossAt         time.Time `json:"last_loss_at,omitempty"`
-	RollingRealizedPnL float64   `json:"rolling_realized_pnl"`
-	ClosedSellFills    int       `json:"closed_sell_fills"`
-	PeakRealizedPnL    float64   `json:"peak_realized_pnl"`
-	RealizedDrawdown   float64   `json:"realized_drawdown"`
-	MaxDrawdown        float64   `json:"max_drawdown"`
-	LastCloseAt        time.Time `json:"last_close_at,omitempty"`
+	ConsecutiveLosses  int                               `json:"consecutive_losses"`
+	LastLossAt         time.Time                         `json:"last_loss_at,omitempty"`
+	RollingRealizedPnL float64                           `json:"rolling_realized_pnl"`
+	ClosedSellFills    int                               `json:"closed_sell_fills"`
+	PeakRealizedPnL    float64                           `json:"peak_realized_pnl"`
+	RealizedDrawdown   float64                           `json:"realized_drawdown"`
+	MaxDrawdown        float64                           `json:"max_drawdown"`
+	LastCloseAt        time.Time                         `json:"last_close_at,omitempty"`
+	BySymbol           map[string]HermesAssetPerformance `json:"by_symbol,omitempty"`
 }
 
 // HermesLossProtectionSnapshot replays owned fills in chronological order and
@@ -27,7 +40,7 @@ func (d *DB) HermesLossProtectionSnapshot(since time.Time) (HermesLossProtection
 	defer rows.Close()
 	type inventory struct{ qty, cost float64 }
 	inv := map[string]inventory{}
-	out := HermesLossProtection{}
+	out := HermesLossProtection{BySymbol: map[string]HermesAssetPerformance{}}
 	for rows.Next() {
 		var ts int64
 		var symbol, side, feeCCY string
@@ -75,6 +88,22 @@ func (d *DB) HermesLossProtectionSnapshot(since time.Time) (HermesLossProtection
 		}
 		out.RollingRealizedPnL += pnl
 		out.ClosedSellFills++
+		perf := out.BySymbol[symbol]
+		perf.Symbol = symbol
+		perf.ClosedFills++
+		perf.RealizedPnL += pnl
+		perf.ClosedCost += avg * sellQty
+		perf.LastCloseAt = time.Unix(ts, 0)
+		if pnl > 0 {
+			perf.WinningFills++
+		} else if pnl < 0 {
+			perf.LosingFills++
+		}
+		perf.WinRate = float64(perf.WinningFills) / float64(perf.ClosedFills)
+		if perf.ClosedCost > 0 {
+			perf.Expectancy = perf.RealizedPnL / perf.ClosedCost
+		}
+		out.BySymbol[symbol] = perf
 		out.LastCloseAt = time.Unix(ts, 0)
 		if out.RollingRealizedPnL > out.PeakRealizedPnL {
 			out.PeakRealizedPnL = out.RollingRealizedPnL

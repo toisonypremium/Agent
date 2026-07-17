@@ -41,6 +41,15 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		state = &liveSupervisorState{}
 	}
 	result := liveguard.SupervisorResult{GeneratedAt: time.Now(), Status: liveguard.SupervisorOK, Action: liveguard.SupervisorActionManagedCycle, ConsecutiveErrors: state.ConsecutiveErrors, Doctor: doctor}
+	if doctor == nil && !dryRun {
+		result.Action = liveguard.SupervisorActionReconcileOnly
+		result.Reasons = append(result.Reasons, "live doctor unavailable; supervisor fail-closed")
+		if err := runReconcileLiveOrdersWithNotify(ctx, cfg, db, false); err != nil {
+			result.Reasons = append(result.Reasons, "reconcile after missing doctor: "+err.Error())
+		}
+		result.RefreshSummary()
+		return result, writeLiveSupervisorResult(ctx, cfg, db, result, false)
+	}
 	if doctor != nil && doctor.Status == liveguard.DoctorBlock && !dryRun {
 		result.Action = liveguard.SupervisorActionReconcileOnly
 		result.Reasons = append(result.Reasons, "live doctor block: "+doctor.Summary)

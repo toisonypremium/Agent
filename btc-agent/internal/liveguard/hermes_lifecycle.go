@@ -13,14 +13,16 @@ import (
 // to enforce PROBE -> OPEN -> SCALE ordering. It complements, not replaces,
 // account/data/reconcile safety.
 type HermesLifecycleContext struct {
-	Action            hermesoperator.Action
-	Asset             agent2.AssetPlan
-	ExistingNotional  float64
-	AssetCap          float64
-	HasOpenBuy        bool
-	Now               time.Time
-	LastExitAt        time.Time
-	CooldownAfterExit time.Duration
+	Action                 hermesoperator.Action
+	Asset                  agent2.AssetPlan
+	ExistingNotional       float64
+	AssetCap               float64
+	HasOpenBuy             bool
+	Now                    time.Time
+	LastExitAt             time.Time
+	CooldownAfterExit      time.Duration
+	FallingKnifeHigh       bool
+	ExceptionalRRThreshold float64
 }
 
 type HermesLifecycleResult struct {
@@ -86,6 +88,9 @@ func EvaluateHermesLifecycle(in HermesLifecycleContext) HermesLifecycleResult {
 	switch in.Action.Intent {
 	case hermesoperator.IntentProbeLimit:
 		r.Required = 1
+		if in.FallingKnifeHigh && (in.ExceptionalRRThreshold <= 0 || in.Asset.RewardRisk < in.ExceptionalRRThreshold) {
+			r.Reasons = append(r.Reasons, "falling knife probe requires exceptional reward/risk")
+		}
 		if in.ExistingNotional > 0 {
 			r.Reasons = append(r.Reasons, "probe stage already completed")
 		}
@@ -94,6 +99,9 @@ func EvaluateHermesLifecycle(in HermesLifecycleContext) HermesLifecycleResult {
 		}
 	case hermesoperator.IntentOpenLimit:
 		r.Required = 2
+		if in.FallingKnifeHigh {
+			r.Reasons = append(r.Reasons, "falling knife allows probe only; open blocked")
+		}
 		if in.ExistingNotional <= 0 {
 			r.Reasons = append(r.Reasons, "cannot open before a filled probe")
 		}
@@ -102,6 +110,9 @@ func EvaluateHermesLifecycle(in HermesLifecycleContext) HermesLifecycleResult {
 		}
 	case hermesoperator.IntentScaleLimit:
 		r.Required = 4
+		if in.FallingKnifeHigh {
+			r.Reasons = append(r.Reasons, "falling knife allows probe only; scale blocked")
+		}
 		if in.ExistingNotional <= 0 {
 			r.Reasons = append(r.Reasons, "cannot scale without an owned position")
 		}

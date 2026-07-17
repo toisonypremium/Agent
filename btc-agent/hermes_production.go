@@ -231,7 +231,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 			}
 			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
 			cap := config.EffectiveLiveNotionalPerAsset(cfg)
-			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)], Now: time.Now(), LastExitAt: lastExitAt[strings.ToUpper(decision.Action.Symbol)], CooldownAfterExit: time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute})
+			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)], Now: time.Now(), LastExitAt: lastExitAt[strings.ToUpper(decision.Action.Symbol)], CooldownAfterExit: time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute, FallingKnifeHigh: analysis.FallingKnifeRisk == agent1.High, ExceptionalRRThreshold: cfg.Risk.ExceptionalRRBypassFallingKnife})
 			if !lifecycle.Allowed {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, lifecycle.Reasons...)

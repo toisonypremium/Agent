@@ -753,15 +753,26 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		filterReader = client
 		placer = client
 		canceler = client
-		// Refresh total_capital from live OKX USDT balance each cycle so
-		// AllocateLiveCapital uses real funds instead of a stale config value.
+		// Refresh total capital from complete live equity: free USDT plus
+		// material managed spot holdings. Using cash alone would make deployment
+		// percentages expand as positions are sold and contract as they are bought.
 		if liveBalances, berr := client.AccountBalance(ctx); berr == nil {
+			equity := 0.0
 			for _, b := range liveBalances {
-				if strings.EqualFold(b.Asset, "USDT") && b.Free > 0 {
-					cfg.Portfolio.TotalCapital = b.Free
-					log.Printf("live capital updated from OKX balance: %.2f USDT", b.Free)
-					break
+				if strings.EqualFold(b.Asset, "USDT") {
+					equity += b.Free
+					continue
 				}
+				if b.Free <= 0 {
+					continue
+				}
+				if price, pe := client.SpotLastPrice(ctx, strings.ToUpper(b.Asset)+"USDT"); pe == nil && b.Free*price >= 1 {
+					equity += b.Free * price
+				}
+			}
+			if equity > 0 {
+				cfg.Portfolio.TotalCapital = equity
+				log.Printf("live capital updated from complete OKX equity: %.2f USDT", equity)
 			}
 		} else {
 			log.Printf("live balance fetch warning (using config value %.2f): %v", cfg.Portfolio.TotalCapital, berr)

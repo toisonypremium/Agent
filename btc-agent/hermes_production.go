@@ -93,6 +93,32 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		safety = safety[:1]
 	}
 	decisionID := audit.Validation.Decision.DecisionID
+	// Enforce the staged lifecycle before building exchange orders. Risk-reducing
+	// actions remain independent; only exposure increases must pass the gate.
+	assetsBySymbol := map[string]agent2.AssetPlan{}
+	for _, asset := range plan.Assets {
+		assetsBySymbol[strings.ToUpper(asset.Symbol)] = asset
+	}
+	openBuy := map[string]bool{}
+	for _, order := range open {
+		if strings.EqualFold(order.Side, "BUY") && live.IsOpenStatus(order.Status) {
+			openBuy[strings.ToUpper(order.Symbol)] = true
+		}
+	}
+	filteredSafety := make([]liveguard.HermesActionDecision, 0, len(safety))
+	for _, decision := range safety {
+		if decision.Allowed && decision.Action.Intent.IncreasesExposure() {
+			asset := assetsBySymbol[strings.ToUpper(decision.Action.Symbol)]
+			cap := config.EffectiveLiveNotionalPerAsset(cfg)
+			lifecycle := liveguard.EvaluateHermesLifecycle(liveguard.HermesLifecycleContext{Action: decision.Action, Asset: asset, ExistingNotional: assetExposure[strings.ToUpper(decision.Action.Symbol)], AssetCap: cap, HasOpenBuy: openBuy[strings.ToUpper(decision.Action.Symbol)]})
+			if !lifecycle.Allowed {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, lifecycle.Reasons...)
+			}
+		}
+		filteredSafety = append(filteredSafety, decision)
+	}
+	safety = filteredSafety
 	reducing := make([]liveguard.HermesActionDecision, 0)
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.ReducesExposure() {

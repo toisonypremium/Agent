@@ -114,7 +114,7 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 	if len(activeAssets) > 0 {
 		b.WriteString("🟩 ĐỦ ĐIỀU KIỆN ĐẶT LỆNH — Bot tự đặt lệnh giới hạn nếu các khóa an toàn đều đạt:\n")
 		for _, a := range activeAssets {
-			b.WriteString(fmt.Sprintf("  %s | RR=%.1f | rank #%d | MM=%s %.0f | Liq=%s %.0f\n",
+			b.WriteString(fmt.Sprintf("  %s | Lãi/rủi ro %.1f lần | Xếp hạng %d | Dòng tiền lớn: %s %.0f | Thanh khoản: %s %.0f\n",
 				a.Symbol, a.RewardRisk, a.RotationRank,
 				emptyMMCaseText(a.MMCase), a.MMScore,
 				empty(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score))
@@ -127,7 +127,7 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 	if len(plan.Watchlist.Candidates) > 0 {
 		b.WriteString("👀 Danh sách theo dõi:\n")
 		for _, c := range firstCandidates(plan.Watchlist.Candidates, 3) {
-			b.WriteString(fmt.Sprintf("  %s %.0f%% | MM=%s %.0f | Liq=%s %.0f | gap %.1f%% RR %.2f",
+			b.WriteString(fmt.Sprintf("  %s sẵn sàng %.0f%% | Dòng tiền lớn: %s %.0f | Thanh khoản: %s %.0f | Cách vùng mua %.1f%% | Lãi/rủi ro %.2f lần",
 				c.Symbol, c.ReadinessScore*100,
 				emptyMMCaseText(c.MMCase), c.MMScore,
 				empty(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score,
@@ -146,7 +146,7 @@ func DailyHumanText(analysis agent1.MarketAnalysis, plan agent2.Plan) string {
 
 	for _, a := range plan.Assets {
 		if a.State == agent2.StateWatch || a.State == agent2.StateArmed {
-			b.WriteString(fmt.Sprintf("  %s [%s] rank #%d | MM=%s %.0f | Liq=%s %.0f\n",
+			b.WriteString(fmt.Sprintf("  %s [%s] | Xếp hạng %d | Dòng tiền lớn: %s %.0f | Thanh khoản: %s %.0f\n",
 				a.Symbol, a.State, a.RotationRank,
 				emptyMMCaseText(a.MMCase), a.MMScore,
 				empty(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score))
@@ -331,7 +331,7 @@ func LiveReadinessHumanText(r LiveReadinessView) string {
 			if len(reasons) > 0 {
 				b.WriteString(fmt.Sprintf("- %s: %s — %s\n", coin.Symbol, coin.State, explainReasons(reasons, 2)))
 			} else {
-				b.WriteString(fmt.Sprintf("- %s: %s — chưa có ACTIVE_LIMIT/layer hợp lệ.\n", coin.Symbol, coin.State))
+				b.WriteString(fmt.Sprintf("- %s: %s — chưa có vùng đặt lệnh hợp lệ.\n", coin.Symbol, coin.State))
 			}
 			if coin.NextTrigger != "" {
 				b.WriteString("  Điều kiện tiếp theo: " + coin.NextTrigger + "\n")
@@ -440,7 +440,7 @@ func LiveOrderManagementHumanText(result liveguard.ManagedCycleResult) string {
 			} else if len(coin.WhyNoOrder) > 0 {
 				b.WriteString("- Vì sao chưa đặt: " + explainReasons(coin.WhyNoOrder, 3) + "\n")
 			} else if coin.DesiredLayers == 0 && coin.OpenOrders == 0 {
-				b.WriteString("- Lý do: chưa có ACTIVE_LIMIT/layer hợp lệ cho coin này.\n")
+				b.WriteString("- Lý do: đồng này chưa có vùng đặt lệnh hợp lệ.\n")
 			}
 			if coin.NextTrigger != "" {
 				b.WriteString("- Điều kiện kích hoạt tiếp theo: " + coin.NextTrigger + "\n")
@@ -590,7 +590,7 @@ func ResearchBriefHumanText(result research.BriefResult) string {
 	b.WriteString("V. KẾ HOẠCH BOT\n")
 	b.WriteString("Hành động ưu tiên: THEO DÕI / GIỮ TIỀN. Không mua đuổi theo tin.\n")
 	b.WriteString("Chỉ cân nhắc mua giao ngay bằng lệnh giới hạn tạo thanh khoản nếu Agent 2 tạo trạng thái được phép đặt lệnh và bộ kiểm soát rủi ro đạt.\n")
-	b.WriteString(fmt.Sprintf("Nguồn xử lý: %d tin / %d nguồn. Link URL không gửi vào Telegram.\n", len(result.Items), result.SourcesChecked))
+	b.WriteString(fmt.Sprintf("Đã xử lý: %d tin từ %d nguồn. Không gửi đường dẫn dài lên Telegram.\n", len(result.Items), result.SourcesChecked))
 	if len(result.Warnings) > 0 {
 		b.WriteString("Cảnh báo thu thập: " + result.Warnings[0] + "\n")
 	}
@@ -890,7 +890,7 @@ func ExplainBlocker(reason string) string {
 	case s == "order no longer matches current desired layer":
 		return "Lệnh không còn khớp giá/vùng mua mới nên bot hủy hoặc thay thế."
 	case s == "plan no longer ACTIVE_LIMIT":
-		return "Plan không còn ACTIVE_LIMIT nên bot hủy lệnh chờ."
+		return "Kế hoạch không còn đủ điều kiện đặt lệnh nên bot hủy lệnh chờ."
 	case s == "per-asset open order limit reached":
 		return "Coin này đã đạt số lệnh mở tối đa."
 	case s == "total open order limit reached":

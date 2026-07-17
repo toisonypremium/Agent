@@ -18,7 +18,7 @@ func TestDailyHumanTextIncludesMMLiquidityWatchlist(t *testing.T) {
 		DiscountGap:      0.12, RewardRisk: 2.2, Missing: []string{"MM case NO_EDGE chưa đủ footprint"}, NextTrigger: "Chờ reclaim.",
 	}}}}
 	got := DailyHumanText(agent1.MarketAnalysis{ActionPermission: agent1.Watch}, plan)
-	for _, want := range []string{"MM=NO_EDGE", "Liq=D", "gap 12.0%", "RR 2.20", "điều kiện kích hoạt: Chờ reclaim"} {
+	for _, want := range []string{"Dòng tiền lớn: CHƯA CÓ LỢI THẾ RÕ", "Thanh khoản: D", "Cách vùng mua 12.0%", "Lãi/rủi ro 2.20", "điều kiện kích hoạt: Chờ reclaim"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}
@@ -99,7 +99,7 @@ func TestLiveSupervisorHumanText(t *testing.T) {
 	}
 	result.RefreshSummary()
 	got := LiveSupervisorHumanText(result)
-	for _, want := range []string{"Giám sát giao dịch thật", "SUPERVISOR_WARN", "mua giao ngay bằng lệnh giới hạn tạo thanh khoản", "mong muốn=1", "chặn=1"} {
+	for _, want := range []string{"Giám sát giao dịch thật", "GIÁM SÁT CÓ CẢNH BÁO", "mua giao ngay bằng lệnh giới hạn tạo thanh khoản", "mong muốn=1", "chặn=1"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}

@@ -204,7 +204,9 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 	if len(validation.Reasons) > 0 && len(validation.Actions) == 0 {
 		if fallback, ok := deterministicHermesProbeFallback(snap, validation.Decision, policy); ok {
 			validation = hermesoperator.Validate(fallback, policy)
-			validation.Reasons = append([]string{"LLM exposure payload malformed; used deterministic quant probe fallback"}, validation.Reasons...)
+			if len(validation.Reasons) == 0 && len(validation.Actions) > 0 {
+				validation.Decision.MarketThesis = strings.TrimSpace(validation.Decision.MarketThesis + " | deterministic quant probe fallback after malformed LLM exposure payload")
+			}
 		}
 	}
 	safety := liveguard.EvaluateHermesActions(validation.Actions, liveguard.HermesSafetyContext{

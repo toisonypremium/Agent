@@ -134,7 +134,11 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 				openBuy += math.Max(o.Notional, o.Price*o.Quantity)
 			}
 		}
-		util := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: cfg.Portfolio.TotalCapital, ExistingExposure: exposure, OpenBuyNotional: openBuy, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(cfg), MarketRegime: latestMarketRegime(db), AccumulationPhase: latestAccumulationPhase(db)})
+		totalCapital := cfg.Portfolio.TotalCapital
+		if eq, ee := db.EquityRiskState(); ee == nil && eq.CurrentEquity > 0 {
+			totalCapital = eq.CurrentEquity
+		}
+		util := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: totalCapital, ExistingExposure: exposure, OpenBuyNotional: openBuy, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(cfg), MarketRegime: latestMarketRegime(db), AccumulationPhase: latestAccumulationPhase(db)})
 		if b, je := json.Marshal(util); je == nil {
 			_, _ = db.Exec(`INSERT INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('capital_utilization',?,?) ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at,payload_json=excluded.payload_json`, time.Now().Unix(), string(b))
 		}

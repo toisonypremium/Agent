@@ -283,9 +283,9 @@ func executeAutonomousExits(ctx context.Context, cfg config.Config, db *storage.
 		decisionID := "exit-" + strings.ToLower(item.Decision.Symbol) + "-" + fmt.Sprint(item.Decision.GeneratedAt.UnixNano())
 		var cycle liveguard.ManagedCycleResult
 		if item.Action.Intent == hermesoperator.IntentReduce {
-			cycle = liveguard.ExecuteHermesReduceActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, client, db, false)
+			cycle = liveguard.ExecuteHermesReduceActionsWithOpen(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, open, filters, client, db, false)
 		} else {
-			cycle = liveguard.ExecuteHermesExitLimitActions(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, filters, client, db, false)
+			cycle = liveguard.ExecuteHermesExitLimitActionsWithOpen(ctx, cfg, decisionID, []liveguard.HermesActionDecision{decision}, owned, open, filters, client, db, false)
 		}
 		result.Placed = append(result.Placed, cycle.Placed...)
 		result.Blocked = append(result.Blocked, cycle.Blocked...)

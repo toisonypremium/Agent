@@ -3,6 +3,7 @@ package liveguard
 import (
 	"context"
 	"fmt"
+	"math"
 	"testing"
 
 	"btc-agent/internal/agent2"
@@ -255,5 +256,39 @@ func TestExecuteHermesExitLimitBlocksUnownedPosition(t *testing.T) {
 	got := ExecuteHermesExitLimitActions(context.Background(), cancelCfg(), "d-exit", []HermesActionDecision{exitLimitDecision("BTCUSDT", 10, 50000)}, nil, reduceFilter(), p, r, false)
 	if len(got.Blocked) != 1 || len(p.calls) != 0 || len(r.reserved) != 0 {
 		t.Fatalf("unowned EXIT_LIMIT reached execution: %+v", got)
+	}
+}
+
+func TestHermesExitSubtractsOpenSellResidual(t *testing.T) {
+	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: .01}}
+	open := []live.OrderStatus{{Symbol: "BTCUSDT", Side: "SELL", Status: live.StatusPartialFill, Quantity: .008, FilledQuantity: .003}}
+	p, r := &hermesTestPlacer{}, &hermesTestRecorder{}
+	got := ExecuteHermesExitLimitActionsWithOpen(context.Background(), cancelCfg(), "d-residual", []HermesActionDecision{exitLimitDecision("BTCUSDT", 1000, 50000)}, owned, open, reduceFilter(), p, r, false)
+	if len(got.Placed) != 1 || len(p.calls) != 1 {
+		t.Fatalf("expected one residual-capped exit, got %+v requests=%+v", got, p.calls)
+	}
+	if math.Abs(p.calls[0].Quantity-.005) > 1e-12 {
+		t.Fatalf("quantity=%v want unreserved residual .005", p.calls[0].Quantity)
+	}
+}
+
+func TestHermesExitBlocksWhenOpenSellReservesOwnership(t *testing.T) {
+	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: .01}}
+	open := []live.OrderStatus{{Symbol: "BTCUSDT", Side: "SELL", Status: live.StatusSubmitted, Quantity: .01}}
+	p, r := &hermesTestPlacer{}, &hermesTestRecorder{}
+	got := ExecuteHermesExitLimitActionsWithOpen(context.Background(), cancelCfg(), "d-reserved", []HermesActionDecision{exitLimitDecision("BTCUSDT", 1000, 50000)}, owned, open, reduceFilter(), p, r, false)
+	if len(got.Placed) != 0 || len(got.Blocked) != 1 || len(p.calls) != 0 {
+		t.Fatalf("fully reserved ownership must block overlapping exit: %+v requests=%+v", got, p.calls)
+	}
+}
+
+func TestOpenSellResidualIgnoresTerminalAndBuyOrders(t *testing.T) {
+	orders := []live.OrderStatus{
+		{Symbol: "BTCUSDT", Side: "SELL", Status: live.StatusFilled, Quantity: .4, FilledQuantity: .4},
+		{Symbol: "BTCUSDT", Side: "BUY", Status: live.StatusSubmitted, Quantity: .3},
+		{Symbol: "BTCUSDT", Side: "SELL", Status: live.StatusPartialFill, Quantity: .2, AccumulatedFillSz: .075},
+	}
+	if got := openSellResidualQuantity("BTCUSDT", orders); math.Abs(got-.125) > 1e-12 {
+		t.Fatalf("residual=%v want .125", got)
 	}
 }

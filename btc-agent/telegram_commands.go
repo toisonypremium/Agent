@@ -733,7 +733,7 @@ func telegramProtectionStatus(cfg config.Config) string {
 	defer db.Close()
 	items, err := db.ProtectionStatuses()
 	if err != nil {
-		return "Bảo vệ Hermes: chưa có trạng thái."
+		items = nil
 	}
 	var b strings.Builder
 	b.WriteString("Bảo vệ Hermes đang hoạt động:\n")

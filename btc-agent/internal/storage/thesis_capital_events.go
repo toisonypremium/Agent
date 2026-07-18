@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-const ThesisCapitalEventBuyFill = "BUY_FILL"
+const (
+	ThesisCapitalEventBuyFill = "BUY_FILL"
+	ThesisCapitalEventRelease = "RELEASE"
+)
 
 type ThesisCapitalEvent struct {
 	EventKey      string    `json:"event_key"`

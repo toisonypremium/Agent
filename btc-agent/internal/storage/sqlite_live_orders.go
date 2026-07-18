@@ -139,18 +139,8 @@ func (d *DB) MarkManagedLiveOrderRejected(clientOrderID string, reason string) e
 	if clientOrderID == "" {
 		return fmt.Errorf("client_order_id required")
 	}
-	res, err := d.Exec(`UPDATE live_orders SET status=?, updated_at=?, last_management_action=? WHERE client_order_id=?`, live.StatusRejected, time.Now().Unix(), "rejected: "+reason, clientOrderID)
-	if err != nil {
-		return err
-	}
-	rows, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if rows == 0 {
-		return fmt.Errorf("live order reservation not found: client_order_id=%q", clientOrderID)
-	}
-	return nil
+	_, _, err := d.SaveTerminalLiveOrderStatusAndRelease(live.OrderStatus{ClientOrderID: clientOrderID, Status: live.StatusRejected, UpdatedAt: time.Now().Unix(), LastManagementAction: "rejected: " + reason})
+	return err
 }
 
 func (d *DB) HasManagedRealOrderSubmission() (bool, error) {
@@ -217,6 +207,10 @@ func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
 
 func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
 	o.Status = live.NormalizeOrderStatus(o.Status)
+	if o.Status == live.StatusCancelled || o.Status == live.StatusRejected {
+		_, _, err := d.SaveTerminalLiveOrderStatusAndRelease(o)
+		return err
+	}
 	updatedAt := o.UpdatedAt
 	if updatedAt == 0 {
 		updatedAt = time.Now().Unix()

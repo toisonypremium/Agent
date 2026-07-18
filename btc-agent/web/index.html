@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="BTC Agent production operations dashboard">
+  <meta name="theme-color" content="#020617">
+  <title>BTC Agent / Control Center</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/web/index.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Bỏ qua điều hướng</a>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Điều hướng chính">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">B</span><span><strong>BTC Agent</strong><small>CONTROL CENTER</small></span></div>
+      <nav class="nav-list">
+        <a class="nav-item active" href="#overview" aria-current="page"><span class="icon">⌁</span>Tổng quan</a>
+        <a class="nav-item" href="#market"><span class="icon">◌</span>Thị trường</a>
+        <a class="nav-item" href="#execution"><span class="icon">⇄</span>Execution</a>
+        <a class="nav-item" href="#risk"><span class="icon">◇</span>Risk &amp; Capital</a>
+        <a class="nav-item" href="#operations"><span class="icon">▦</span>Vận hành</a>
+      </nav>
+      <div class="sidebar-footer"><span class="pulse-dot"></span><span>Live monitoring</span><span class="version">v—</span></div>
+    </aside>
+    <main id="main-content" class="main-content">
+      <header class="topbar">
+        <div><p class="eyebrow">PRODUCTION / READINESS</p><h1>Control Center</h1></div>
+        <div class="top-actions"><span class="connection"><span class="pulse-dot"></span>VPS connected</span><button class="icon-button" id="refresh-button" aria-label="Làm mới dữ liệu" title="Làm mới">↻</button><button class="avatar" aria-label="Tài khoản operator">A</button></div>
+      </header>
+      <section id="overview" class="hero-panel panel-grid">
+        <div><div class="status-label"><span class="status-orb blocked"></span><span id="authority-label">CURRENT AUTHORITY / BLOCKED</span></div><h2>Monitoring ổn định.<br><em>Execution đang bị khóa đúng policy.</em></h2><p class="hero-copy">Market gate chưa đạt điều kiện mở lệnh. Hệ thống tiếp tục quan sát, reconcile và fail-closed.</p><div class="hero-actions"><button class="btn btn-danger" data-action="halt">Yêu cầu operator halt</button><button class="btn btn-ghost" data-action="audit">Chạy live audit</button></div></div>
+        <div class="hero-telemetry"><div class="telemetry-head"><span>RUNTIME TELEMETRY</span><span class="live-tag"><span class="pulse-dot"></span>LIVE</span></div><div class="sparkline" aria-label="Biểu đồ mô phỏng heartbeat ổn định"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="telemetry-foot"><span>Heartbeat age</span><strong id="heartbeat-age">—</strong></div></div>
+      </section>
+      <section class="metric-grid" aria-label="Chỉ số hệ thống">
+        <article class="metric-card"><span class="metric-kicker">SERVICE</span><strong class="metric-value good" id="service-status">ACTIVE</strong><span class="metric-meta" id="service-meta">Scheduler running</span></article>
+        <article class="metric-card"><span class="metric-kicker">OPEN ORDERS</span><strong class="metric-value" id="open-orders">0</strong><span class="metric-meta">Reconcile clean</span></article>
+        <article class="metric-card"><span class="metric-kicker">EXECUTABLE NOW</span><strong class="metric-value" id="executable-capital">0.00 <small>USDT</small></strong><span class="metric-meta">Blocked by market gate</span></article>
+        <article class="metric-card"><span class="metric-kicker">RISK GOVERNOR</span><strong class="metric-value warn" id="risk-status">WARN</strong><span class="metric-meta">No hard blocker</span></article>
+      </section>
+      <div class="content-grid">
+        <section id="market" class="panel market-panel"><div class="section-head"><div><p class="eyebrow">MARKET AUTHORITY</p><h3>BTC gate &amp; asset readiness</h3></div><button class="text-button" data-action="market-watch">Refresh market <span>↗</span></button></div><div class="gate-row"><div class="gate-icon btc">₿</div><div class="gate-main"><strong>BTC / USDT</strong><span>RANGE · MARKDOWN</span></div><div class="gate-state"><strong>WATCH</strong><span>Permission</span></div><div class="gate-score"><strong>28.8</strong><span>Trend score</span></div></div><div class="readiness-list"><div class="readiness-row"><span class="asset-name">ETHUSDT</span><div class="progress-track"><span style="width:50%"></span></div><span class="readiness-value">50%</span><span class="tag amber">WATCH</span></div><div class="readiness-row"><span class="asset-name">RENDERUSDT</span><div class="progress-track"><span style="width:50%"></span></div><span class="readiness-value">50%</span><span class="tag slate">SCOUT</span></div><div class="readiness-row"><span class="asset-name">SOLUSDT</span><div class="progress-track"><span style="width:43%"></span></div><span class="readiness-value">43%</span><span class="tag amber">WATCH</span></div></div></section>
+        <section id="execution" class="panel execution-panel"><div class="section-head"><div><p class="eyebrow">EXECUTION EVIDENCE</p><h3>Safety pipeline</h3></div><span class="tag green">FAIL-CLOSED</span></div><div class="pipeline"><div class="pipeline-step pass"><span>01</span><div><strong>Doctor</strong><small>Credentials &amp; runtime</small></div><b>PASS</b></div><div class="pipeline-step pass"><span>02</span><div><strong>Data health</strong><small>9 checks / 0 blockers</small></div><b>PASS</b></div><div class="pipeline-step pass"><span>03</span><div><strong>Forced simulation</strong><small>0 exchange calls</small></div><b>PASS</b></div><div class="pipeline-step block"><span>04</span><div><strong>Market authority</strong><small>BTC not confirmed</small></div><b>BLOCK</b></div></div></section>
+      </div>
+      <div class="content-grid lower-grid">
+        <section id="risk" class="panel"><div class="section-head"><div><p class="eyebrow">RISK &amp; CAPITAL</p><h3>Exposure envelope</h3></div><span class="tag green">WITHIN CAPS</span></div><div class="allocation"><div class="donut"><span>0%</span></div><div class="allocation-legend"><div><span class="legend-dot reserve"></span><span>Reserve</span><strong>163.75</strong></div><div><span class="legend-dot available"></span><span>Available</span><strong>2,177.88</strong></div><div><span class="legend-dot committed"></span><span>Committed</span><strong>0.00</strong></div></div></div></section>
+        <section id="operations" class="panel ops-panel"><div class="section-head"><div><p class="eyebrow">OPERATIONS</p><h3>Latest events</h3></div><button class="text-button" data-action="events">View all <span>↗</span></button></div><div class="event-list"><div class="event"><span class="event-dot green"></span><div><strong>Scheduler heartbeat healthy</strong><small>live-auto · 20 seconds ago</small></div><span class="event-code">OK</span></div><div class="event"><span class="event-dot amber"></span><div><strong>Market authority remains blocked</strong><small>BTC MARKDOWN · 1 minute ago</small></div><span class="event-code">GATE</span></div><div class="event"><span class="event-dot green"></span><div><strong>Reconciliation completed cleanly</strong><small>0 open orders · 2 minutes ago</small></div><span class="event-code">SAFE</span></div></div></section>
+      </div>
+      <footer class="footer"><span>BTC Agent Control Center</span><span id="last-updated">Last updated —</span><span>Read-only by default · No order authority</span></footer>
+    </main>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/web/app.js"></script>
+</body>
+</html>

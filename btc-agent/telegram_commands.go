@@ -355,7 +355,7 @@ func telegramCommandsHelp() string {
 /dongtien — dòng tiền lớn và thanh khoản
 /tienvi — bối cảnh kinh tế và tâm lý
 /ruiro — các lớp bảo vệ vốn
-/thoat — tình trạng chốt lời/cắt lỗ
+/thoat — tình trạng bảo vệ lợi nhuận và cảnh báo DCA
 /vithe — tài sản đang giữ
 /lenh — lệnh đang chờ
 /coin — tình trạng từng đồng

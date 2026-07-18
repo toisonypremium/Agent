@@ -9,7 +9,7 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ExitConfig controls automatic take-profit, trailing stop, and time-stop behaviour.
+// ExitConfig controls automatic profit protection and warning-only loss analysis.
 type HermesOperatorConfig struct {
 	Enabled                  bool    `yaml:"enabled"`
 	Mode                     string  `yaml:"mode"`
@@ -44,7 +44,7 @@ type ExitConfig struct {
 	TrailingDistancePct   float64 `yaml:"trailing_distance_pct"`
 	TimeStopDays          int     `yaml:"time_stop_days"`
 	MinPnLForTimeStop     float64 `yaml:"min_pnl_for_time_stop"`
-	PanicSellPnLThreshold float64 `yaml:"panic_sell_pnl_threshold"` // negative threshold e.g. -0.25 = sell all when loss >= 25%; 0 = disabled
+	PanicSellPnLThreshold float64 `yaml:"panic_sell_pnl_threshold"` // negative warning threshold; never grants stop-loss SELL authority
 }
 
 type Config struct {

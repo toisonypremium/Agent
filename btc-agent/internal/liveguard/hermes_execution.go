@@ -287,6 +287,15 @@ func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decis
 			continue
 		}
 		pos := matches[0]
+		// Hermes follows DCA/average-cost management. No automated SELL may
+		// realize a loss; loss conditions are warning/evidence only.
+		if pos.AvgEntryPrice > 0 && action.EntryPrice < pos.AvgEntryPrice {
+			decision.Action = "block"
+			decision.Reason = fmt.Sprintf("automated loss sale forbidden: sell_price=%.8f below avg_entry=%.8f; warning/DCA analysis only", action.EntryPrice, pos.AvgEntryPrice)
+			decision.AuditTrail = []string{"no_automatic_stop_loss=true", "dca_only=true", fmt.Sprintf("sell_price=%.8f", action.EntryPrice), fmt.Sprintf("avg_entry=%.8f", pos.AvgEntryPrice)}
+			result.Blocked = append(result.Blocked, decision)
+			continue
+		}
 		reservedQty := openSellResidualQuantity(symbol, openOrders)
 		availableQty := pos.Quantity - reservedQty
 		if availableQty <= fillEpsilon {

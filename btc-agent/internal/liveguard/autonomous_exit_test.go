@@ -24,3 +24,15 @@ func TestBuildAutonomousExitActionsRejectsUnowned(t *testing.T) {
 		t.Fatalf("unowned exit generated: %+v", got)
 	}
 }
+
+func TestBuildAutonomousExitActionsRejectsLossAndWarnings(t *testing.T) {
+	owned := []live.LivePosition{{Symbol: "ETHUSDT", Quantity: 2, AvgEntryPrice: 100}}
+	for _, ex := range []ExitDecision{
+		{Symbol: "ETHUSDT", Action: ExitPanicSell, SellPrice: 70, SellQuantity: 2, PnLPct: -.30},
+		{Symbol: "ETHUSDT", Action: ExitHold, SellPrice: 70, SellQuantity: 0, PnLPct: -.30, Warning: true},
+	} {
+		if got := BuildAutonomousExitActions([]ExitDecision{ex}, owned, nil); len(got) != 0 {
+			t.Fatalf("loss exit generated action: %+v", got)
+		}
+	}
+}

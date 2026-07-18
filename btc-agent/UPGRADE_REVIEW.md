@@ -127,7 +127,7 @@ Exit automation production status:
 ```text
 Production config ExitConfig.Enabled=true
 EvaluateExits wired into supervisor cycle
-ExitActions: HOLD / TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL
+ExitActions: tự động TAKE_PROFIT / bảo vệ lợi nhuận không lỗ; cảnh báo lỗ chỉ HOLD + DCA review, không tự động SELL
 Autonomous exits route through ExecuteHermesReduceActionsWithOpen/ExecuteHermesExitLimitActionsWithOpen; spot limit SELL only
 OpenedAt tracked on LivePosition for accurate time-stop
 PeakTracker persists in-memory across supervisor cycles
@@ -143,6 +143,6 @@ exit:
   trailing_activate_pct: 0.20
   trailing_distance_pct: 0.08
   time_stop_days: 90
-  min_pnl_for_time_stop: 0.0  # 0 = no floor; set >0 to require gain before time-stop
-  panic_sell_pnl_threshold: 0  # 0 = disabled; set e.g. -0.25 to sell all at -25% loss
+  min_pnl_for_time_stop: 0.0  # luôn yêu cầu PnL không âm; giá trị dương yêu cầu mức lãi tối thiểu
+  panic_sell_pnl_threshold: -0.25  # ngưỡng cảnh báo lỗ/DCA; không cấp quyền bán cắt lỗ
 ```

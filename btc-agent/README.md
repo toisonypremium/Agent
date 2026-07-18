@@ -375,9 +375,9 @@ No real order was placed.
 
 ### Milestone B+: exit manager
 
-- Done: `EvaluateExits` with TAKE_PROFIT / TRAILING_STOP / TIME_STOP / PANIC_SELL.
+- Done: `EvaluateExits` tự động bảo vệ lợi nhuận; lỗ sâu/vị thế lỗ lâu chỉ tạo cảnh báo DCA, không tạo lệnh bán cắt lỗ.
 - Done: `PeakTracker` persists across supervisor cycles.
-- Done: `OpenedAt` on `LivePosition` for accurate time-stop.
+- Done: `OpenedAt` on `LivePosition` để đánh giá tuổi vị thế và cảnh báo DCA; tự động bán theo thời gian chỉ khi không lỗ.
 - Done: Wired into supervisor through Hermes-owned limit SELL execution. Production `exit.enabled=true`; ownership, no-short, operator halt, reconcile and residual reservation gates remain mandatory.
 - Done: `live-auto-audit` scheduled in scheduler loop (`audit_interval_minutes`).
 

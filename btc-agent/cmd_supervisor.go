@@ -160,8 +160,8 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 	if e := saveExecutionEvidenceReport(db, time.Now()); e != nil {
 		result.Reasons = append(result.Reasons, "execution evidence: "+e.Error())
 	}
-	// Evaluate and execute deterministic exits after the managed cycle.
-	// Exits use the Hermes-owned ledger and the same reconcile-safe sell executor.
+	// Evaluate profit exits and loss warnings after the managed cycle.
+	// Loss warnings never grant SELL authority; final execution blocks below-cost sells.
 	if cfg.Exit.Enabled {
 		if state.PeakTracker == nil {
 			state.PeakTracker = loadExitPeakTracker()
@@ -221,8 +221,10 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 				}
 			}
 			for _, ex := range exits {
-				if ex.Action != liveguard.ExitHold {
-					result.Reasons = append(result.Reasons, "exit signal: "+ex.Symbol+" → "+string(ex.Action)+": "+ex.Reason)
+				if ex.Warning {
+					result.Reasons = append(result.Reasons, "cảnh báo vị thế (không bán): "+ex.Symbol+": "+ex.Reason)
+				} else if ex.Action != liveguard.ExitHold {
+					result.Reasons = append(result.Reasons, "tín hiệu bảo vệ lợi nhuận: "+ex.Symbol+" → "+string(ex.Action)+": "+ex.Reason)
 				}
 			}
 		}
@@ -392,13 +394,16 @@ func liveSupervisorMarkdown(result liveguard.SupervisorResult) string {
 	if len(result.Exits) > 0 {
 		md += "\nExit Evaluation:\n"
 		for _, ex := range result.Exits {
+			if ex.Warning {
+				md += fmt.Sprintf("  %s — CẢNH BÁO, KHÔNG BÁN: lãi/lỗ=%.2f%%: %s\n", ex.Symbol, ex.PnLPct*100, ex.Reason)
+				continue
+			}
 			if ex.Action == liveguard.ExitHold {
 				continue
 			}
-			md += fmt.Sprintf("  %s → %s pnl=%.2f%% qty=%.6f price=%.4f: %s\n",
-				ex.Symbol, ex.Action, ex.PnLPct*100, ex.SellQuantity, ex.SellPrice, ex.Reason)
+			md += fmt.Sprintf("  %s → %s lãi/lỗ=%.2f%% số lượng=%.6f giá=%.4f: %s\n", ex.Symbol, ex.Action, ex.PnLPct*100, ex.SellQuantity, ex.SellPrice, ex.Reason)
 		}
-		md += "  Autonomous execution: validated Hermes-owned positions are reduced/exited through reconcile-safe limit orders.\n"
+		md += "  Chính sách: chỉ tự động bảo vệ lợi nhuận; không tự động bán dưới giá vốn. Khi lỗ chỉ cảnh báo và cung cấp dữ liệu xem xét DCA.\n"
 	}
 	md += "\nSafety: spot limit BUY post-only only; no futures, no leverage, no market order.\n"
 	return md

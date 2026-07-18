@@ -32,7 +32,8 @@ func BuildAutonomousExitActions(exits []ExitDecision, owned []live.LivePosition,
 	for _, ex := range exits {
 		symbol := strings.ToUpper(ex.Symbol)
 		qty := ex.SellQuantity
-		if ex.Action == ExitHold || qty <= 0 || ex.SellPrice <= 0 || ownedQty[symbol] <= 0 || openSell[symbol] {
+		// Warning-only and loss-making decisions have no execution authority.
+		if ex.Warning || ex.Action == ExitHold || ex.PnLPct < 0 || qty <= 0 || ex.SellPrice <= 0 || ownedQty[symbol] <= 0 || openSell[symbol] {
 			continue
 		}
 		if qty > ownedQty[symbol] {

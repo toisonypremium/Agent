@@ -31,6 +31,8 @@ type ExitDecision struct {
 	SellQuantity float64    `json:"sell_quantity"` // Qty to sell (partial or full)
 	PnLPct       float64    `json:"pnl_pct"`
 	Reason       string     `json:"reason"`
+	Warning      bool       `json:"warning,omitempty"`
+	WarningCode  string     `json:"warning_code,omitempty"`
 	GeneratedAt  time.Time  `json:"generated_at"`
 }
 
@@ -64,7 +66,8 @@ func (pt *PeakTracker) Update(symbol string, currentPrice, activatePct, avgEntry
 }
 
 // EvaluateExits evaluates exit conditions for all live positions.
-// Returns a list of ExitDecision — caller places SELL limit orders for non-HOLD decisions.
+// Returns analysis decisions. Loss conditions are warning-only and never authorize a SELL.
+// Automatic SELL authority is limited to exits at or above the position cost basis.
 func EvaluateExits(
 	cfg config.Config,
 	positions []live.LivePosition,
@@ -108,11 +111,13 @@ func EvaluateExits(
 		}
 
 		switch {
-		// 0. Panic sell: loss exceeds threshold — exit entire position immediately
+		// 0. Deep loss: analysis warning only. Hermes never opens a stop-loss SELL.
 		case cfg.Exit.PanicSellPnLThreshold < 0 && pnlPct <= cfg.Exit.PanicSellPnLThreshold:
-			decision.Action = ExitPanicSell
-			decision.SellQuantity = pos.Quantity
-			decision.Reason = fmt.Sprintf("panic-sell: pnl=%.2f%% <= threshold=%.2f%%",
+			decision.Action = ExitHold
+			decision.SellQuantity = 0
+			decision.Warning = true
+			decision.WarningCode = "DEEP_LOSS_DCA_REVIEW"
+			decision.Reason = fmt.Sprintf("cảnh báo lỗ sâu: lỗ %.2f%% đã chạm ngưỡng cảnh báo %.2f%%; chỉ phân tích để xem xét DCA, không tự động bán cắt lỗ",
 				pnlPct*100, cfg.Exit.PanicSellPnLThreshold*100)
 
 		// 1. Take-profit: reached target gain → partial sell
@@ -130,24 +135,39 @@ func EvaluateExits(
 		case trailActive && cfg.Exit.TrailingDistancePct > 0 && peak > 0:
 			trailStop := peak * (1 - cfg.Exit.TrailingDistancePct)
 			if currentPrice <= trailStop {
-				decision.Action = ExitTrailingStop
-				decision.SellQuantity = pos.Quantity
-				decision.Reason = fmt.Sprintf("trailing stop: price=%.4f <= trail_stop=%.4f (peak=%.4f, dist=%.1f%%)",
-					currentPrice, trailStop, peak, cfg.Exit.TrailingDistancePct*100)
+				if currentPrice < pos.AvgEntryPrice {
+					decision.Action = ExitHold
+					decision.SellQuantity = 0
+					decision.Warning = true
+					decision.WarningCode = "TRAIL_BELOW_COST_DCA_REVIEW"
+					decision.Reason = fmt.Sprintf("cảnh báo giá giảm khỏi đỉnh nhưng còn dưới giá vốn: giá %.4f, giá vốn %.4f; không tự động bán cắt lỗ", currentPrice, pos.AvgEntryPrice)
+				} else {
+					decision.Action = ExitTrailingStop
+					decision.SellQuantity = pos.Quantity
+					decision.Reason = fmt.Sprintf("bảo vệ lợi nhuận: giá=%.4f <= ngưỡng theo đỉnh=%.4f (đỉnh=%.4f, khoảng lùi=%.1f%%)", currentPrice, trailStop, peak, cfg.Exit.TrailingDistancePct*100)
+				}
 			}
 
 		// 3. Time stop: position too old and PnL not recovering
 		case cfg.Exit.TimeStopDays > 0 && pos.OpenedAt > 0 && time.Unix(pos.OpenedAt, 0).Before(now.AddDate(0, 0, -cfg.Exit.TimeStopDays)):
-			// Don't time-stop if deep in loss (let it recover) unless explicitly below min PnL floor
-			if cfg.Exit.MinPnLForTimeStop == 0 || pnlPct >= cfg.Exit.MinPnLForTimeStop {
+			// Time-based exits may protect non-negative capital only. A losing position
+			// produces evidence for DCA review but never an automatic stop-loss order.
+			if pnlPct < 0 {
+				decision.Action = ExitHold
+				decision.SellQuantity = 0
+				decision.Warning = true
+				decision.WarningCode = "AGED_LOSS_DCA_REVIEW"
+				decision.Reason = fmt.Sprintf("cảnh báo vị thế giữ quá %d ngày và đang lỗ %.2f%%; phân tích DCA, không tự động bán cắt lỗ", cfg.Exit.TimeStopDays, pnlPct*100)
+			} else if pnlPct >= cfg.Exit.MinPnLForTimeStop {
 				decision.Action = ExitTimeStop
 				decision.SellQuantity = pos.Quantity
-				decision.Reason = fmt.Sprintf("time-stop: position age > %d days, pnl=%.2f%%",
-					cfg.Exit.TimeStopDays, pnlPct*100)
+				decision.Reason = fmt.Sprintf("kết thúc vị thế không lỗ sau %d ngày: lãi %.2f%%", cfg.Exit.TimeStopDays, pnlPct*100)
 			}
 		}
 
-		if decision.Action != ExitHold {
+		if decision.Warning {
+			log.Printf("[ExitManager] %s warning-only %s: %s", sym, decision.WarningCode, decision.Reason)
+		} else if decision.Action != ExitHold {
 			log.Printf("[ExitManager] %s → %s: %s", sym, decision.Action, decision.Reason)
 		}
 		decisions = append(decisions, decision)
@@ -157,6 +177,9 @@ func EvaluateExits(
 
 // PlaceSellLimitOrder places a sell limit order for an exit decision.
 func PlaceSellLimitOrder(ctx context.Context, decision ExitDecision, placer OrderPlacer) (live.OrderResult, error) {
+	if decision.Warning || decision.PnLPct < 0 {
+		return live.OrderResult{}, fmt.Errorf("automatic stop-loss sell forbidden: warning/DCA analysis only")
+	}
 	if decision.SellQuantity <= 0 || decision.SellPrice <= 0 {
 		return live.OrderResult{}, fmt.Errorf("invalid exit decision: qty=%.6f price=%.4f", decision.SellQuantity, decision.SellPrice)
 	}

@@ -110,3 +110,21 @@ func TestApplyReconciledLiveFillSellDoesNotConsumeThesis(t *testing.T) {
 		t.Fatalf("sell applied=%v err=%v", applied, err)
 	}
 }
+
+func TestApplyReconciledLiveFillReleasesFilledPriceImprovementResidual(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "filled-residual.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seedThesisReservedBuy(t, db, "thesis-price", "price-order", 40)
+	event := live.LivePositionEvent{Timestamp: 100, ClientOrderID: "price-order", InstID: "ETH-USDT", Symbol: "ETHUSDT", Side: "BUY", DeltaQuantity: .2, FillPrice: 150, NotionalDelta: 30, Status: live.StatusFilled}
+	snapshot := live.LiveFillSnapshot{ClientOrderID: "price-order", InstID: "ETH-USDT", Symbol: "ETHUSDT", Side: "BUY", FilledQuantity: .2, AvgPrice: 150, UpdatedAt: 100}
+	if _, applied, err := db.ApplyReconciledLiveFill(event, snapshot, "price-fill"); err != nil || !applied {
+		t.Fatalf("applied=%v err=%v", applied, err)
+	}
+	ledger, err := db.ThesisCapitalLedgerByID("thesis-price")
+	if err != nil || ledger.ReservedUSDT != 0 || ledger.FilledUSDT != 30 || ledger.RemainingDCAUSDT != 70 {
+		t.Fatalf("ledger=%+v err=%v", ledger, err)
+	}
+}

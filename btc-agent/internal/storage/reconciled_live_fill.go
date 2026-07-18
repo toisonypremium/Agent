@@ -67,7 +67,8 @@ func (d *DB) ApplyReconciledLiveFill(event live.LivePositionEvent, snapshot live
 	}
 
 	var thesisID, orderSide, orderSymbol string
-	err = tx.QueryRow(`SELECT COALESCE(thesis_id,''),side,symbol FROM live_orders WHERE client_order_id=?`, snapshot.ClientOrderID).Scan(&thesisID, &orderSide, &orderSymbol)
+	var orderNotional float64
+	err = tx.QueryRow(`SELECT COALESCE(thesis_id,''),side,symbol,notional FROM live_orders WHERE client_order_id=?`, snapshot.ClientOrderID).Scan(&thesisID, &orderSide, &orderSymbol, &orderNotional)
 	if err != nil && err != sql.ErrNoRows {
 		return live.LivePosition{}, false, err
 	}
@@ -102,6 +103,24 @@ func (d *DB) ApplyReconciledLiveFill(event live.LivePositionEvent, snapshot live
 		}
 		if _, err := tx.Exec(`UPDATE thesis_capital_ledgers SET reserved_usdt=reserved_usdt-?,filled_usdt=filled_usdt+?,updated_at=?,version=version+1 WHERE thesis_id=?`, event.NotionalDelta, event.NotionalDelta, now.Unix(), thesisID); err != nil {
 			return live.LivePosition{}, false, err
+		}
+		if live.NormalizeOrderStatus(event.Status) == live.StatusFilled {
+			var consumed float64
+			if err := tx.QueryRow(`SELECT COALESCE(SUM(notional_usdt),0) FROM thesis_capital_events WHERE client_order_id=? AND event_type=?`, snapshot.ClientOrderID, ThesisCapitalEventBuyFill).Scan(&consumed); err != nil {
+				return live.LivePosition{}, false, err
+			}
+			release := orderNotional - consumed
+			if release > 1e-9 {
+				releaseKey := fmt.Sprintf("release:%s:%s", snapshot.ClientOrderID, live.StatusFilled)
+				releaseEvent := ThesisCapitalEvent{EventKey: releaseKey, ThesisID: thesisID, ClientOrderID: snapshot.ClientOrderID, EventType: ThesisCapitalEventRelease, NotionalUSDT: release, CreatedAt: now}
+				releasePayload, _ := json.Marshal(releaseEvent)
+				if _, err := tx.Exec(`INSERT INTO thesis_capital_events(event_key,thesis_id,client_order_id,event_type,notional_usdt,created_at,payload_json) VALUES(?,?,?,?,?,?,?)`, releaseKey, thesisID, snapshot.ClientOrderID, ThesisCapitalEventRelease, release, now.Unix(), string(releasePayload)); err != nil {
+					return live.LivePosition{}, false, err
+				}
+				if _, err := tx.Exec(`UPDATE thesis_capital_ledgers SET reserved_usdt=reserved_usdt-?,remaining_dca_usdt=remaining_dca_usdt+?,updated_at=?,version=version+1 WHERE thesis_id=?`, release, release, now.Unix(), thesisID); err != nil {
+					return live.LivePosition{}, false, err
+				}
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {

@@ -41,16 +41,22 @@ func runReconcileLiveOrdersWithNotify(ctx context.Context, cfg config.Config, db
 
 	ledgerReport := liveguard.LiveLedgerReport{GeneratedAt: time.Now(), ManualCheckRequired: []string{}, Events: []live.LivePositionEvent{}}
 	for _, o := range result.Orders {
-		if o.Status != live.StatusUnknownNeedsManualCheck {
+		terminal := o.Status == live.StatusCancelled || o.Status == live.StatusRejected
+		if !terminal && o.Status != live.StatusUnknownNeedsManualCheck {
 			if err := db.SaveLiveOrderStatus(o); err != nil {
 				return fmt.Errorf("save reconciled live order %s/%s: %w", o.ClientOrderID, o.OrderID, err)
 			}
 		}
-		if err := db.SaveLiveOrderEvent(o); err != nil {
-			return fmt.Errorf("save live order event %s/%s: %w", o.ClientOrderID, o.OrderID, err)
-		}
 		if err := applyLedgerUpdate(db, o, &ledgerReport); err != nil {
 			return err
+		}
+		if terminal {
+			if _, _, err := db.SaveTerminalLiveOrderStatusAndRelease(o); err != nil {
+				return fmt.Errorf("save terminal live order %s/%s and release thesis capital: %w", o.ClientOrderID, o.OrderID, err)
+			}
+		}
+		if err := db.SaveLiveOrderEvent(o); err != nil {
+			return fmt.Errorf("save live order event %s/%s: %w", o.ClientOrderID, o.OrderID, err)
 		}
 	}
 

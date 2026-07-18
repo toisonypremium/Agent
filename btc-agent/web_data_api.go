@@ -96,13 +96,16 @@ func registerWebDataAPI(mux *http.ServeMux, cfg config.Config, db *storage.DB) {
 		if shadow.CapNhatLuc.IsZero() {
 			warnings = append(warnings, "quyết định bóng Hermes chưa có thời điểm cập nhật")
 		}
-		if !management.CapNhatLuc.IsZero() && !shadow.CapNhatLuc.IsZero() && shadow.CapNhatLuc.After(management.CapNhatLuc) {
-			warnings = append(warnings, "báo cáo quản lý Hermes cũ hơn quyết định bóng mới nhất")
+		latestSource := "báo cáo quản lý Hermes"
+		if !shadow.CapNhatLuc.IsZero() && (management.CapNhatLuc.IsZero() || shadow.CapNhatLuc.After(management.CapNhatLuc)) {
+			latestSource = "quyết định bóng Hermes"
 		}
 		return map[string]any{
 			"bao_cao_quan_ly":  management,
 			"quyet_dinh_bong":  shadow,
 			"canh_bao_do_tuoi": warnings,
+			"nguon_moi_nhat":   latestSource,
+			"ghi_chu_lich":     "Báo cáo quản lý cập nhật mỗi 60 phút; quyết định bóng cập nhật trước chu kỳ thực thi và là nguồn mới nhất cho quyết định Hermes.",
 
 			"bo_giam_sat":         loadWebReport("live_supervisor_latest.json", 35*time.Minute),
 			"bang_quyet_dinh":     loadWebReport("decision_dashboard_latest.json", 35*time.Minute),

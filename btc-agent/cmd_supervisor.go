@@ -165,23 +165,11 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 	if e := updatePersistedTotalEquity(ctx, cfg, db); e != nil {
 		result.Reasons = append(result.Reasons, "persist total equity: "+e.Error())
 	}
-	if positions, e := db.LivePositions(); e == nil {
-		exposure := 0.0
-		for _, p := range positions {
-			exposure += math.Max(0, p.CostBasis)
-		}
-		openBuy := 0.0
-		for _, o := range currentOpenOrders(db) {
-			if strings.EqualFold(o.Side, "BUY") {
-				openBuy += math.Max(o.Notional, o.Price*o.Quantity)
-			}
-		}
-		totalCapital := cfg.Portfolio.TotalCapital
-		if eq, ee := db.EquityRiskState(); ee == nil && eq.CurrentEquity > 0 {
-			totalCapital = eq.CurrentEquity
-		}
-		util := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: totalCapital, ExistingExposure: exposure, OpenBuyNotional: openBuy, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(cfg), MarketRegime: latestMarketRegime(db), AccumulationPhase: latestAccumulationPhase(db)})
-		if b, je := json.Marshal(util); je == nil {
+	if capital, e := db.BuildCapitalAuthoritySnapshot(cfg, time.Now()); e != nil {
+		result.Reasons = append(result.Reasons, "capital authority snapshot: "+e.Error())
+	} else {
+		util := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: capital.AccountEquityUSDT, ExistingExposure: capital.ExistingExposureUSDT, OpenBuyNotional: capital.OpenBuyNotionalUSDT, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: capital.HardExposureCapUSDT, MarketRegime: latestMarketRegime(db), AccumulationPhase: latestAccumulationPhase(db)})
+		if b, je := json.Marshal(map[string]any{"authority": capital, "utilization": util}); je == nil {
 			_, _ = db.Exec(`INSERT INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('capital_utilization',?,?) ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at,payload_json=excluded.payload_json`, time.Now().Unix(), string(b))
 		}
 	}

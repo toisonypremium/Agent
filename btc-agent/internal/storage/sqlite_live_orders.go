@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -38,6 +39,64 @@ func (d *DB) ReserveManagedLiveOrder(clientOrderID string, desired liveguard.Man
 		clientOrderID, "", desired.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusPlanned, now, now, desired.LayerIndex, desired.Source, desired.InvalidationPrice, expiresAt, desired.DecisionReason, "planned: "+reason, desired.DecisionID, desired.Intent, desired.StrategyVersion, desired.ConfigHash,
 	)
 	return err
+}
+
+func (d *DB) ReserveManagedLiveOrderWithThesis(clientOrderID string, desired liveguard.ManagedDesiredOrder, reason string) error {
+	if clientOrderID == "" {
+		return fmt.Errorf("client_order_id required")
+	}
+	if strings.TrimSpace(desired.ThesisID) == "" {
+		return fmt.Errorf("thesis_id required")
+	}
+	if strings.ToUpper(strings.TrimSpace(desired.Side)) != "BUY" {
+		return fmt.Errorf("thesis reservation requires BUY side")
+	}
+	if desired.Notional <= 0 || math.IsNaN(desired.Notional) || math.IsInf(desired.Notional, 0) {
+		return fmt.Errorf("thesis reservation requires finite positive notional")
+	}
+	tx, err := d.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var ledger ThesisCapitalLedger
+	var created, updated int64
+	err = tx.QueryRow(`SELECT thesis_id,symbol,max_exposure_usdt,reserved_usdt,filled_usdt,remaining_dca_usdt,status,version,created_at,updated_at FROM thesis_capital_ledgers WHERE thesis_id=?`, strings.TrimSpace(desired.ThesisID)).Scan(&ledger.ThesisID, &ledger.Symbol, &ledger.MaxExposureUSDT, &ledger.ReservedUSDT, &ledger.FilledUSDT, &ledger.RemainingDCAUSDT, &ledger.Status, &ledger.Version, &created, &updated)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("thesis ledger not found: %s", strings.TrimSpace(desired.ThesisID))
+	}
+	if err != nil {
+		return err
+	}
+	ledger.CreatedAt, ledger.UpdatedAt = time.Unix(created, 0).UTC(), time.Unix(updated, 0).UTC()
+	if err := ValidateThesisCapitalLedger(ledger); err != nil {
+		return err
+	}
+	if strings.ToUpper(ledger.Symbol) != strings.ToUpper(strings.TrimSpace(desired.Symbol)) {
+		return fmt.Errorf("thesis symbol mismatch: ledger=%s order=%s", ledger.Symbol, desired.Symbol)
+	}
+	switch strings.ToUpper(strings.TrimSpace(ledger.Status)) {
+	case "PROBE", "CONFIRMING", "ACCUMULATING":
+	default:
+		return fmt.Errorf("thesis status does not permit reservation: %s", ledger.Status)
+	}
+	if ledger.RemainingDCAUSDT+1e-9 < desired.Notional {
+		return fmt.Errorf("thesis remaining DCA budget insufficient: remaining=%.8f requested=%.8f", ledger.RemainingDCAUSDT, desired.Notional)
+	}
+	now := time.Now().Unix()
+	expiresAt := int64(0)
+	if !desired.ExpiresAt.IsZero() {
+		expiresAt = desired.ExpiresAt.Unix()
+	}
+	_, err = tx.Exec(`INSERT INTO live_orders(client_order_id,order_id,inst_id,symbol,side,type,price,quantity,notional,status,submitted_at,updated_at,layer_index,source,invalidation_price,expires_at,decision_reason,last_management_action,decision_id,intent,strategy_version,config_hash,thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, clientOrderID, "", desired.InstID, desired.Symbol, desired.Side, desired.Type, desired.Price, desired.Quantity, desired.Notional, live.StatusPlanned, now, now, desired.LayerIndex, desired.Source, desired.InvalidationPrice, expiresAt, desired.DecisionReason, "planned: "+reason, desired.DecisionID, desired.Intent, desired.StrategyVersion, desired.ConfigHash, strings.TrimSpace(desired.ThesisID))
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`UPDATE thesis_capital_ledgers SET reserved_usdt=reserved_usdt+?, remaining_dca_usdt=remaining_dca_usdt-?, updated_at=?, version=version+1 WHERE thesis_id=?`, desired.Notional, desired.Notional, now, strings.TrimSpace(desired.ThesisID))
+	if err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (d *DB) MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error {

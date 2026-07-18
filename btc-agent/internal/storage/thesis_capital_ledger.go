@@ -63,8 +63,18 @@ func (d *DB) SaveThesisCapitalLedger(l ThesisCapitalLedger) error {
 	if err != nil {
 		return err
 	}
-	_, err = d.Exec(`INSERT INTO thesis_capital_ledgers(thesis_id,symbol,max_exposure_usdt,reserved_usdt,filled_usdt,remaining_dca_usdt,status,version,created_at,updated_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thesis_id) DO UPDATE SET max_exposure_usdt=excluded.max_exposure_usdt,reserved_usdt=excluded.reserved_usdt,filled_usdt=excluded.filled_usdt,remaining_dca_usdt=excluded.remaining_dca_usdt,status=excluded.status,version=excluded.version,updated_at=excluded.updated_at,payload_json=excluded.payload_json WHERE thesis_capital_ledgers.symbol=excluded.symbol`, l.ThesisID, l.Symbol, l.MaxExposureUSDT, l.ReservedUSDT, l.FilledUSDT, l.RemainingDCAUSDT, l.Status, l.Version, l.CreatedAt.Unix(), l.UpdatedAt.Unix(), string(b))
-	return err
+	res, err := d.Exec(`INSERT INTO thesis_capital_ledgers(thesis_id,symbol,max_exposure_usdt,reserved_usdt,filled_usdt,remaining_dca_usdt,status,version,created_at,updated_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thesis_id) DO UPDATE SET max_exposure_usdt=excluded.max_exposure_usdt,reserved_usdt=excluded.reserved_usdt,filled_usdt=excluded.filled_usdt,remaining_dca_usdt=excluded.remaining_dca_usdt,status=excluded.status,version=excluded.version,updated_at=excluded.updated_at,payload_json=excluded.payload_json WHERE thesis_capital_ledgers.symbol=excluded.symbol`, l.ThesisID, l.Symbol, l.MaxExposureUSDT, l.ReservedUSDT, l.FilledUSDT, l.RemainingDCAUSDT, l.Status, l.Version, l.CreatedAt.Unix(), l.UpdatedAt.Unix(), string(b))
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("thesis symbol is immutable: thesis_id=%s symbol=%s", l.ThesisID, l.Symbol)
+	}
+	return nil
 }
 
 func (d *DB) ThesisCapitalLedgerByID(thesisID string) (ThesisCapitalLedger, error) {

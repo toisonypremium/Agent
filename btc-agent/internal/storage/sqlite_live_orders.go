@@ -208,7 +208,22 @@ func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
 func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
 	o.Status = live.NormalizeOrderStatus(o.Status)
 	if o.Status == live.StatusCancelled || o.Status == live.StatusRejected {
+		// Terminal transitions are validated by the release helper below.
+
 		_, _, err := d.SaveTerminalLiveOrderStatusAndRelease(o)
+		return err
+	}
+	var current string
+	var lookupErr error
+	if o.ClientOrderID != "" {
+		lookupErr = d.QueryRow(`SELECT status FROM live_orders WHERE client_order_id=?`, o.ClientOrderID).Scan(&current)
+	} else if o.OrderID != "" {
+		lookupErr = d.QueryRow(`SELECT status FROM live_orders WHERE order_id=?`, o.OrderID).Scan(&current)
+	}
+	if lookupErr != nil {
+		return fmt.Errorf("live order transition lookup failed: %w", lookupErr)
+	}
+	if err := ensureLiveOrderTransition(current, o.Status); err != nil {
 		return err
 	}
 	updatedAt := o.UpdatedAt

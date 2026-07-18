@@ -58,15 +58,24 @@ func applyLivePositionEventTx(tx *sql.Tx, event live.LivePositionEvent) (live.Li
 	if err != nil {
 		return live.LivePosition{}, err
 	}
+	if found && pos.ThesisID != "" && event.ThesisID != "" && pos.ThesisID != event.ThesisID {
+		return live.LivePosition{}, fmt.Errorf("live position thesis conflict: position=%s event=%s", pos.ThesisID, event.ThesisID)
+	}
+	if pos.ThesisID == "" {
+		pos.ThesisID = event.ThesisID
+	}
 	managed := HermesManagedHolding{}
 	var managedAdoptedAt, managedUpdatedAt int64
-	_ = tx.QueryRow(`SELECT symbol,inst_id,quantity,avg_entry_price,adopted_at,updated_at,source FROM hermes_managed_holdings WHERE symbol=?`, strings.ToUpper(event.Symbol)).Scan(&managed.Symbol, &managed.InstID, &managed.Quantity, &managed.AvgEntryPrice, &managedAdoptedAt, &managedUpdatedAt, &managed.Source)
+	_ = tx.QueryRow(`SELECT symbol,inst_id,quantity,avg_entry_price,adopted_at,updated_at,source,COALESCE(thesis_id,'') FROM hermes_managed_holdings WHERE symbol=?`, strings.ToUpper(event.Symbol)).Scan(&managed.Symbol, &managed.InstID, &managed.Quantity, &managed.AvgEntryPrice, &managedAdoptedAt, &managedUpdatedAt, &managed.Source, &managed.ThesisID)
+	if managed.ThesisID != "" && event.ThesisID != "" && managed.ThesisID != event.ThesisID {
+		return live.LivePosition{}, fmt.Errorf("managed holding thesis conflict: holding=%s event=%s", managed.ThesisID, event.ThesisID)
+	}
 	if managed.Quantity > pos.Quantity {
 		pos = managedPosition(managed)
 		found = true
 	}
 	if !found {
-		pos = live.LivePosition{Symbol: event.Symbol, InstID: event.InstID}
+		pos = live.LivePosition{ThesisID: event.ThesisID, Symbol: event.Symbol, InstID: event.InstID}
 		if event.Timestamp > 0 {
 			pos.OpenedAt = event.Timestamp
 		} else {
@@ -119,7 +128,7 @@ func applyLivePositionEventTx(tx *sql.Tx, event live.LivePositionEvent) (live.Li
 		pos.UpdatedAt = time.Now().Unix()
 	}
 	b, _ := json.Marshal(pos)
-	if _, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b)); err != nil {
+	if _, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b), nullableString(pos.ThesisID)); err != nil {
 		return live.LivePosition{}, err
 	}
 	return pos, nil
@@ -129,7 +138,7 @@ func livePositionBySymbol(q interface {
 	QueryRow(string, ...any) *sql.Row
 }, symbol string) (live.LivePosition, bool, error) {
 	var pos live.LivePosition
-	err := q.QueryRow(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at FROM live_positions WHERE symbol=?`, symbol).Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt)
+	err := q.QueryRow(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, COALESCE(thesis_id,'') FROM live_positions WHERE symbol=?`, symbol).Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt, &pos.ThesisID)
 	if err == sql.ErrNoRows {
 		return live.LivePosition{}, false, nil
 	}
@@ -141,12 +150,12 @@ func livePositionBySymbol(q interface {
 
 func (d *DB) SaveLivePositionEvent(event live.LivePositionEvent) error {
 	b, _ := json.Marshal(event)
-	_, err := d.Exec(`INSERT INTO live_position_events(timestamp, client_order_id, order_id, inst_id, symbol, side, delta_quantity, fill_price, notional_delta, fee_delta, fee_currency, position_qty, avg_entry_price, status, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, strings.ToUpper(event.Side), event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, strings.ToUpper(event.FeeCurrency), event.PositionQty, event.AvgEntryPrice, event.Status, string(b))
+	_, err := d.Exec(`INSERT INTO live_position_events(timestamp, client_order_id, order_id, inst_id, symbol, side, delta_quantity, fill_price, notional_delta, fee_delta, fee_currency, position_qty, avg_entry_price, status, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, strings.ToUpper(event.Side), event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, strings.ToUpper(event.FeeCurrency), event.PositionQty, event.AvgEntryPrice, event.Status, string(b), nullableString(event.ThesisID))
 	return err
 }
 
 func (d *DB) LivePositions() ([]live.LivePosition, error) {
-	rows, err := d.Query(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at FROM live_positions ORDER BY symbol`)
+	rows, err := d.Query(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, COALESCE(thesis_id,'') FROM live_positions ORDER BY symbol`)
 	if err != nil {
 		return nil, err
 	}
@@ -154,7 +163,7 @@ func (d *DB) LivePositions() ([]live.LivePosition, error) {
 	out := []live.LivePosition{}
 	for rows.Next() {
 		var pos live.LivePosition
-		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt); err != nil {
+		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt, &pos.ThesisID); err != nil {
 			return nil, err
 		}
 		out = append(out, pos)

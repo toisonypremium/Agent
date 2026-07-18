@@ -10,6 +10,7 @@ import (
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
+	"btc-agent/internal/liquidity"
 	"btc-agent/internal/market"
 )
 
@@ -76,6 +77,10 @@ func (f *forcedSimulationExchange) PlaceSpotLimitOrder(ctx context.Context, req 
 func (f *forcedSimulationExchange) CancelOrder(ctx context.Context, req live.CancelOrderRequest) (live.CancelOrderResult, error) {
 	f.calls++
 	return live.CancelOrderResult{}, nil
+}
+
+func (f *forcedSimulationExchange) OrderBook(ctx context.Context, instID string) (liquidity.OrderBookSnapshot, error) {
+	return liquidity.OrderBookSnapshot{BestBid: 99.95, BestAsk: 100.05, BidDepth1PctUSDT: 100000, AskDepth1PctUSDT: 100000}, nil
 }
 
 type fakeHaltFalse struct{}

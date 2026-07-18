@@ -43,7 +43,10 @@ func registerWebDataAPI(mux *http.ServeMux, cfg config.Config, db *storage.DB) {
 	})
 	registerWebGET(mux, "/api/v1/von", func() any {
 		positions, positionErr := db.LivePositions()
+		capital, capitalErr := db.BuildCapitalAuthoritySnapshot(cfg, time.Now().UTC())
 		return map[string]any{
+			"von_authority":       capital,
+			"loi_von_authority":   webErrorText(capitalErr),
 			"ke_hoach_van_hanh":   loadWebReport("operations_plan_latest.json", 35*time.Minute),
 			"san_sang_giao_dich":  loadWebReport("live_readiness_latest.json", 35*time.Minute),
 			"ke_hoach_nghien_cuu": loadWebReport("capital_plan_research_latest.json", 90*time.Minute),
@@ -112,6 +115,17 @@ func registerWebDataAPI(mux *http.ServeMux, cfg config.Config, db *storage.DB) {
 			"trang_thai_bot":      loadWebReport("bot_state_latest.json", 35*time.Minute),
 			"bang_chung_thuc_thi": loadWebReport("execution_evidence_latest.json", 90*time.Minute),
 			"bao_cao_vi_the":      loadWebReport("live_position_latest.json", 35*time.Minute),
+		}
+	})
+	registerWebGET(mux, "/api/v1/canary", func() any {
+		return map[string]any{
+			"san_sang_ky_thuat": loadWebReport("canary_readiness_latest.json", 35*time.Minute),
+			"dien_tap":          loadWebReport("canary_rehearsal_latest.json", 35*time.Minute),
+			"do_tuoi_critical": map[string]any{
+				"doctor":    loadWebReport("live_doctor_latest.json", 35*time.Minute),
+				"doi_soat":  loadWebReport("live_reconcile_latest.json", 35*time.Minute),
+				"heartbeat": loadWebReport("scheduler_heartbeat_latest.json", 10*time.Minute),
+			},
 		}
 	})
 	registerWebGET(mux, "/api/v1/van-hanh", func() any {

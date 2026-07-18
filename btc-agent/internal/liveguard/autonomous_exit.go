@@ -15,10 +15,10 @@ type AutonomousExitAction struct {
 }
 
 func BuildAutonomousExitActions(exits []ExitDecision, owned []live.LivePosition, open []live.OrderStatus) []AutonomousExitAction {
-	ownedQty := map[string]float64{}
+	ownedBySymbol := map[string]live.LivePosition{}
 	for _, p := range owned {
 		if p.Quantity > 0 {
-			ownedQty[strings.ToUpper(p.Symbol)] = p.Quantity
+			ownedBySymbol[strings.ToUpper(p.Symbol)] = p
 		}
 	}
 	openSell := map[string]bool{}
@@ -33,11 +33,14 @@ func BuildAutonomousExitActions(exits []ExitDecision, owned []live.LivePosition,
 		symbol := strings.ToUpper(ex.Symbol)
 		qty := ex.SellQuantity
 		// Warning-only and loss-making decisions have no execution authority.
-		if ex.Warning || ex.Action == ExitHold || ex.PnLPct < 0 || qty <= 0 || ex.SellPrice <= 0 || ownedQty[symbol] <= 0 || openSell[symbol] {
+		if ex.Warning || ex.Action == ExitHold || ex.PnLPct < 0 || qty <= 0 || ex.SellPrice <= 0 || ownedBySymbol[symbol].Quantity <= 0 || openSell[symbol] {
 			continue
 		}
-		if qty > ownedQty[symbol] {
-			qty = ownedQty[symbol]
+		if qty > ownedBySymbol[symbol].Quantity {
+			qty = ownedBySymbol[symbol].Quantity
+		}
+		if err := ValidateAutomatedSell(AutomatedSellCheck{Position: ownedBySymbol[symbol], Symbol: symbol, SellPrice: ex.SellPrice, SellQuantity: qty}); err != nil {
+			continue
 		}
 		intent := hermesoperator.IntentExitLimit
 		if ex.Action == ExitTakeProfit {

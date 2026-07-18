@@ -262,7 +262,7 @@ func TestExecuteHermesExitLimitBlocksUnownedPosition(t *testing.T) {
 }
 
 func TestHermesExitSubtractsOpenSellResidual(t *testing.T) {
-	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: .01}}
+	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: .01, AvgEntryPrice: 50000}}
 	open := []live.OrderStatus{{Symbol: "BTCUSDT", Side: "SELL", Status: live.StatusPartialFill, Quantity: .008, FilledQuantity: .003}}
 	p, r := &hermesTestPlacer{}, &hermesTestRecorder{}
 	got := ExecuteHermesExitLimitActionsWithOpen(context.Background(), cancelCfg(), "d-residual", []HermesActionDecision{exitLimitDecision("BTCUSDT", 1000, 50000)}, owned, open, reduceFilter(), p, r, false)
@@ -275,7 +275,7 @@ func TestHermesExitSubtractsOpenSellResidual(t *testing.T) {
 }
 
 func TestHermesExitBlocksWhenOpenSellReservesOwnership(t *testing.T) {
-	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: .01}}
+	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: .01, AvgEntryPrice: 50000}}
 	open := []live.OrderStatus{{Symbol: "BTCUSDT", Side: "SELL", Status: live.StatusSubmitted, Quantity: .01}}
 	p, r := &hermesTestPlacer{}, &hermesTestRecorder{}
 	got := ExecuteHermesExitLimitActionsWithOpen(context.Background(), cancelCfg(), "d-reserved", []HermesActionDecision{exitLimitDecision("BTCUSDT", 1000, 50000)}, owned, open, reduceFilter(), p, r, false)

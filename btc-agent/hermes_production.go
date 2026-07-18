@@ -126,6 +126,15 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		safety = safety[:1]
 	}
 	decisionID := audit.Validation.Decision.DecisionID
+	if !dryRun {
+		payloadHash, hashErr := storage.HermesDecisionPayloadHash(audit.Validation.Decision)
+		if hashErr != nil {
+			return blockedHermesCycle(plan, dryRun, "Hermes decision payload hash failed"), true
+		}
+		if reserveErr := db.ReserveHermesExecution(decisionID, payloadHash, time.Now().UTC()); reserveErr != nil {
+			return blockedHermesCycle(plan, dryRun, reserveErr.Error()), true
+		}
+	}
 	// Enforce the staged lifecycle before building exchange orders. Risk-reducing
 	// actions remain independent; only exposure increases must pass the gate.
 	assetsBySymbol := map[string]agent2.AssetPlan{}
@@ -279,6 +288,9 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	}
 	if len(reducing) > 0 {
 		result := executeHermesReducingBatch(ctx, cfg, db, plan, decisionID, reducing, open, positions, filters, placer, dataHealth, reconcile, risk, dryRun)
+		if !dryRun {
+			_ = db.CompleteHermesExecution(decisionID, hermesReceiptStatus(result), result.Summary, time.Now().UTC())
+		}
 		return result, true
 	}
 	desired, blocked := liveguard.BuildHermesDesiredOrders(cfg, plan, decisionID, true, safety, filters)
@@ -292,7 +304,20 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	result := liveguard.ExecuteHermesDesiredOrders(ctx, cfg, plan, desired, open, placer, db, execCtx, dryRun)
 	result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
 	result.Blocked = append(result.Blocked, blocked...)
+	if !dryRun {
+		_ = db.CompleteHermesExecution(decisionID, hermesReceiptStatus(result), result.Summary, time.Now().UTC())
+	}
 	return result, true
+}
+
+func hermesReceiptStatus(result liveguard.ManagedCycleResult) string {
+	if len(result.Blocked) > 0 && len(result.Placed) == 0 && len(result.Canceled) == 0 {
+		return storage.HermesReceiptBlocked
+	}
+	if len(result.Blocked) > 0 {
+		return storage.HermesReceiptPartial
+	}
+	return storage.HermesReceiptCompleted
 }
 
 func sameHermesActions(a, b []hermesoperator.Action) bool {

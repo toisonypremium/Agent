@@ -68,6 +68,10 @@ func runWeb(ctx context.Context, cfg config.Config, db *storage.DB, args []strin
 	})
 	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/dashboard" || r.URL.Path == "/dashboard/" {
+			http.Redirect(w, r, "/", http.StatusTemporaryRedirect)
+			return
+		}
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
 			return

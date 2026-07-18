@@ -15,6 +15,10 @@ func run(ctx context.Context, args []string) error {
 		return usage()
 	}
 	cmd := args[1]
+	if cmd == "version" {
+		fmt.Printf("btc-agent version=%s commit=%s build_time=%s\n", version, commit, buildTime)
+		return nil
+	}
 	cfgPath := "config.yaml"
 	for i := 2; i < len(args)-1; i++ {
 		if args[i] == "--config" {
@@ -172,7 +176,7 @@ func run(ctx context.Context, args []string) error {
 }
 
 func usage() error {
-	return fmt.Errorf("usage: btc-agent <fetch|analyze|plan|paper-manager|operations-plan|market-watch|ops-events|microstructure-fetch|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|hermes-canary-readiness|live-auto-audit|live-doctor|research-doctor|research-brief|research-expert|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|event-replay|telegram-commands|scheduler-heartbeat-check|maintenance|control-plane-snapshot|control-plane-validate-proposal|control-plane-submit-proposal|control-plane-proposal-result|control-plane-recent-proposals|control-plane-request-halt|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>|--proposal-file <path>|--decision-id <id>|--caller <name>|--reason-code <code>|--summary <text>]")
+	return fmt.Errorf("usage: btc-agent <version|fetch|analyze|plan|paper-manager|operations-plan|market-watch|ops-events|microstructure-fetch|accumulation-readiness|btc-gate-diagnostic|run-daily|run-ai-watch|backtest|backtest-live-manager|learn|real-data-survey|universe-research|export-training|eval-ai|live-proof|live-readiness|hermes-canary-readiness|live-auto-audit|live-doctor|research-doctor|research-brief|research-expert|execute-live-proof-order|auto-live-order|live-supervisor|cancel-all-live-orders|simulate-live-manager|operator-halt|operator-resume|operator-status|reconcile-live-orders|live-positions|event-replay|telegram-commands|scheduler-heartbeat-check|maintenance|control-plane-snapshot|control-plane-validate-proposal|control-plane-submit-proposal|control-plane-proposal-result|control-plane-recent-proposals|control-plane-request-halt|status|scheduler> --config config.yaml [--run-now|--dry-run|--max-age-minutes <minutes>|--research-armed|--production-armed-probe|--research-profile <name>|--research-expiry-days <days>|--research-hold-through-watch|--research-hold-if-price-above-discount-pct <pct>|--proposal-file <path>|--decision-id <id>|--caller <name>|--reason-code <code>|--summary <text>]")
 }
 
 func argValue(args []string, key string) string {

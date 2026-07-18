@@ -19,11 +19,12 @@ type Config struct {
 	MaxTokens int
 	Temp      float64
 }
-
 type Client struct {
 	cfg  Config
 	http *http.Client
 }
+
+const maxResponseBytes = 2 << 20
 
 func New(cfg Config) (*Client, error) {
 	if cfg.BaseURL == "" {
@@ -40,7 +41,6 @@ func New(cfg Config) (*Client, error) {
 	}
 	return &Client{cfg: cfg, http: &http.Client{Timeout: 90 * time.Second}}, nil
 }
-
 func NewFromEnv(baseEnv, keyEnv, model string, maxTokens int, temp float64) (*Client, error) {
 	if baseEnv == "" {
 		baseEnv = "ANTHROPIC_BASE_URL"
@@ -53,28 +53,18 @@ func NewFromEnv(baseEnv, keyEnv, model string, maxTokens int, temp float64) (*Cl
 	}
 	return New(Config{BaseURL: os.Getenv(baseEnv), APIKey: os.Getenv(keyEnv), Model: model, MaxTokens: maxTokens, Temp: temp})
 }
-
 func (c *Client) ChatJSON(ctx context.Context, prompt string, out any) error {
 	content, err := c.ChatText(ctx, prompt)
 	if err != nil {
 		return err
 	}
-	content = extractJSONObject(content)
-	if err := json.Unmarshal([]byte(content), out); err != nil {
+	if err := decodeStrictJSONObject(content, out); err != nil {
 		return fmt.Errorf("llm json parse failed: %w", err)
 	}
 	return nil
 }
-
 func (c *Client) ChatText(ctx context.Context, prompt string) (string, error) {
-	reqBody := map[string]any{
-		"model":       c.cfg.Model,
-		"temperature": c.cfg.Temp,
-		"messages": []map[string]string{{
-			"role":    "user",
-			"content": prompt,
-		}},
-	}
+	reqBody := map[string]any{"model": c.cfg.Model, "temperature": c.cfg.Temp, "messages": []map[string]string{{"role": "system", "content": "You are a report-only assistant. Never override the deterministic engine, never place orders, and return only the requested format."}, {"role": "user", "content": prompt}}}
 	if c.cfg.MaxTokens > 0 {
 		reqBody["max_tokens"] = c.cfg.MaxTokens
 	}
@@ -86,8 +76,7 @@ func (c *Client) ChatText(ctx context.Context, prompt string) (string, error) {
 	if !strings.HasSuffix(base, "/v1") {
 		base += "/v1"
 	}
-	url := base + "/chat/completions"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(b))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/chat/completions", bytes.NewReader(b))
 	if err != nil {
 		return "", err
 	}
@@ -98,16 +87,19 @@ func (c *Client) ChatText(ctx context.Context, prompt string) (string, error) {
 		return "", fmt.Errorf("llm request failed: %w", err)
 	}
 	defer resp.Body.Close()
-	data, err := io.ReadAll(resp.Body)
+	limited := io.LimitReader(resp.Body, maxResponseBytes+1)
+	data, err := io.ReadAll(limited)
 	if err != nil {
 		return "", err
+	}
+	if len(data) > maxResponseBytes {
+		return "", fmt.Errorf("llm response exceeds %d bytes", maxResponseBytes)
 	}
 	if resp.StatusCode/100 != 2 {
 		return "", fmt.Errorf("llm http %d: %s", resp.StatusCode, redact(string(data), c.cfg.APIKey))
 	}
 	return responseContent(data)
 }
-
 func responseContent(data []byte) (string, error) {
 	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("data:")) || bytes.Contains(data, []byte("\ndata:")) {
 		return sseContent(data), nil
@@ -118,7 +110,6 @@ func responseContent(data []byte) (string, error) {
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
-		Error any `json:"error,omitempty"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return "", fmt.Errorf("llm decode failed: %w", err)
@@ -128,9 +119,8 @@ func responseContent(data []byte) (string, error) {
 	}
 	return raw.Choices[0].Message.Content, nil
 }
-
 func sseContent(data []byte) string {
-	out := strings.Builder{}
+	var out strings.Builder
 	for _, line := range strings.Split(string(data), "\n") {
 		line = strings.TrimSpace(line)
 		if !strings.HasPrefix(line, "data:") {
@@ -160,24 +150,27 @@ func sseContent(data []byte) string {
 	}
 	return out.String()
 }
-
+func decodeStrictJSONObject(s string, out any) error {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```json") {
+		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "```json"), "```"))
+	} else if strings.HasPrefix(s, "```") {
+		s = strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(s, "```"), "```"))
+	}
+	dec := json.NewDecoder(strings.NewReader(s))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	var extra any
+	if err := dec.Decode(&extra); err != io.EOF {
+		return fmt.Errorf("trailing content")
+	}
+	return nil
+}
 func redact(s, secret string) string {
 	if secret == "" {
 		return s
 	}
 	return strings.ReplaceAll(s, secret, "<REDACTED>")
-}
-
-func extractJSONObject(s string) string {
-	s = strings.TrimSpace(s)
-	s = strings.TrimPrefix(s, "```json")
-	s = strings.TrimPrefix(s, "```")
-	s = strings.TrimSuffix(s, "```")
-	s = strings.TrimSpace(s)
-	start := strings.Index(s, "{")
-	end := strings.LastIndex(s, "}")
-	if start >= 0 && end >= start {
-		return s[start : end+1]
-	}
-	return s
 }

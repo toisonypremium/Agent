@@ -47,6 +47,30 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if len(audit.Validation.Reasons) > 0 {
 		return blockedHermesCycle(plan, dryRun, "Hermes decision did not pass validation"), true
 	}
+	// Revalidate the original decision against current policy immediately before
+	// execution. A report-level validation result is evidence, never durable
+	// execution authority: TTL, symbol universe, confidence, action count and
+	// notional caps may have changed since the report was written.
+	allowedSymbols := map[string]bool{}
+	for _, symbol := range cfg.Data.Symbols.Assets {
+		allowedSymbols[strings.ToUpper(symbol)] = true
+	}
+	executionValidation := hermesoperator.Validate(audit.Validation.Decision, hermesoperator.ValidationPolicy{
+		Now:                   time.Now().UTC(),
+		MaxDecisionTTL:        time.Duration(cfg.HermesOperator.DecisionTTLSeconds) * time.Second,
+		MinConfidence:         cfg.HermesOperator.MinConfidence,
+		MaxActions:            cfg.HermesOperator.MaxActionsPerCycle,
+		MaxProbeNotionalUSDT:  config.EffectiveHermesProbeNotional(cfg),
+		MaxActionNotionalUSDT: config.EffectiveHermesActionNotional(cfg),
+		AllowedSymbols:        allowedSymbols,
+	})
+	if len(executionValidation.Reasons) > 0 {
+		return blockedHermesCycle(plan, dryRun, "Hermes decision failed execution-time validation: "+strings.Join(executionValidation.Reasons, "; ")), true
+	}
+	if !sameHermesActions(audit.Validation.Actions, executionValidation.Actions) {
+		return blockedHermesCycle(plan, dryRun, "Hermes validated actions differ from signed decision payload"), true
+	}
+	audit.Validation = executionValidation
 	if len(audit.Validation.Actions) == 0 {
 		saveBaseProtectionStatus(db, cfg)
 		return noActionHermesCycle(plan, dryRun, "valid Hermes HOLD/WATCH decision; no action requested"), true
@@ -269,6 +293,15 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
 	result.Blocked = append(result.Blocked, blocked...)
 	return result, true
+}
+
+func sameHermesActions(a, b []hermesoperator.Action) bool {
+	left, err := json.Marshal(a)
+	if err != nil {
+		return false
+	}
+	right, err := json.Marshal(b)
+	return err == nil && string(left) == string(right)
 }
 
 func noActionHermesCycle(plan agent2.Plan, dryRun bool, reason string) liveguard.ManagedCycleResult {

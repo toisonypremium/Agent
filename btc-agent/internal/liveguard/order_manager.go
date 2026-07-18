@@ -30,6 +30,7 @@ type ManagedOrderRecorder interface {
 }
 
 type ManagedDesiredOrder struct {
+	ThesisID          string      `json:"thesis_id,omitempty"`
 	Symbol            string      `json:"symbol"`
 	InstID            string      `json:"inst_id"`
 	LayerIndex        int         `json:"layer_index"`

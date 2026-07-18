@@ -188,7 +188,7 @@ func BuildHermesDesiredOrders(cfg config.Config, plan agent2.Plan, decisionID st
 		if action.Intent == hermesoperator.IntentScaleLimit {
 			tier = OpportunityStrong
 		}
-		desired = append(desired, ManagedDesiredOrder{Symbol: symbol, InstID: instID, LayerIndex: 1, Side: "BUY", Type: "limit", Price: candidate.Price, Quantity: candidate.Quantity, Notional: candidate.Notional, PostOnly: true, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: source, DecisionReason: strings.Join(action.ReasonCodes, ","), AllocationTier: string(tier), AllocationReason: "Hermes validated action", TargetPrice: action.Target, RewardRisk: asset.RewardRisk, LayerReason: "Hermes " + string(action.Intent), DecisionID: decisionID, Intent: string(action.Intent)})
+		desired = append(desired, ManagedDesiredOrder{ThesisID: action.ThesisID, Symbol: symbol, InstID: instID, LayerIndex: 1, Side: "BUY", Type: "limit", Price: candidate.Price, Quantity: candidate.Quantity, Notional: candidate.Notional, PostOnly: true, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: source, DecisionReason: strings.Join(action.ReasonCodes, ","), AllocationTier: string(tier), AllocationReason: "Hermes validated action", TargetPrice: action.Target, RewardRisk: asset.RewardRisk, LayerReason: "Hermes " + string(action.Intent), DecisionID: decisionID, Intent: string(action.Intent)})
 	}
 	return desired, blocked
 }

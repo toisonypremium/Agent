@@ -38,12 +38,12 @@ func TestBuildHermesShadowDesiredOrdersAllowsScoutProbeInEnvelope(t *testing.T) 
 	cfg.Live.MaxLiveNotionalPerOrderUSDT = 100
 	cfg.Risk.DiscountZonePremiumPct = 0
 	plan := agent2.Plan{State: agent2.StateScout, Assets: []agent2.AssetPlan{{Symbol: "RENDERUSDT", State: agent2.StateScout, DiscountZone: market.Zone{Low: 1.4, High: 1.6}, Invalidation: 1.3, RewardRisk: 8}}}
-	decisions := []HermesActionDecision{{Allowed: true, NotionalUSDT: 5, Action: hermesoperator.Action{Symbol: "RENDERUSDT", Intent: hermesoperator.IntentProbeLimit, EntryPrice: 1.5, Target: 2.4, ReasonCodes: []string{"EXCEPTIONAL_RR"}}}}
+	decisions := []HermesActionDecision{{Allowed: true, NotionalUSDT: 5, Action: hermesoperator.Action{ThesisID: "thesis-hermes", Symbol: "RENDERUSDT", Intent: hermesoperator.IntentProbeLimit, EntryPrice: 1.5, Target: 2.4, ReasonCodes: []string{"EXCEPTIONAL_RR"}}}}
 	desired, blocked := BuildHermesShadowDesiredOrders(cfg, plan, decisions, nil)
 	if len(blocked) != 0 || len(desired) != 1 {
 		t.Fatalf("desired=%+v blocked=%+v", desired, blocked)
 	}
-	if desired[0].Source != "HERMES_SHADOW" || desired[0].Notional > 5.000001 || !desired[0].PostOnly {
+	if desired[0].ThesisID != "thesis-hermes" || desired[0].Source != "HERMES_SHADOW" || desired[0].Notional > 5.000001 || !desired[0].PostOnly {
 		t.Fatalf("unsafe shadow desired: %+v", desired[0])
 	}
 }

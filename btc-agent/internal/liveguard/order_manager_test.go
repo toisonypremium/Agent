@@ -551,6 +551,10 @@ func TestBuildManagedDesiredOrdersUsesOpportunityAllocationNotStaticLayerNotiona
 	cfg := managedConfig()
 	plan := managedPlan()
 	for i := range plan.Assets {
+		plan.Assets[i].ThesisID = "asset-" + plan.Assets[i].Symbol
+		if len(plan.Assets[i].Layers) > 0 && plan.Assets[i].Symbol == "SOLUSDT" {
+			plan.Assets[i].Layers[0].ThesisID = "layer-sol"
+		}
 		for j := range plan.Assets[i].Layers {
 			plan.Assets[i].Layers[j].Notional = 100
 		}
@@ -564,6 +568,13 @@ func TestBuildManagedDesiredOrdersUsesOpportunityAllocationNotStaticLayerNotiona
 		t.Fatalf("higher opportunity should sort first: %+v", desired)
 	}
 	for _, d := range desired {
+		wantThesis := "asset-" + d.Symbol
+		if d.Symbol == "SOLUSDT" && d.LayerIndex == 1 {
+			wantThesis = "layer-sol"
+		}
+		if d.ThesisID != wantThesis {
+			t.Fatalf("thesis provenance lost: got=%q want=%q order=%+v", d.ThesisID, wantThesis, d)
+		}
 		if d.Notional > cfg.Live.MaxLiveNotionalPerOrderUSDT {
 			t.Fatalf("static layer notional leaked into live sizing: %+v", d)
 		}

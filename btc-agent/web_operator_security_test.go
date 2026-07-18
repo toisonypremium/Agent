@@ -69,7 +69,7 @@ func TestOperatorHaltRequiresIdentityAndCSRF(t *testing.T) {
 	}
 }
 
-func TestOperatorHaltAuditsIdentityAndRateLimits(t *testing.T) {
+func TestOperatorHaltAuditsIdentityAndRemainsAvailable(t *testing.T) {
 	db, err := storage.Open(filepath.Join(t.TempDir(), "halt-audit.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +79,16 @@ func TestOperatorHaltAuditsIdentityAndRateLimits(t *testing.T) {
 	now := time.Date(2026, 7, 18, 16, 0, 0, 0, time.UTC)
 	s.now = func() time.Time { return now }
 	handler := s.halt(db)
+
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest(http.MethodPost, "/api/operator/halt", nil)
+		req.Header.Set(webIdentityHeader, webOperatorEmail)
+		res := httptest.NewRecorder()
+		handler(res, req)
+		if res.Code != http.StatusForbidden {
+			t.Fatalf("malformed attempt %d status=%d", i, res.Code)
+		}
+	}
 
 	request := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/api/operator/halt", nil)
@@ -91,13 +101,12 @@ func TestOperatorHaltAuditsIdentityAndRateLimits(t *testing.T) {
 		handler(res, req)
 		return res
 	}
-	for i := 0; i < webRateLimitAttempts; i++ {
+	// Emergency halt is idempotent and must remain available. Repeated valid
+	// requests must never lock the operator out of this safety action.
+	for i := 0; i < 10; i++ {
 		if res := request(); res.Code != http.StatusOK {
 			t.Fatalf("attempt %d status=%d body=%s", i, res.Code, res.Body.String())
 		}
-	}
-	if res := request(); res.Code != http.StatusTooManyRequests {
-		t.Fatalf("rate limit status=%d", res.Code)
 	}
 	if halted, err := db.IsHalted(); err != nil || !halted {
 		t.Fatalf("halted=%v err=%v", halted, err)

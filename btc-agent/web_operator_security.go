@@ -7,25 +7,20 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"btc-agent/internal/storage"
 )
 
 const (
-	webOperatorEmail     = "llthtt1@gmail.com"
-	webCSRFCookie        = "btc_agent_csrf"
-	webCSRFHeader        = "X-CSRF-Token"
-	webIdentityHeader    = "Cf-Access-Authenticated-User-Email"
-	webRateLimitWindow   = 5 * time.Minute
-	webRateLimitAttempts = 3
+	webOperatorEmail  = "llthtt1@gmail.com"
+	webCSRFCookie     = "btc_agent_csrf"
+	webCSRFHeader     = "X-CSRF-Token"
+	webIdentityHeader = "Cf-Access-Authenticated-User-Email"
 )
 
 type webOperatorSecurity struct {
 	csrfToken string
-	mu        sync.Mutex
-	attempts  map[string][]time.Time
 	now       func() time.Time
 }
 
@@ -36,7 +31,6 @@ func newWebOperatorSecurity() (*webOperatorSecurity, error) {
 	}
 	return &webOperatorSecurity{
 		csrfToken: base64.RawURLEncoding.EncodeToString(buf),
-		attempts:  map[string][]time.Time{},
 		now:       func() time.Time { return time.Now().UTC() },
 	}, nil
 }
@@ -64,11 +58,6 @@ func (s *webOperatorSecurity) halt(db *storage.DB) http.HandlerFunc {
 		identity, ok := webOperatorIdentity(r)
 		if !ok {
 			http.Error(w, "không có quyền điều khiển", http.StatusForbidden)
-			return
-		}
-		if !s.allow(identity) {
-			w.Header().Set("Retry-After", "300")
-			http.Error(w, "quá nhiều yêu cầu", http.StatusTooManyRequests)
 			return
 		}
 		cookie, err := r.Cookie(webCSRFCookie)
@@ -103,25 +92,6 @@ func (s *webOperatorSecurity) halt(db *storage.DB) http.HandlerFunc {
 func webOperatorIdentity(r *http.Request) (string, bool) {
 	identity := strings.ToLower(strings.TrimSpace(r.Header.Get(webIdentityHeader)))
 	return identity, identity == webOperatorEmail
-}
-
-func (s *webOperatorSecurity) allow(identity string) bool {
-	now := s.now()
-	cutoff := now.Add(-webRateLimitWindow)
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	kept := s.attempts[identity][:0]
-	for _, attempt := range s.attempts[identity] {
-		if attempt.After(cutoff) {
-			kept = append(kept, attempt)
-		}
-	}
-	if len(kept) >= webRateLimitAttempts {
-		s.attempts[identity] = kept
-		return false
-	}
-	s.attempts[identity] = append(kept, now)
-	return true
 }
 
 func secureEqual(a, b string) bool {

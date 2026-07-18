@@ -91,8 +91,9 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		assetExposure[strings.ToUpper(p.Symbol)] += p.CostBasis
 	}
 	riskCfg := cfg
-	if eq, ee := db.EquityRiskState(); ee == nil && eq.CurrentEquity > 0 {
-		riskCfg.Portfolio.TotalCapital = eq.CurrentEquity
+	capitalAuthority, capitalAuthorityErr := db.BuildCapitalAuthoritySnapshot(cfg, time.Now().UTC())
+	if capitalAuthorityErr == nil {
+		riskCfg.Portfolio.TotalCapital = capitalAuthority.AccountEquityUSDT
 	}
 	assetRemaining := map[string]float64{}
 	for _, symbol := range riskCfg.Data.Symbols.Assets {
@@ -102,7 +103,14 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if fp, ok := analysis.Microstructure.MMFootprint[strings.ToUpper(cfg.Data.Symbols.BTC)]; ok {
 		mmConfidence = fp.FootprintScore
 	}
-	utilization := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: riskCfg.Portfolio.TotalCapital, ExistingExposure: openExposure, ReserveCashRatio: riskCfg.Portfolio.ReserveCashRatio, HardExposureCap: config.EffectiveHermesPortfolioExposure(riskCfg), MarketRegime: analysis.MarketRegime, AccumulationPhase: string(analysis.BTCAccumulation.Phase), PanicSelling: analysis.MarketRegime == "PANIC_SELLING"})
+	capitalExposure, capitalOpenBuy, capitalCap := openExposure, 0.0, config.EffectiveHermesPortfolioExposure(riskCfg)
+	if capitalAuthorityErr == nil {
+		capitalExposure, capitalOpenBuy, capitalCap = capitalAuthority.ExistingExposureUSDT, capitalAuthority.OpenBuyNotionalUSDT, capitalAuthority.HardExposureCapUSDT
+	}
+	utilization := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: riskCfg.Portfolio.TotalCapital, ExistingExposure: capitalExposure, OpenBuyNotional: capitalOpenBuy, ReserveCashRatio: riskCfg.Portfolio.ReserveCashRatio, HardExposureCap: capitalCap, MarketRegime: analysis.MarketRegime, AccumulationPhase: string(analysis.BTCAccumulation.Phase), PanicSelling: analysis.MarketRegime == "PANIC_SELLING"})
+	if capitalAuthorityErr != nil {
+		utilization.AvailableDeploymentUSDT = 0
+	}
 	liquidityQuality := map[string]float64{}
 	for _, asset := range plan.Assets {
 		q := 0.5
@@ -201,6 +209,10 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	filteredSafety := make([]liveguard.HermesActionDecision, 0, len(safety))
 	for _, decision := range safety {
 		if decision.Allowed && decision.Action.Intent.IncreasesExposure() {
+			if capitalAuthorityErr != nil {
+				decision.Allowed = false
+				decision.Reasons = append(decision.Reasons, "capital authority snapshot unavailable")
+			}
 			if lastExitErr != nil {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, "Hermes exit history unavailable")

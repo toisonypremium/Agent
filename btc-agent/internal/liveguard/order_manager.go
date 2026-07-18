@@ -2,6 +2,7 @@ package liveguard
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,6 +28,25 @@ type ManagedOrderRecorder interface {
 	MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error
 	MarkManagedLiveOrderRejected(clientOrderID string, reason string) error
 	MarkManagedLiveOrderUnknown(clientOrderID string, reason string) error
+}
+
+type ThesisManagedOrderRecorder interface {
+	ManagedOrderRecorder
+	ReserveManagedLiveOrderWithThesis(clientOrderID string, desired ManagedDesiredOrder, reason string) error
+}
+
+func reserveManagedOrder(recorder ManagedOrderRecorder, clientOrderID string, desired ManagedDesiredOrder, reason string) error {
+	if recorder == nil {
+		return fmt.Errorf("managed order recorder unavailable")
+	}
+	if strings.TrimSpace(desired.ThesisID) != "" && strings.EqualFold(desired.Side, "BUY") {
+		thesisRecorder, ok := recorder.(ThesisManagedOrderRecorder)
+		if !ok {
+			return fmt.Errorf("thesis-aware managed order recorder required")
+		}
+		return thesisRecorder.ReserveManagedLiveOrderWithThesis(clientOrderID, desired, reason)
+	}
+	return recorder.ReserveManagedLiveOrder(clientOrderID, desired, reason)
 }
 
 type ManagedDesiredOrder struct {
@@ -266,7 +286,7 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 		decision.Desired = desiredOrder
 		clientID := clientOrderID(desiredOrder.Symbol)
 		if recorder != nil {
-			if err := recorder.ReserveManagedLiveOrder(clientID, desiredOrder, decision.Reason); err != nil {
+			if err := reserveManagedOrder(recorder, clientID, desiredOrder, decision.Reason); err != nil {
 				decision.Error = err.Error()
 				decision.Reason = "reserve live order failed"
 				result.Blocked = append(result.Blocked, decision)

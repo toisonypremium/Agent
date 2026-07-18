@@ -66,6 +66,7 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS hermes_exit_peaks(symbol TEXT PRIMARY KEY, peak REAL NOT NULL, trail_active INTEGER NOT NULL, updated_at INTEGER NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS execution_markouts(event_id INTEGER NOT NULL, horizon_minutes INTEGER NOT NULL, mark_price REAL NOT NULL, markout_pct REAL NOT NULL, measured_at INTEGER NOT NULL, PRIMARY KEY(event_id,horizon_minutes));`,
 		`CREATE TABLE IF NOT EXISTS hermes_managed_holdings(symbol TEXT PRIMARY KEY, inst_id TEXT NOT NULL, quantity REAL NOT NULL, avg_entry_price REAL NOT NULL, adopted_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, source TEXT NOT NULL, payload_json TEXT NOT NULL);`,
+		`CREATE TABLE IF NOT EXISTS thesis_capital_ledgers(thesis_id TEXT PRIMARY KEY, symbol TEXT NOT NULL, max_exposure_usdt REAL NOT NULL CHECK(max_exposure_usdt >= 0), reserved_usdt REAL NOT NULL DEFAULT 0 CHECK(reserved_usdt >= 0), filled_usdt REAL NOT NULL DEFAULT 0 CHECK(filled_usdt >= 0), remaining_dca_usdt REAL NOT NULL DEFAULT 0 CHECK(remaining_dca_usdt >= 0), status TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, payload_json TEXT NOT NULL DEFAULT '{}', CHECK(filled_usdt + reserved_usdt + remaining_dca_usdt <= max_exposure_usdt + 0.000000001));`,
 		`INSERT OR IGNORE INTO operator_settings(key, value) VALUES('halted', 'true');`}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {
@@ -86,6 +87,7 @@ func (d *DB) Migrate() error {
 		{"intent", "TEXT"},
 		{"strategy_version", "TEXT"},
 		{"config_hash", "TEXT"},
+		{"thesis_id", "TEXT"},
 	} {
 		if err := d.ensureColumn("live_orders", col.name, col.def); err != nil {
 			return err

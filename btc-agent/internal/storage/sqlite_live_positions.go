@@ -12,27 +12,48 @@ import (
 )
 
 func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosition, error) {
-	if event.Symbol == "" {
-		event.Symbol = live.InternalSymbol(event.InstID)
+	event = normalizeLivePositionEvent(event)
+	if err := validateLivePositionEvent(event); err != nil {
+		return live.LivePosition{}, err
 	}
-	event.Side = strings.ToUpper(event.Side)
-	event.FeeCurrency = strings.ToUpper(event.FeeCurrency)
-	if event.Symbol == "" {
-		return live.LivePosition{}, fmt.Errorf("live position event symbol required")
-	}
-	if event.DeltaQuantity <= 0 {
-		return live.LivePosition{}, fmt.Errorf("live position event delta quantity must be positive")
-	}
-	if event.FillPrice <= 0 {
-		return live.LivePosition{}, fmt.Errorf("live position event fill price must be positive")
-	}
-
 	tx, err := d.Begin()
 	if err != nil {
 		return live.LivePosition{}, err
 	}
 	defer tx.Rollback()
+	pos, err := applyLivePositionEventTx(tx, event)
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return live.LivePosition{}, err
+	}
+	return pos, nil
+}
 
+func normalizeLivePositionEvent(event live.LivePositionEvent) live.LivePositionEvent {
+	if event.Symbol == "" {
+		event.Symbol = live.InternalSymbol(event.InstID)
+	}
+	event.Side = strings.ToUpper(event.Side)
+	event.FeeCurrency = strings.ToUpper(event.FeeCurrency)
+	return event
+}
+
+func validateLivePositionEvent(event live.LivePositionEvent) error {
+	if event.Symbol == "" {
+		return fmt.Errorf("live position event symbol required")
+	}
+	if event.DeltaQuantity <= 0 {
+		return fmt.Errorf("live position event delta quantity must be positive")
+	}
+	if event.FillPrice <= 0 {
+		return fmt.Errorf("live position event fill price must be positive")
+	}
+	return nil
+}
+
+func applyLivePositionEventTx(tx *sql.Tx, event live.LivePositionEvent) (live.LivePosition, error) {
 	pos, found, err := livePositionBySymbol(tx, event.Symbol)
 	if err != nil {
 		return live.LivePosition{}, err
@@ -55,7 +76,6 @@ func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosi
 	if pos.InstID == "" {
 		pos.InstID = event.InstID
 	}
-
 	switch event.Side {
 	case "BUY":
 		pos.Quantity += event.DeltaQuantity
@@ -98,17 +118,10 @@ func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosi
 	} else {
 		pos.UpdatedAt = time.Now().Unix()
 	}
-
 	b, _ := json.Marshal(pos)
-	_, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b))
-	if err != nil {
+	if _, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b)); err != nil {
 		return live.LivePosition{}, err
 	}
-	if err := tx.Commit(); err != nil {
-		return live.LivePosition{}, err
-	}
-	event.PositionQty = pos.Quantity
-	event.AvgEntryPrice = pos.AvgEntryPrice
 	return pos, nil
 }
 

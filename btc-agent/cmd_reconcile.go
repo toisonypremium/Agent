@@ -129,16 +129,6 @@ func applyLedgerUpdate(db *storage.DB, status live.OrderStatus, report *liveguar
 	if !ok {
 		return nil
 	}
-	position, err := db.ApplyLivePositionEvent(event)
-	if err != nil {
-		report.ManualCheckRequired = append(report.ManualCheckRequired, err.Error())
-		return nil
-	}
-	event.PositionQty = position.Quantity
-	event.AvgEntryPrice = position.AvgEntryPrice
-	if err := db.SaveLivePositionEvent(event); err != nil {
-		return fmt.Errorf("save live position event %s/%s: %w", event.ClientOrderID, event.OrderID, err)
-	}
 	snapshot := liveguard.FillSnapshotFromStatus(status)
 	if snapshot.ClientOrderID == "" {
 		snapshot.ClientOrderID = previous.ClientOrderID
@@ -147,9 +137,17 @@ func applyLedgerUpdate(db *storage.DB, status live.OrderStatus, report *liveguar
 		report.ManualCheckRequired = append(report.ManualCheckRequired, fmt.Sprintf("%s/%s missing client_order_id for fill snapshot", status.InstID, status.OrderID))
 		return nil
 	}
-	if err := db.SaveLiveFillSnapshot(snapshot); err != nil {
-		return fmt.Errorf("save live fill snapshot %s/%s: %w", snapshot.ClientOrderID, snapshot.OrderID, err)
+	thesisEventKey := fmt.Sprintf("buy-fill:%s:%g", snapshot.ClientOrderID, snapshot.FilledQuantity)
+	position, applied, err := db.ApplyReconciledLiveFill(event, snapshot, thesisEventKey)
+	if err != nil {
+		report.ManualCheckRequired = append(report.ManualCheckRequired, err.Error())
+		return nil
 	}
+	if !applied {
+		return nil
+	}
+	event.PositionQty = position.Quantity
+	event.AvgEntryPrice = position.AvgEntryPrice
 	report.Events = append(report.Events, event)
 	report.Updated++
 	return nil

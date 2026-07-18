@@ -1,0 +1,9 @@
+tunnel: 59274473-122a-48b1-99f3-9227183ee8e9
+credentials-file: /home/admin/.cloudflared/59274473-122a-48b1-99f3-9227183ee8e9.json
+ingress:
+  - hostname: btc-ops.linhbot.xyz
+    service: http://127.0.0.1:20129
+    originRequest:
+      connectTimeout: 10s
+      noHappyEyeballs: false
+  - service: http://127.0.0.1:18080

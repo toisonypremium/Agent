@@ -138,6 +138,7 @@ func registerWebGET(mux *http.ServeMux, path string, value func() any) {
 }
 
 func loadWebReport(name string, maxAge time.Duration) webReport {
+	maxAge = freshnessPolicy(name, maxAge).MaxAge
 	path := filepath.Join("reports", filepath.Base(name))
 	out := webReport{TrangThai: "THIẾU", Nguon: name}
 	data, err := os.ReadFile(path)

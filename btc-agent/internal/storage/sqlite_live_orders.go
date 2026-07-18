@@ -19,7 +19,7 @@ func (d *DB) SaveLiveOrderFromParams(clientOrderID, orderID, instID, symbol, sid
 func (d *DB) SaveManagedLiveOrder(clientOrderID, orderID, instID, symbol, side, ordType string, price, quantity, notional float64, status string, meta live.OrderStatus) error {
 	now := time.Now().Unix()
 	_, err := d.Exec(
-		`INSERT OR REPLACE INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		`INSERT INTO live_orders(client_order_id, order_id, inst_id, symbol, side, type, price, quantity, notional, status, submitted_at, updated_at, layer_index, source, invalidation_price, expires_at, decision_reason, last_management_action) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 		clientOrderID, orderID, instID, symbol, side, ordType, price, quantity, notional, status, now, now, meta.LayerIndex, meta.Source, meta.InvalidationPrice, meta.ExpiresAt, meta.DecisionReason, meta.LastManagementAction,
 	)
 	return err

@@ -101,14 +101,14 @@ Before autonomous real-order approval, live-auto now has extra production checks
 Current approved operating state:
 
 ```text
-scheduler=running in dry-run/monitoring
+scheduler=running in live-auto production mode
 mode=live-auto
 operator_halt=INACTIVE (cleared 2026-07-15)
-dry_run=true until live-auto-audit APPROVED_REAL_ORDER
+dry_run=false; this does not bypass market authority, audit/proof, final assertion, or live guards
 bot_ready_for_monitoring=true
 bot_ready_for_dry_run=true (infrastructure approved)
-bot_ready_for_real_order=false until ACTIVE_LIMIT+ALLOWED+ACCUMULATION_CONFIRMED and audit proof passes
-current_market_blocker=BTC MARKDOWN phase + falling knife risk governor
+bot_ready_for_real_order=false until ACTIVE_LIMIT+ALLOWED+ACCUMULATION_CONFIRMED and all execution guards pass
+current_market_blocker=BTC MARKDOWN/WATCH market authority
 ```
 
 When market is not ready, expected managed cycle remains:

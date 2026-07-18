@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"btc-agent/internal/agent2"
@@ -290,5 +291,18 @@ func TestOpenSellResidualIgnoresTerminalAndBuyOrders(t *testing.T) {
 	}
 	if got := openSellResidualQuantity("BTCUSDT", orders); math.Abs(got-.125) > 1e-12 {
 		t.Fatalf("residual=%v want .125", got)
+	}
+}
+
+func TestHermesOwnedSellBlocksBelowAverageEntry(t *testing.T) {
+	cfg := cancelCfg()
+	p := &hermesTestPlacer{}
+	r := &hermesTestRecorder{}
+	owned := []live.LivePosition{{Symbol: "RENDERUSDT", InstID: "RENDER-USDT", Quantity: 4, AvgEntryPrice: 2}}
+	filters := []live.InstrumentFilter{{Symbol: "RENDERUSDT", InstID: "RENDER-USDT", TickSize: .01, StepSize: .1, MinSize: .1, MinNotional: 1}}
+	decision := HermesActionDecision{Allowed: true, Action: hermesoperator.Action{Symbol: "RENDERUSDT", Intent: hermesoperator.IntentExitLimit, EntryPrice: 1.5, RequestedNotionalUSDT: 3}}
+	got := ExecuteHermesExitLimitActionsWithOpen(context.Background(), cfg, "loss-sale", []HermesActionDecision{decision}, owned, nil, filters, p, r, false)
+	if len(got.Placed) != 0 || len(p.calls) != 0 || len(got.Blocked) != 1 || !strings.Contains(got.Blocked[0].Reason, "automated loss sale forbidden") {
+		t.Fatalf("loss sale reached execution: %+v calls=%+v", got, p.calls)
 	}
 }

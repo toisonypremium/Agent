@@ -1,6 +1,7 @@
 package liveguard
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -183,19 +184,19 @@ func TestEvaluateExits_TimeStop_DeepLoss(t *testing.T) {
 	positions := []live.LivePosition{testPos("ETHUSDT", 2.0, 2000.0, 95)}
 	prices := map[string]float64{"ETHUSDT": 1800.0} // -10% < 5% floor
 	result := EvaluateExits(cfg, positions, prices, NewPeakTracker())
-	if result[0].Action != ExitHold {
-		t.Errorf("expected HOLD (pnl=-10%% < min_pnl_for_time_stop=5%%), got %s", result[0].Action)
+	if result[0].Action != ExitHold || !result[0].Warning || result[0].SellQuantity != 0 {
+		t.Fatalf("expected warning-only HOLD, got %+v", result[0])
 	}
 }
 
-// TestEvaluateExits_TimeStop_ZeroFloor: MinPnLForTimeStop=0 → time-stop even in loss.
+// TestEvaluateExits_TimeStop_ZeroFloor: zero floor still cannot authorize a loss sale.
 func TestEvaluateExits_TimeStop_ZeroFloor(t *testing.T) {
-	cfg := testExitCfg(func(ec *config.ExitConfig) { ec.MinPnLForTimeStop = 0.0 }) // no floor
+	cfg := testExitCfg(func(ec *config.ExitConfig) { ec.MinPnLForTimeStop = 0.0 })
 	positions := []live.LivePosition{testPos("ETHUSDT", 2.0, 2000.0, 95)}
-	prices := map[string]float64{"ETHUSDT": 1800.0} // -10%, but no floor → time-stop anyway
+	prices := map[string]float64{"ETHUSDT": 1800.0}
 	result := EvaluateExits(cfg, positions, prices, NewPeakTracker())
-	if result[0].Action != ExitTimeStop {
-		t.Errorf("expected TIME_STOP (no floor, min_pnl=0), got %s", result[0].Action)
+	if result[0].Action != ExitHold || !result[0].Warning || result[0].SellQuantity != 0 || result[0].WarningCode != "AGED_LOSS_DCA_REVIEW" {
+		t.Fatalf("loss must be warning-only, got %+v", result[0])
 	}
 }
 
@@ -210,21 +211,18 @@ func TestEvaluateExits_TimeStop_OpenedAtZero(t *testing.T) {
 	}
 }
 
-// TestEvaluateExits_PanicSell: pnl <= panic threshold → PANIC_SELL full qty.
-func TestEvaluateExits_PanicSell(t *testing.T) {
-	cfg := testExitCfg() // panic_sell_pnl_threshold=-0.25
+// TestEvaluateExits_DeepLossWarningOnly: crossing the loss threshold warns but never sells.
+func TestEvaluateExits_DeepLossWarningOnly(t *testing.T) {
+	cfg := testExitCfg()
 	positions := []live.LivePosition{testPos("SOLUSDT", 8.0, 100.0, 5)}
-	prices := map[string]float64{"SOLUSDT": 72.0} // -28% <= -25%
+	prices := map[string]float64{"SOLUSDT": 72.0}
 	result := EvaluateExits(cfg, positions, prices, NewPeakTracker())
 	if len(result) != 1 {
 		t.Fatalf("expected 1 decision, got %d", len(result))
 	}
 	d := result[0]
-	if d.Action != ExitPanicSell {
-		t.Errorf("expected PANIC_SELL, got %s: %s", d.Action, d.Reason)
-	}
-	if d.SellQuantity != 8.0 {
-		t.Errorf("panic sell should sell full qty 8.0, got %.4f", d.SellQuantity)
+	if d.Action != ExitHold || !d.Warning || d.WarningCode != "DEEP_LOSS_DCA_REVIEW" || d.SellQuantity != 0 {
+		t.Fatalf("deep loss must be warning-only: %+v", d)
 	}
 }
 
@@ -328,5 +326,13 @@ func TestEvaluateExits_PeakTrackerPersists(t *testing.T) {
 	result := EvaluateExits(cfg, positions, map[string]float64{"ETHUSDT": 1140.0}, pt)
 	if result[0].Action != ExitTrailingStop {
 		t.Errorf("expected TRAILING_STOP after peak persists, got %s", result[0].Action)
+	}
+}
+
+func TestPlaceSellLimitOrderRejectsLossWarning(t *testing.T) {
+	placer := &hermesTestPlacer{}
+	_, err := PlaceSellLimitOrder(context.Background(), ExitDecision{Symbol: "ETHUSDT", Action: ExitPanicSell, SellPrice: 70, SellQuantity: 1, PnLPct: -.3, Warning: true}, placer)
+	if err == nil || len(placer.calls) != 0 {
+		t.Fatalf("loss warning reached exchange: err=%v calls=%+v", err, placer.calls)
 	}
 }

@@ -20,8 +20,10 @@ const (
 )
 
 type webOperatorSecurity struct {
-	csrfToken string
-	now       func() time.Time
+	csrfToken      string
+	now            func() time.Time
+	accessJWT      *cloudflareAccessVerifier
+	verifyIdentity func(*http.Request) (string, bool)
 }
 
 func newWebOperatorSecurity() (*webOperatorSecurity, error) {
@@ -32,6 +34,7 @@ func newWebOperatorSecurity() (*webOperatorSecurity, error) {
 	return &webOperatorSecurity{
 		csrfToken: base64.RawURLEncoding.EncodeToString(buf),
 		now:       func() time.Time { return time.Now().UTC() },
+		accessJWT: newCloudflareAccessVerifier(),
 	}, nil
 }
 
@@ -40,7 +43,7 @@ func (s *webOperatorSecurity) session(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "phương thức không được hỗ trợ", http.StatusMethodNotAllowed)
 		return
 	}
-	identity, ok := webOperatorIdentity(r)
+	identity, ok := s.webOperatorIdentity(r)
 	if !ok {
 		http.Error(w, "không có quyền điều khiển", http.StatusForbidden)
 		return
@@ -55,7 +58,7 @@ func (s *webOperatorSecurity) halt(db *storage.DB) http.HandlerFunc {
 			http.Error(w, "phương thức không được hỗ trợ", http.StatusMethodNotAllowed)
 			return
 		}
-		identity, ok := webOperatorIdentity(r)
+		identity, ok := s.webOperatorIdentity(r)
 		if !ok {
 			http.Error(w, "không có quyền điều khiển", http.StatusForbidden)
 			return
@@ -75,7 +78,7 @@ func (s *webOperatorSecurity) halt(db *storage.DB) http.HandlerFunc {
 			return
 		}
 		now := s.now()
-		payload, _ := json.Marshal(map[string]string{"reason": reason, "operator": identity, "access_identity_header": webIdentityHeader})
+		payload, _ := json.Marshal(map[string]string{"reason": reason, "operator": identity, "access_identity_header": webIdentityHeader, "identity_authority": "verified_cloudflare_access_jwt"})
 		event := storage.RuntimeEvent{Timestamp: now, Source: "web-control-plane", Type: "operator_halt_request", Severity: "critical", Fingerprint: "web-halt:" + identity + ":" + now.Format("20060102150405"), PayloadJSON: string(payload)}
 		if err := db.SaveRuntimeEvent(event); err != nil {
 			http.Error(w, "không ghi được nhật ký", http.StatusInternalServerError)
@@ -89,9 +92,17 @@ func (s *webOperatorSecurity) halt(db *storage.DB) http.HandlerFunc {
 	}
 }
 
-func webOperatorIdentity(r *http.Request) (string, bool) {
-	identity := strings.ToLower(strings.TrimSpace(r.Header.Get(webIdentityHeader)))
-	return identity, identity == webOperatorEmail
+func (s *webOperatorSecurity) webOperatorIdentity(r *http.Request) (string, bool) {
+	if s.verifyIdentity != nil {
+		return s.verifyIdentity(r)
+	}
+	claims, err := s.accessJWT.verifyRequest(r)
+	if err != nil {
+		return "", false
+	}
+	identity := strings.ToLower(strings.TrimSpace(claims.Email))
+	headerIdentity := strings.ToLower(strings.TrimSpace(r.Header.Get(webIdentityHeader)))
+	return identity, identity == webOperatorEmail && secureEqual(identity, headerIdentity)
 }
 
 func secureEqual(a, b string) bool {

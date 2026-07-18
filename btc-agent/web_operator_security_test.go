@@ -18,6 +18,12 @@ func testWebSecurity(t *testing.T) *webOperatorSecurity {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Unit tests below target CSRF/halt semantics. JWT cryptographic validation
+	// has dedicated verifier tests and production never installs this override.
+	s.verifyIdentity = func(r *http.Request) (string, bool) {
+		identity := strings.ToLower(strings.TrimSpace(r.Header.Get(webIdentityHeader)))
+		return identity, identity == webOperatorEmail
+	}
 	return s
 }
 

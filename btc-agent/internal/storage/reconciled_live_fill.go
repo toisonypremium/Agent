@@ -52,26 +52,35 @@ func (d *DB) ApplyReconciledLiveFill(event live.LivePositionEvent, snapshot live
 		return live.LivePosition{}, false, fmt.Errorf("fill delta does not match cumulative snapshot")
 	}
 
-	pos, err := applyLivePositionEventTx(tx, event)
-	if err != nil {
-		return live.LivePosition{}, false, err
-	}
-	event.PositionQty, event.AvgEntryPrice = pos.Quantity, pos.AvgEntryPrice
-	eventPayload, _ := json.Marshal(event)
-	if _, err := tx.Exec(`INSERT INTO live_position_events(timestamp,client_order_id,order_id,inst_id,symbol,side,delta_quantity,fill_price,notional_delta,fee_delta,fee_currency,position_qty,avg_entry_price,status,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, event.Side, event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, event.FeeCurrency, event.PositionQty, event.AvgEntryPrice, event.Status, string(eventPayload)); err != nil {
-		return live.LivePosition{}, false, err
-	}
-	snapshotPayload, _ := json.Marshal(snapshot)
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO live_fills(client_order_id,order_id,inst_id,symbol,side,filled_quantity,avg_price,fee,fee_currency,updated_at,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, snapshot.ClientOrderID, snapshot.OrderID, snapshot.InstID, snapshot.Symbol, strings.ToUpper(snapshot.Side), snapshot.FilledQuantity, snapshot.AvgPrice, snapshot.Fee, strings.ToUpper(snapshot.FeeCurrency), snapshot.UpdatedAt, string(snapshotPayload)); err != nil {
-		return live.LivePosition{}, false, err
-	}
-
 	var thesisID, orderSide, orderSymbol string
 	var orderNotional float64
 	err = tx.QueryRow(`SELECT COALESCE(thesis_id,''),side,symbol,notional FROM live_orders WHERE client_order_id=?`, snapshot.ClientOrderID).Scan(&thesisID, &orderSide, &orderSymbol, &orderNotional)
 	if err != nil && err != sql.ErrNoRows {
 		return live.LivePosition{}, false, err
 	}
+	thesisID = strings.TrimSpace(thesisID)
+	if event.ThesisID != "" && event.ThesisID != thesisID {
+		return live.LivePosition{}, false, fmt.Errorf("fill event thesis mismatch")
+	}
+	if snapshot.ThesisID != "" && snapshot.ThesisID != thesisID {
+		return live.LivePosition{}, false, fmt.Errorf("fill snapshot thesis mismatch")
+	}
+	event.ThesisID, snapshot.ThesisID = thesisID, thesisID
+
+	pos, err := applyLivePositionEventTx(tx, event)
+	if err != nil {
+		return live.LivePosition{}, false, err
+	}
+	event.PositionQty, event.AvgEntryPrice = pos.Quantity, pos.AvgEntryPrice
+	eventPayload, _ := json.Marshal(event)
+	if _, err := tx.Exec(`INSERT INTO live_position_events(timestamp,client_order_id,order_id,inst_id,symbol,side,delta_quantity,fill_price,notional_delta,fee_delta,fee_currency,position_qty,avg_entry_price,status,payload_json,thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, event.Side, event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, event.FeeCurrency, event.PositionQty, event.AvgEntryPrice, event.Status, string(eventPayload), nullableString(event.ThesisID)); err != nil {
+		return live.LivePosition{}, false, err
+	}
+	snapshotPayload, _ := json.Marshal(snapshot)
+	if _, err := tx.Exec(`INSERT OR REPLACE INTO live_fills(client_order_id,order_id,inst_id,symbol,side,filled_quantity,avg_price,fee,fee_currency,updated_at,payload_json,thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, snapshot.ClientOrderID, snapshot.OrderID, snapshot.InstID, snapshot.Symbol, strings.ToUpper(snapshot.Side), snapshot.FilledQuantity, snapshot.AvgPrice, snapshot.Fee, strings.ToUpper(snapshot.FeeCurrency), snapshot.UpdatedAt, string(snapshotPayload), nullableString(snapshot.ThesisID)); err != nil {
+		return live.LivePosition{}, false, err
+	}
+
 	if strings.TrimSpace(thesisID) != "" && strings.EqualFold(orderSide, "BUY") {
 		if strings.TrimSpace(thesisEventKey) == "" {
 			return live.LivePosition{}, false, fmt.Errorf("thesis fill event key required")

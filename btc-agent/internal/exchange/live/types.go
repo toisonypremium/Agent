@@ -139,6 +139,7 @@ type OrderStatus struct {
 }
 
 type LiveFillSnapshot struct {
+	ThesisID       string  `json:"thesis_id,omitempty"`
 	ClientOrderID  string  `json:"client_order_id"`
 	OrderID        string  `json:"order_id"`
 	InstID         string  `json:"inst_id"`
@@ -152,6 +153,7 @@ type LiveFillSnapshot struct {
 }
 
 type LivePosition struct {
+	ThesisID      string  `json:"thesis_id,omitempty"`
 	Symbol        string  `json:"symbol"`
 	InstID        string  `json:"inst_id"`
 	Quantity      float64 `json:"quantity"`
@@ -164,6 +166,7 @@ type LivePosition struct {
 }
 
 type LivePositionEvent struct {
+	ThesisID      string  `json:"thesis_id,omitempty"`
 	Timestamp     int64   `json:"timestamp"`
 	ClientOrderID string  `json:"client_order_id"`
 	OrderID       string  `json:"order_id"`

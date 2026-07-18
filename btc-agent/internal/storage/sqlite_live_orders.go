@@ -58,6 +58,24 @@ func (d *DB) MarkManagedLiveOrderSubmitted(clientOrderID string, result live.Ord
 	return nil
 }
 
+func (d *DB) MarkManagedLiveOrderUnknown(clientOrderID string, reason string) error {
+	if clientOrderID == "" {
+		return fmt.Errorf("client_order_id required")
+	}
+	res, err := d.Exec(`UPDATE live_orders SET status=?, updated_at=?, last_management_action=? WHERE client_order_id=?`, live.StatusUnknownNeedsManualCheck, time.Now().Unix(), "unknown: "+reason, clientOrderID)
+	if err != nil {
+		return err
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return fmt.Errorf("live order reservation not found: client_order_id=%q", clientOrderID)
+	}
+	return nil
+}
+
 func (d *DB) MarkManagedLiveOrderRejected(clientOrderID string, reason string) error {
 	if clientOrderID == "" {
 		return fmt.Errorf("client_order_id required")
@@ -92,7 +110,7 @@ func (d *DB) OpenLiveOrders() ([]live.OrderStatus, error) {
 func (d *DB) OpenLiveOrdersDetailed() ([]live.OrderStatus, error) {
 	rows, err := d.Query(`SELECT o.client_order_id, o.order_id, o.inst_id, o.symbol, o.type, o.side, o.price, o.quantity, o.notional, o.status, o.submitted_at, o.updated_at, o.layer_index, o.source, o.invalidation_price, o.expires_at, o.decision_reason, o.last_management_action, COALESCE(f.filled_quantity,0), COALESCE(f.avg_price,0)
 		FROM live_orders o LEFT JOIN live_fills f ON f.client_order_id=o.client_order_id
-		WHERE o.status IN ('PLANNED', 'SUBMITTED', 'PARTIAL_FILL', 'LIVE_OPEN', 'PARTIALLY_FILLED')`)
+		WHERE o.status IN ('PLANNED', 'SUBMITTED', 'PARTIAL_FILL', 'LIVE_OPEN', 'PARTIALLY_FILLED', 'UNKNOWN_NEEDS_MANUAL_CHECK')`)
 	if err != nil {
 		return nil, err
 	}

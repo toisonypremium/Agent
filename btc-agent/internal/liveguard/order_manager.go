@@ -26,6 +26,7 @@ type ManagedOrderRecorder interface {
 	ReserveManagedLiveOrder(clientOrderID string, desired ManagedDesiredOrder, reason string) error
 	MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error
 	MarkManagedLiveOrderRejected(clientOrderID string, reason string) error
+	MarkManagedLiveOrderUnknown(clientOrderID string, reason string) error
 }
 
 type ManagedDesiredOrder struct {
@@ -277,10 +278,26 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 		decision.PlaceResult = placed
 		if err != nil {
 			safeErr := sanitizeExchangeError(cfg, err)
+			unknown := managedSubmissionOutcomeUnknown(err)
 			if recorder != nil {
-				_ = recorder.MarkManagedLiveOrderRejected(clientID, safeErr)
+				var persistErr error
+				if unknown {
+					persistErr = recorder.MarkManagedLiveOrderUnknown(clientID, safeErr)
+				} else {
+					persistErr = recorder.MarkManagedLiveOrderRejected(clientID, safeErr)
+				}
+				if persistErr != nil {
+					decision.Error = safeErr + "; persist outcome failed: " + persistErr.Error()
+					decision.Reason = "order outcome persistence failed; manual check required"
+					result.Blocked = append(result.Blocked, decision)
+					result.Status = ManagedCyclePartial
+					continue
+				}
 			}
 			decision.Error = safeErr
+			if unknown {
+				decision.Reason = "order placement outcome unknown; reconcile required"
+			}
 			result.Blocked = append(result.Blocked, decision)
 			result.Status = ManagedCyclePartial
 			continue

@@ -131,7 +131,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	}
 	protections := []storage.ProtectionStatus{{Name: "loss_streak", Active: !lossLockUntil.IsZero() && time.Now().Before(lossLockUntil), UnlockAt: lossLockUntil, Detail: fmt.Sprintf("%d consecutive losses", lossProtection.ConsecutiveLosses)}, {Name: "realized_drawdown", Active: !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil), UnlockAt: drawdownLockUntil, Detail: fmt.Sprintf("%.2f USDT", lossProtection.MaxDrawdown)}}
 	if eq, e := db.EquityRiskState(); e == nil {
-		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.HermesMaxRealizedDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
+		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.MaxTotalEquityDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
 	}
 	for symbol, exited := range lastExitAt {
 		unlock := exited.Add(time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute)
@@ -182,7 +182,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 			if eq, e := db.EquityRiskState(); e != nil && e != sql.ErrNoRows {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, "Hermes equity high-water state unavailable")
-			} else if e == nil && cfg.Risk.HermesMaxRealizedDrawdownPct > 0 && eq.DrawdownPct >= cfg.Risk.HermesMaxRealizedDrawdownPct {
+			} else if e == nil && cfg.Risk.MaxTotalEquityDrawdownPct > 0 && eq.DrawdownPct >= cfg.Risk.MaxTotalEquityDrawdownPct {
 				decision.Allowed = false
 				decision.Reasons = append(decision.Reasons, fmt.Sprintf("Hermes total-equity drawdown protection active (%.2f%% from high-water mark)", eq.DrawdownPct*100))
 			}
@@ -264,6 +264,7 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		return result, true
 	}
 	execCtx := liveguard.ManagedExecutionContext{BTCAccumulationPhase: string(analysis.BTCAccumulation.Phase), HermesMode: cfg.HermesOperator.NormalizedMode()}
+	applyPortfolioLossState(cfg, db, &execCtx, time.Now())
 	result := liveguard.ExecuteHermesDesiredOrders(ctx, cfg, plan, desired, open, placer, db, execCtx, dryRun)
 	result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
 	result.Blocked = append(result.Blocked, blocked...)
@@ -374,7 +375,7 @@ func saveBaseProtectionStatus(db *storage.DB, cfg config.Config) {
 		{Name: "realized_drawdown", Active: !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil), UnlockAt: drawdownLockUntil, Detail: fmt.Sprintf("%.2f USDT", lossProtection.MaxDrawdown)},
 	}
 	if eq, e := db.EquityRiskState(); e == nil {
-		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.HermesMaxRealizedDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
+		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.MaxTotalEquityDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
 	}
 	lastExitAt, err := db.HermesLastExitAtBySymbol()
 	if err == nil {

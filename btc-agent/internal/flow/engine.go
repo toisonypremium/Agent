@@ -202,18 +202,25 @@ func nextBullTrigger(s Signal) string {
 }
 
 func aggregateBias(daily, h4, weekly Signal) Bias {
-	bear := weightedBias(daily, h4, weekly, BiasBullTrap) + weightedBias(daily, h4, weekly, BiasDistribution)
-	bull := weightedBias(daily, h4, weekly, BiasAccumulation) + weightedBias(daily, h4, weekly, BiasBearTrap)
-	if daily.FlowBias == BiasBullTrap || bear >= 0.45 {
+	bullTrap := weightedBias(daily, h4, weekly, BiasBullTrap)
+	distribution := weightedBias(daily, h4, weekly, BiasDistribution)
+	bearTrap := weightedBias(daily, h4, weekly, BiasBearTrap)
+	accumulation := weightedBias(daily, h4, weekly, BiasAccumulation)
+	if daily.FlowBias == BiasBullTrap || bullTrap >= 0.45 {
 		return BiasBullTrap
 	}
-	if daily.FlowBias == BiasDistribution || bear >= 0.40 {
+	if daily.FlowBias == BiasDistribution || distribution >= 0.40 {
 		return BiasDistribution
 	}
-	if daily.FlowBias == BiasBearTrap || bull >= 0.45 {
+	weeklyBearish := weekly.FlowBias == BiasBullTrap || weekly.FlowBias == BiasDistribution
+	lowerTimeframeBullish := daily.FlowBias == BiasAccumulation || daily.FlowBias == BiasBearTrap || h4.FlowBias == BiasAccumulation || h4.FlowBias == BiasBearTrap
+	if weeklyBearish && lowerTimeframeBullish {
+		return BiasNeutral
+	}
+	if daily.FlowBias == BiasBearTrap || bearTrap >= 0.45 {
 		return BiasBearTrap
 	}
-	if daily.FlowBias == BiasAccumulation || bull >= 0.35 {
+	if daily.FlowBias == BiasAccumulation || accumulation >= 0.35 {
 		return BiasAccumulation
 	}
 	return BiasNeutral

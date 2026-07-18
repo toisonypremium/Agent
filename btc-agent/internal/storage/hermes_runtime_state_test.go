@@ -2,6 +2,7 @@ package storage
 
 import (
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/microstructure"
 	"testing"
 	"time"
 )
@@ -57,5 +58,83 @@ func TestReplayChecksumStable(t *testing.T) {
 	b, e := db.ReplayHermesState()
 	if e != nil || a.Checksum != b.Checksum || a.Events != 1 {
 		t.Fatalf("unstable replay %+v %+v %v", a, b, e)
+	}
+}
+
+func TestMMCalibrationPersistsInRuntimeState(t *testing.T) {
+	db, err := Open(t.TempDir() + "/calibration.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	state := microstructure.NewCalibrationState()
+	state.Symbols["BTCUSDT"] = &microstructure.SymbolCalibration{TakerAnomalyZ: 1.65, Resolved: 8}
+	if err := db.SaveMMCalibration(state, time.Unix(10, 0)); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.MMCalibration()
+	if err != nil || got.Symbols["BTCUSDT"] == nil || got.Symbols["BTCUSDT"].TakerAnomalyZ != 1.65 {
+		t.Fatalf("calibration round trip failed: %+v err=%v", got, err)
+	}
+}
+
+func TestDailyOpeningEquityImmutableWithinUTCDateAndResetsNextDate(t *testing.T) {
+	path := t.TempDir() + "/daily-basis.db"
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	day1 := time.Date(2026, 7, 18, 1, 0, 0, 0, time.UTC)
+	first, err := db.DailyOpeningEquity(day1, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sameDay, err := db.DailyOpeningEquity(day1.Add(20*time.Hour), 80)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Equity != 100 || sameDay.Equity != 100 {
+		t.Fatalf("same-day basis changed: first=%+v later=%+v", first, sameDay)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	afterRestart, err := db.DailyOpeningEquity(day1.Add(21*time.Hour), 70)
+	if err != nil || afterRestart.Equity != 100 {
+		t.Fatalf("basis did not survive restart: %+v err=%v", afterRestart, err)
+	}
+	nextDay, err := db.DailyOpeningEquity(day1.Add(24*time.Hour), 70)
+	if err != nil || nextDay.Equity != 70 {
+		t.Fatalf("new UTC day did not reset basis: %+v err=%v", nextDay, err)
+	}
+}
+
+func TestMMCalibrationSurvivesDatabaseRestart(t *testing.T) {
+	path := t.TempDir() + "/calibration-restart.db"
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := microstructure.NewCalibrationState()
+	state.Symbols["ETHUSDT"] = &microstructure.SymbolCalibration{TakerAnomalyZ: 1.75, Resolved: 16, Successes: 9}
+	if err := db.SaveMMCalibration(state, time.Unix(20, 0)); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	got, err := db.MMCalibration()
+	if err != nil || got.Symbols["ETHUSDT"] == nil || got.Symbols["ETHUSDT"].TakerAnomalyZ != 1.75 || got.Symbols["ETHUSDT"].Resolved != 16 {
+		t.Fatalf("calibration did not survive restart: %+v err=%v", got, err)
 	}
 }

@@ -96,6 +96,8 @@ type Config struct {
 		HermesMaxConsecutiveLosses      int     `yaml:"hermes_max_consecutive_losses"`
 		HermesLossLockMinutes           int     `yaml:"hermes_loss_lock_minutes"`
 		HermesMaxRealizedDrawdownPct    float64 `yaml:"hermes_max_realized_drawdown_pct"`
+		MaxTotalEquityDrawdownPct       float64 `yaml:"max_total_equity_drawdown_pct"`
+		MaxDailyRealizedLossPct         float64 `yaml:"max_daily_realized_loss_pct"`
 		HermesDrawdownLockMinutes       int     `yaml:"hermes_drawdown_lock_minutes"`
 		HermesLowProfitMinSamples       int     `yaml:"hermes_low_profit_min_samples"`
 		HermesLowProfitMinExpectancyPct float64 `yaml:"hermes_low_profit_min_expectancy_pct"`
@@ -629,6 +631,12 @@ func (c Config) Validate() error {
 	}
 	if c.Risk.HermesMaxRealizedDrawdownPct < 0 || c.Risk.HermesMaxRealizedDrawdownPct > 1 {
 		return errors.New("risk.hermes_max_realized_drawdown_pct must be between 0 and 1")
+	}
+	if c.Risk.MaxTotalEquityDrawdownPct < 0 || c.Risk.MaxTotalEquityDrawdownPct > 1 {
+		return errors.New("risk.max_total_equity_drawdown_pct must be between 0 and 1")
+	}
+	if c.Risk.MaxDailyRealizedLossPct < 0 || c.Risk.MaxDailyRealizedLossPct > 1 {
+		return errors.New("risk.max_daily_realized_loss_pct must be between 0 and 1")
 	}
 	if c.Risk.HermesLowProfitMinSamples < 0 || c.Risk.HermesLowProfitLockMinutes < 0 {
 		return errors.New("risk Hermes low-profit protection values cannot be negative")

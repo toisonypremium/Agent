@@ -85,6 +85,28 @@ func TestManagedLiveOrderReservationLifecycle(t *testing.T) {
 	}
 }
 
+func TestManagedLiveOrderReservationRejectsLogicalDuplicateWithDifferentClientID(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "logical-duplicate.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	desired := liveguard.ManagedDesiredOrder{Symbol: "ETHUSDT", InstID: "ETH-USDT", LayerIndex: 1, Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, Source: "deterministic_agent2_layer_1", DecisionReason: "active"}
+	if err := db.ReserveManagedLiveOrder("client-a", desired, "cycle-a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.ReserveManagedLiveOrder("client-b", desired, "cycle-b"); err == nil {
+		t.Fatal("expected logical duplicate reservation error for different client ID")
+	}
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 {
+		t.Fatalf("logical duplicate created %d active orders: %+v", len(open), open)
+	}
+}
+
 func TestOpenLiveOrdersDetailedIncludesCanonicalAndLegacyOpenStatuses(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
 	if err != nil {
@@ -93,7 +115,7 @@ func TestOpenLiveOrdersDetailedIncludesCanonicalAndLegacyOpenStatuses(t *testing
 	defer db.Close()
 	statuses := []string{live.StatusPlanned, live.StatusSubmitted, live.StatusPartialFill, live.StatusLiveOpen, live.StatusPartiallyFilled, live.StatusFilled, live.StatusCancelled, live.StatusRejected}
 	for i, status := range statuses {
-		if err := db.SaveManagedLiveOrder(fmt.Sprintf("client-%d", i), fmt.Sprintf("order-%d", i), "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.02, 2, status, live.OrderStatus{LayerIndex: 1}); err != nil {
+		if err := db.SaveManagedLiveOrder(fmt.Sprintf("client-%d", i), fmt.Sprintf("order-%d", i), "ETH-USDT", "ETHUSDT", "BUY", "limit", 100, 0.02, 2, status, live.OrderStatus{LayerIndex: i + 1}); err != nil {
 			t.Fatal(err)
 		}
 	}

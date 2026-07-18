@@ -2,6 +2,7 @@ package liveguard
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"regexp"
@@ -170,6 +171,22 @@ func manualOrderBlockers(cfg config.Config, proof Proof, confirm string, placer 
 func clientOrderID(symbol string) string {
 	s := strings.ToLower(strings.ReplaceAll(symbol, "-", ""))
 	return fmt.Sprintf("btclive%s%s", s, nextClientOrderIDSuffix())
+}
+
+func managedSubmissionOutcomeUnknown(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
+		return true
+	}
+	s := strings.ToLower(err.Error())
+	for _, marker := range []string{"request failed", "read failed", "connection reset", "connection refused", "eof", "timeout", "timed out", "transport"} {
+		if strings.Contains(s, marker) {
+			return true
+		}
+	}
+	return false
 }
 
 func sanitizeExchangeError(cfg config.Config, err error) string {

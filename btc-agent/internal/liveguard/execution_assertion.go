@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
@@ -12,13 +13,20 @@ import (
 )
 
 type ManagedExecutionContext struct {
-	BTCAccumulationPhase       string `json:"btc_accumulation_phase,omitempty"`
-	FirstOrderDryRunApproved   bool   `json:"first_order_dry_run_approved,omitempty"`
-	ManagedOrderHistoryKnown   bool   `json:"managed_order_history_known,omitempty"`
-	HasManagedRealOrderHistory bool   `json:"has_managed_real_order_history,omitempty"`
-	HermesMode                 string `json:"hermes_mode,omitempty"`
-	HermesDecisionID           string `json:"hermes_decision_id,omitempty"`
-	HermesIntent               string `json:"hermes_intent,omitempty"`
+	BTCAccumulationPhase        string    `json:"btc_accumulation_phase,omitempty"`
+	FirstOrderDryRunApproved    bool      `json:"first_order_dry_run_approved,omitempty"`
+	ManagedOrderHistoryKnown    bool      `json:"managed_order_history_known,omitempty"`
+	HasManagedRealOrderHistory  bool      `json:"has_managed_real_order_history,omitempty"`
+	HermesMode                  string    `json:"hermes_mode,omitempty"`
+	HermesDecisionID            string    `json:"hermes_decision_id,omitempty"`
+	HermesIntent                string    `json:"hermes_intent,omitempty"`
+	PortfolioLossStateKnown     bool      `json:"portfolio_loss_state_known,omitempty"`
+	PortfolioLossLockActive     bool      `json:"portfolio_loss_lock_active,omitempty"`
+	PortfolioLossDrawdownPct    float64   `json:"portfolio_loss_drawdown_pct,omitempty"`
+	PortfolioLossStateUpdatedAt time.Time `json:"portfolio_loss_state_updated_at,omitempty"`
+	DailyRealizedPnL            float64   `json:"daily_realized_pnl,omitempty"`
+	DailyLossEquityBasis        float64   `json:"daily_loss_equity_basis,omitempty"`
+	DailyRealizedLossLockActive bool      `json:"daily_realized_loss_lock_active,omitempty"`
 }
 
 type ExecutionAssertionInput struct {
@@ -52,6 +60,18 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 	}
 	if cfg.Live.FirstOrderRequireDryRun && !in.DryRun && !in.FirstOrderDryRunApproved {
 		reasons = append(reasons, "live.first_order_require_dry_run=true; approved dry-run audit required before first real order")
+	}
+	if (cfg.Risk.MaxTotalEquityDrawdownPct > 0 || cfg.Risk.MaxDailyRealizedLossPct > 0) && !in.DryRun {
+		if !in.PortfolioLossStateKnown {
+			reasons = append(reasons, "portfolio loss state unavailable")
+		} else {
+			if cfg.Risk.MaxTotalEquityDrawdownPct > 0 && in.PortfolioLossLockActive {
+				reasons = append(reasons, fmt.Sprintf("portfolio drawdown protection active (%.2f%%)", in.PortfolioLossDrawdownPct*100))
+			}
+			if cfg.Risk.MaxDailyRealizedLossPct > 0 && in.DailyRealizedLossLockActive {
+				reasons = append(reasons, fmt.Sprintf("daily realized-loss protection active (PnL %.2f USDT)", in.DailyRealizedPnL))
+			}
+		}
 	}
 	if !cfg.Risk.NoFutures || !cfg.Risk.NoLeverage || !cfg.Risk.SpotLimitOnly {
 		reasons = append(reasons, "risk flags must enforce no futures/no leverage/spot limit only")

@@ -9,6 +9,7 @@ import (
 	"btc-agent/internal/reportio"
 	"btc-agent/internal/storage"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -73,7 +74,10 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 	}
 	summary := microstructure.BuildSummary(true, cfg.Data.Symbols.BTC, snapshots, microstructureRequiredFresh(cfg), now)
 	// MM Footprint: load history and apply persisted, outcome-calibrated thresholds.
-	calibration := loadMMCalibration()
+	calibration, calibrationErr := loadMMCalibration(db, now)
+	if calibrationErr != nil {
+		summary.Warnings = append(summary.Warnings, "load MM calibration: "+calibrationErr.Error())
+	}
 	if db != nil {
 		history, err := db.LoadMicrostructureHistory(microstructureSymbols(cfg), 20)
 		if err == nil && len(history) > 0 {
@@ -84,6 +88,11 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 		}
 	}
 	summary.MMCalibration = calibration
+	if db != nil {
+		if err := db.SaveMMCalibration(calibration, now); err != nil {
+			summary.Warnings = append(summary.Warnings, "save MM calibration state: "+err.Error())
+		}
+	}
 	if err := saveJSONFile("reports", "mm_footprint_calibration.json", calibration); err != nil {
 		summary.Warnings = append(summary.Warnings, "save MM calibration: "+err.Error())
 	}
@@ -91,13 +100,26 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 	return summary, nil
 }
 
-func loadMMCalibration() microstructure.CalibrationState {
+func loadMMCalibration(db *storage.DB, now time.Time) (microstructure.CalibrationState, error) {
 	state := microstructure.NewCalibrationState()
-	b, err := os.ReadFile(filepath.Join("reports", "mm_footprint_calibration.json"))
-	if err == nil && json.Unmarshal(b, &state) == nil {
-		return state
+	if db == nil {
+		return state, nil
 	}
-	return microstructure.NewCalibrationState()
+	stored, err := db.MMCalibration()
+	if err == nil {
+		return stored, nil
+	}
+	if err != sql.ErrNoRows {
+		return state, err
+	}
+	// One-time migration from the former report-file authority.
+	b, fileErr := os.ReadFile(filepath.Join("reports", "mm_footprint_calibration.json"))
+	if fileErr == nil && json.Unmarshal(b, &state) == nil {
+		if saveErr := db.SaveMMCalibration(state, now); saveErr != nil {
+			return microstructure.NewCalibrationState(), saveErr
+		}
+	}
+	return state, nil
 }
 
 func writeMicrostructureReport(summary microstructure.Summary) error {

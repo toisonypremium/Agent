@@ -94,6 +94,9 @@ func (d *DB) Migrate() error {
 	if err := d.ensureColumn("live_positions", "opened_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
+	if _, err := d.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_live_orders_active_logical_intent ON live_orders(symbol, layer_index, side, source) WHERE status IN ('PLANNED','SUBMITTED','PARTIAL_FILL','LIVE_OPEN','PARTIALLY_FILLED','UNKNOWN_NEEDS_MANUAL_CHECK');`); err != nil {
+		return err
+	}
 	return nil
 }
 

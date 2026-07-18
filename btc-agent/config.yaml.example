@@ -34,6 +34,8 @@ risk:
   allow_neutral_reclaim_entry: true
   strict_asset_flow_entry: false
   flow_bear_hard_block_score: 0.45
+  max_total_equity_drawdown_pct: 0.08
+  max_daily_realized_loss_pct: 0.03
   min_scout_reward_risk: 1.5
   allow_scout_in_downtrend: true
   no_futures: true

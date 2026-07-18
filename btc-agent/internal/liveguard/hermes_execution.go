@@ -318,6 +318,11 @@ func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decis
 		}
 		qty = floorToStep(qty, filter.StepSize)
 		notional := price * qty
+		if err := ValidateAutomatedSell(AutomatedSellCheck{Position: pos, Symbol: symbol, SellPrice: price, SellQuantity: qty, ReservedSellQty: reservedQty}); err != nil {
+			decision.Action, decision.Reason = "block", err.Error()
+			result.Blocked = append(result.Blocked, decision)
+			continue
+		}
 		if price <= 0 || qty <= 0 || qty > availableQty+fillEpsilon || (filter.MinSize > 0 && qty < filter.MinSize) || (filter.MinNotional > 0 && notional < filter.MinNotional) {
 			decision.Action, decision.Reason = "block", intent+" quantity failed owned-position or instrument limits"
 			result.Blocked = append(result.Blocked, decision)

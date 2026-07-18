@@ -8,7 +8,7 @@ import (
 
 func TestBuildAutonomousExitActionsOwnershipAndDedup(t *testing.T) {
 	exits := []ExitDecision{{Symbol: "BTCUSDT", Action: ExitTakeProfit, SellPrice: 110, SellQuantity: 2}, {Symbol: "ETHUSDT", Action: ExitPanicSell, SellPrice: 90, SellQuantity: 1}}
-	owned := []live.LivePosition{{Symbol: "BTCUSDT", Quantity: 1}, {Symbol: "ETHUSDT", Quantity: 1}}
+	owned := []live.LivePosition{{Symbol: "BTCUSDT", Quantity: 1, AvgEntryPrice: 100}, {Symbol: "ETHUSDT", Quantity: 1, AvgEntryPrice: 100}}
 	open := []live.OrderStatus{{Symbol: "ETHUSDT", Side: "SELL", Status: live.StatusSubmitted}}
 	got := BuildAutonomousExitActions(exits, owned, open)
 	if len(got) != 1 || got[0].Action.Symbol != "BTCUSDT" || got[0].Action.Intent != hermesoperator.IntentReduce {

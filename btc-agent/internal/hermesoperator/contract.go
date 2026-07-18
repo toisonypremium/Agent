@@ -52,6 +52,7 @@ type Decision struct {
 }
 
 type Action struct {
+	ThesisID              string   `json:"thesis_id,omitempty"`
 	Symbol                string   `json:"symbol"`
 	Intent                Intent   `json:"intent"`
 	Confidence            float64  `json:"confidence"`

@@ -81,7 +81,7 @@ func BuildManagedDesiredOrdersWithContext(cfg config.Config, plan agent2.Plan, f
 				}
 				instID = firstNonEmptyString(preflight.InstID, instID)
 			}
-			d := ManagedDesiredOrder{Symbol: symbol, InstID: instID, LayerIndex: layer.Index, Side: "BUY", Type: "limit", Price: preflightCandidate.Price, Quantity: preflightCandidate.Quantity, Notional: preflightCandidate.Notional, PostOnly: preflightCandidate.PostOnly, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: preflightCandidate.Source, DecisionReason: asset.Reason, QualityScore: qualityBySymbol[symbol].Score, QualityGrade: qualityBySymbol[symbol].Grade, AllocationScore: allocation.Score, AllocationTier: string(allocation.Tier), AllocationReason: allocation.Reason, TargetPrice: layer.Target, RewardRisk: layer.RewardRisk, ExpiresAt: layer.ExpiresAt, LayerReason: layer.Reason}
+			d := ManagedDesiredOrder{ThesisID: firstNonEmptyString(layer.ThesisID, asset.ThesisID), Symbol: symbol, InstID: instID, LayerIndex: layer.Index, Side: "BUY", Type: "limit", Price: preflightCandidate.Price, Quantity: preflightCandidate.Quantity, Notional: preflightCandidate.Notional, PostOnly: preflightCandidate.PostOnly, InvalidationPrice: asset.Invalidation, DiscountZone: asset.DiscountZone, Source: preflightCandidate.Source, DecisionReason: asset.Reason, QualityScore: qualityBySymbol[symbol].Score, QualityGrade: qualityBySymbol[symbol].Grade, AllocationScore: allocation.Score, AllocationTier: string(allocation.Tier), AllocationReason: allocation.Reason, TargetPrice: layer.Target, RewardRisk: layer.RewardRisk, ExpiresAt: layer.ExpiresAt, LayerReason: layer.Reason}
 			desired = append(desired, d)
 			assetRemaining -= d.Notional
 			totalDesired += d.Notional

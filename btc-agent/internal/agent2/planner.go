@@ -24,6 +24,7 @@ const (
 )
 
 type Layer struct {
+	ThesisID     string    `json:"thesis_id,omitempty"`
 	Index        int       `json:"index"`
 	Fraction     float64   `json:"fraction"`
 	Price        float64   `json:"price"`
@@ -37,6 +38,7 @@ type Layer struct {
 }
 
 type AssetPlan struct {
+	ThesisID         string            `json:"thesis_id,omitempty"`
 	Symbol           string            `json:"symbol"`
 	State            State             `json:"state"`
 	DiscountZone     market.Zone       `json:"discount_zone"`

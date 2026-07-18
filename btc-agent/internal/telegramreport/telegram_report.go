@@ -457,12 +457,27 @@ func LiveOrderManagementHumanText(result liveguard.ManagedCycleResult) string {
 	return trimTelegram(b.String())
 }
 
+func riskLockText(active bool) string {
+	if active {
+		return "khóa drawdown đang bật"
+	}
+	return "khóa drawdown không bật"
+}
+
 func LiveSupervisorHumanText(result liveguard.SupervisorResult) string {
 	var b strings.Builder
 	b.WriteString("🤖 BTC Agent — Giám sát giao dịch thật\n\n")
 	b.WriteString(fmt.Sprintf("Kết luận: %s\n", result.Summary))
 	if result.AutoHalted {
 		b.WriteString("🚨 Khóa vận hành: ĐÃ BẬT tự động sau lỗi lặp lại. Cần người vận hành kiểm tra.\n")
+	}
+	if result.PortfolioRisk.Known {
+		b.WriteString(fmt.Sprintf("Vốn: drawdown %.2f%% (%s) | PnL đã chốt hôm nay %.2f USDT | vốn mở ngày %.2f USDT\n", result.PortfolioRisk.DrawdownPct*100, riskLockText(result.PortfolioRisk.DrawdownLockActive), result.PortfolioRisk.DailyRealizedPnL, result.PortfolioRisk.DailyLossEquityBasis))
+		if result.PortfolioRisk.DailyLossLockActive {
+			b.WriteString("🚨 Khóa BUY do lỗ đã chốt trong ngày: ĐÃ BẬT; không tự động bán.\n")
+		}
+	} else if result.PortfolioRisk.Reason != "" {
+		b.WriteString("⚠️ Trạng thái vốn: CHƯA BIẾT — không cấp thêm quyền BUY.\n")
 	}
 	if len(result.Reasons) > 0 {
 		b.WriteString("Lý do:\n")

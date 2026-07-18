@@ -9,6 +9,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"btc-agent/internal/microstructure"
 )
 
 type EquityRiskState struct {
@@ -18,6 +20,11 @@ type EquityRiskState struct {
 	UnrealizedDrawdown float64   `json:"unrealized_drawdown"`
 	DrawdownPct        float64   `json:"drawdown_pct"`
 }
+type DailyEquityBasis struct {
+	DayUTC time.Time `json:"day_utc"`
+	Equity float64   `json:"equity"`
+}
+
 type ExitPeakState struct {
 	Symbol      string    `json:"symbol"`
 	Peak        float64   `json:"peak"`
@@ -71,6 +78,36 @@ func (d *DB) UpdateEquityRiskState(equity float64, now time.Time) (EquityRiskSta
 	_, err = d.Exec(`INSERT OR REPLACE INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('equity',?,?)`, now.Unix(), mustJSONRisk(s))
 	return s, err
 }
+
+// DailyOpeningEquity returns the first valid equity recorded for a UTC day.
+// INSERT OR IGNORE makes concurrent callers converge on one immutable basis.
+func (d *DB) DailyOpeningEquity(now time.Time, currentEquity float64) (DailyEquityBasis, error) {
+	if currentEquity <= 0 {
+		return DailyEquityBasis{}, fmt.Errorf("daily opening equity must be positive")
+	}
+	day := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	key := "daily_equity_basis:" + day.Format("2006-01-02")
+	basis := DailyEquityBasis{DayUTC: day, Equity: currentEquity}
+	b, err := json.Marshal(basis)
+	if err != nil {
+		return DailyEquityBasis{}, err
+	}
+	if _, err = d.Exec(`INSERT OR IGNORE INTO hermes_runtime_state(key,updated_at,payload_json) VALUES(?,?,?)`, key, now.Unix(), string(b)); err != nil {
+		return DailyEquityBasis{}, err
+	}
+	var js string
+	if err = d.QueryRow(`SELECT payload_json FROM hermes_runtime_state WHERE key=?`, key).Scan(&js); err != nil {
+		return DailyEquityBasis{}, err
+	}
+	if err = json.Unmarshal([]byte(js), &basis); err != nil {
+		return DailyEquityBasis{}, err
+	}
+	if basis.Equity <= 0 || !basis.DayUTC.Equal(day) {
+		return DailyEquityBasis{}, fmt.Errorf("invalid persisted daily equity basis")
+	}
+	return basis, nil
+}
+
 func (d *DB) EquityRiskState() (EquityRiskState, error) {
 	var ts int64
 	var js string
@@ -116,6 +153,28 @@ func (d *DB) ExitPeakStates() ([]ExitPeakState, error) {
 	}
 	return out, rows.Err()
 }
+func (d *DB) SaveMMCalibration(state microstructure.CalibrationState, now time.Time) error {
+	b, err := json.Marshal(state)
+	if err != nil {
+		return err
+	}
+	_, err = d.Exec(`INSERT OR REPLACE INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('mm_footprint_calibration',?,?)`, now.Unix(), string(b))
+	return err
+}
+
+func (d *DB) MMCalibration() (microstructure.CalibrationState, error) {
+	var js string
+	err := d.QueryRow(`SELECT payload_json FROM hermes_runtime_state WHERE key='mm_footprint_calibration'`).Scan(&js)
+	state := microstructure.NewCalibrationState()
+	if err != nil {
+		return state, err
+	}
+	if err := json.Unmarshal([]byte(js), &state); err != nil {
+		return microstructure.NewCalibrationState(), err
+	}
+	return state, nil
+}
+
 func (d *DB) SaveProtectionStatuses(items []ProtectionStatus, now time.Time) error {
 	b, err := json.Marshal(items)
 	if err != nil {

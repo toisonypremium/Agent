@@ -482,15 +482,6 @@ func updatePersistedTotalEquity(ctx context.Context, cfg config.Config, db *stor
 			equity += p.Quantity * price
 		}
 	}
-	for _, o := range currentOpenOrders(db) {
-		if strings.EqualFold(o.Side, "BUY") {
-			n := o.Notional
-			if n <= 0 {
-				n = o.Price * o.Quantity
-			}
-			equity += n
-		}
-	}
 	balances, err := client.AccountBalance(ctx)
 	if err != nil {
 		return err

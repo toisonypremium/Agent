@@ -53,6 +53,7 @@ func (r *hermesTestRecorder) MarkManagedLiveOrderSubmitted(id string, _ live.Ord
 	return nil
 }
 func (r *hermesTestRecorder) MarkManagedLiveOrderRejected(string, string) error { return nil }
+func (r *hermesTestRecorder) MarkManagedLiveOrderUnknown(string, string) error  { return nil }
 
 func TestExecuteHermesCanaryProbeCallsSpotLimitOnce(t *testing.T) {
 	cfg := config.Config{}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -70,6 +71,8 @@ type fakeManagedRecorder struct {
 	submitted    []string
 	rejected     []string
 	rejectReason []string
+	unknown      []string
+	unknownErr   error
 }
 
 func (f *fakeManagedRecorder) ReserveManagedLiveOrder(clientOrderID string, desired ManagedDesiredOrder, reason string) error {
@@ -88,6 +91,14 @@ func (f *fakeManagedRecorder) MarkManagedLiveOrderSubmitted(clientOrderID string
 func (f *fakeManagedRecorder) MarkManagedLiveOrderRejected(clientOrderID string, reason string) error {
 	f.rejected = append(f.rejected, clientOrderID)
 	f.rejectReason = append(f.rejectReason, reason)
+	return nil
+}
+
+func (f *fakeManagedRecorder) MarkManagedLiveOrderUnknown(clientOrderID string, reason string) error {
+	if f.unknownErr != nil {
+		return f.unknownErr
+	}
+	f.unknown = append(f.unknown, clientOrderID)
 	return nil
 }
 
@@ -211,6 +222,19 @@ func TestManageLiveOrdersWithRecorderMarksRejectedOnSubmitError(t *testing.T) {
 	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if got.Status != ManagedCyclePartial || len(rec.rejected) == 0 || len(got.Blocked) == 0 {
 		t.Fatalf("submit error should mark rejected: %+v recorder=%+v", got, rec)
+	}
+}
+
+func TestManageLiveOrdersUnknownPersistenceFailureFailsClosed(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{placeErr: context.DeadlineExceeded}
+	rec := &fakeManagedRecorder{unknownErr: fmt.Errorf("sqlite unavailable")}
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
+	joined := strings.Join(append(got.Reasons, got.Blocked[0].Error), " ")
+	if got.Status != ManagedCyclePartial || len(rec.rejected) != 0 || !strings.Contains(joined, "persist outcome failed") || !strings.Contains(got.Blocked[0].Reason, "manual check") {
+		t.Fatalf("unknown persistence failure must fail closed without rejection: result=%+v recorder=%+v", got, rec)
 	}
 }
 
@@ -691,8 +715,12 @@ func TestManageLiveOrdersFinalAssertionBlocksMissingBTCPhaseBeforeSubmit(t *test
 	}
 }
 
+var historyQualityReportTestMu sync.Mutex
+
 func writeHistoryQualityReportForTest(t *testing.T, scores map[string]historyQualityScore) {
 	t.Helper()
+	historyQualityReportTestMu.Lock()
+	t.Cleanup(historyQualityReportTestMu.Unlock)
 	perCoin := map[string]map[string]any{}
 	for symbol, score := range scores {
 		perCoin[symbol] = map[string]any{"quality_score": score.Score, "quality_grade": score.Grade}

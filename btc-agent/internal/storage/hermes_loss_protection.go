@@ -131,3 +131,82 @@ func (d *DB) HermesLossProtectionSnapshot(since time.Time) (HermesLossProtection
 	}
 	return out, rows.Err()
 }
+
+type PortfolioRealizedPnL struct {
+	Since           time.Time `json:"since"`
+	RealizedPnL     float64   `json:"realized_pnl"`
+	ClosedSellFills int       `json:"closed_sell_fills"`
+	LastCloseAt     time.Time `json:"last_close_at,omitempty"`
+}
+
+// PortfolioRealizedPnLSnapshot replays every managed position event in
+// chronological order. Inventory is built from all history, while realized PnL
+// is scored only for SELL fills at or after since. This intentionally covers
+// normal managed and Hermes orders and includes entry/exit fees when their
+// currency can be valued from the fill.
+func (d *DB) PortfolioRealizedPnLSnapshot(since time.Time) (PortfolioRealizedPnL, error) {
+	rows, err := d.Query(`SELECT e.timestamp,e.symbol,UPPER(e.side),e.delta_quantity,e.fill_price,e.notional_delta,e.fee_delta,e.fee_currency FROM live_position_events e JOIN live_orders o ON o.client_order_id=e.client_order_id ORDER BY e.timestamp,e.id`)
+	out := PortfolioRealizedPnL{Since: since.UTC()}
+	if err != nil {
+		return out, err
+	}
+	defer rows.Close()
+	type inventory struct{ qty, cost float64 }
+	inv := map[string]inventory{}
+	for rows.Next() {
+		var ts int64
+		var symbol, side, feeCCY string
+		var qty, price, notional, fee float64
+		if err := rows.Scan(&ts, &symbol, &side, &qty, &price, &notional, &fee, &feeCCY); err != nil {
+			return out, err
+		}
+		symbol = strings.ToUpper(symbol)
+		v := inv[symbol]
+		if notional <= 0 {
+			notional = qty * price
+		}
+		baseCCY := strings.TrimSuffix(symbol, "USDT")
+		feeUSDT := fee
+		feeValued := strings.EqualFold(feeCCY, "USDT") || strings.EqualFold(feeCCY, baseCCY)
+		if strings.EqualFold(feeCCY, baseCCY) {
+			feeUSDT = fee * price
+		}
+		if side == "BUY" {
+			v.qty += qty
+			v.cost += notional
+			if feeValued {
+				v.cost -= feeUSDT
+			}
+			inv[symbol] = v
+			continue
+		}
+		if side != "SELL" || qty <= 0 || v.qty <= 0 {
+			continue
+		}
+		sellQty := qty
+		if sellQty > v.qty {
+			sellQty = v.qty
+		}
+		avg := v.cost / v.qty
+		proceeds := sellQty * price
+		if price <= 0 && qty > 0 {
+			proceeds = notional * sellQty / qty
+		}
+		pnl := proceeds - avg*sellQty
+		if feeValued {
+			pnl += feeUSDT
+		}
+		v.qty -= sellQty
+		v.cost -= avg * sellQty
+		if v.qty < 1e-12 {
+			v = inventory{}
+		}
+		inv[symbol] = v
+		if ts >= since.Unix() {
+			out.RealizedPnL += pnl
+			out.ClosedSellFills++
+			out.LastCloseAt = time.Unix(ts, 0).UTC()
+		}
+	}
+	return out, rows.Err()
+}

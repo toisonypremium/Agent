@@ -17,6 +17,50 @@ import (
 	"time"
 )
 
+func applyPortfolioLossState(cfg config.Config, db *storage.DB, execCtx *liveguard.ManagedExecutionContext, now time.Time) {
+	if execCtx == nil {
+		return
+	}
+	if cfg.Risk.MaxTotalEquityDrawdownPct <= 0 && cfg.Risk.MaxDailyRealizedLossPct <= 0 {
+		execCtx.PortfolioLossStateKnown = true
+		return
+	}
+	if db == nil {
+		return
+	}
+	eq, err := db.EquityRiskState()
+	if err != nil {
+		return
+	}
+	maxAge := time.Duration(cfg.Live.ManagementIntervalMinutes*3) * time.Minute
+	if maxAge < time.Minute {
+		maxAge = time.Minute
+	}
+	if eq.UpdatedAt.IsZero() || now.Sub(eq.UpdatedAt) < 0 || now.Sub(eq.UpdatedAt) > maxAge {
+		return
+	}
+	execCtx.PortfolioLossStateKnown = true
+	execCtx.PortfolioLossDrawdownPct = eq.DrawdownPct
+	execCtx.PortfolioLossStateUpdatedAt = eq.UpdatedAt
+	execCtx.PortfolioLossLockActive = cfg.Risk.MaxTotalEquityDrawdownPct > 0 && eq.DrawdownPct >= cfg.Risk.MaxTotalEquityDrawdownPct
+	if cfg.Risk.MaxDailyRealizedLossPct > 0 {
+		dayStart := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+		daily, dailyErr := db.PortfolioRealizedPnLSnapshot(dayStart)
+		if dailyErr != nil {
+			execCtx.PortfolioLossStateKnown = false
+			return
+		}
+		basis, basisErr := db.DailyOpeningEquity(now, eq.CurrentEquity)
+		if basisErr != nil {
+			execCtx.PortfolioLossStateKnown = false
+			return
+		}
+		execCtx.DailyRealizedPnL = daily.RealizedPnL
+		execCtx.DailyLossEquityBasis = basis.Equity
+		execCtx.DailyRealizedLossLockActive = daily.RealizedPnL <= -(basis.Equity * cfg.Risk.MaxDailyRealizedLossPct)
+	}
+}
+
 func requireAutoLiveRuntime(cfg config.Config) error {
 	if os.Getenv("BTC_AGENT_ALLOW_AUTO_LIVE") != "true" {
 		return fmt.Errorf("BTC_AGENT_ALLOW_AUTO_LIVE=true required for auto live execution")
@@ -776,6 +820,9 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 			}
 			if equity > 0 {
 				cfg.Portfolio.TotalCapital = equity
+				if _, equityErr := db.UpdateEquityRiskState(equity, time.Now()); equityErr != nil {
+					log.Printf("persist pre-execution equity risk state warning: %v", equityErr)
+				}
 				log.Printf("live capital updated from complete OKX equity: %.2f USDT", equity)
 			}
 		} else {
@@ -809,6 +856,7 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		}
 	}
 	execCtx := liveguard.ManagedExecutionContext{BTCAccumulationPhase: string(analysis.BTCAccumulation.Phase), FirstOrderDryRunApproved: dryRunApproved}
+	applyPortfolioLossState(cfg, db, &execCtx, time.Now())
 	if historyErr == nil {
 		execCtx.ManagedOrderHistoryKnown = true
 		execCtx.HasManagedRealOrderHistory = hasHistory

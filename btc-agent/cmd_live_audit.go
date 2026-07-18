@@ -112,6 +112,7 @@ func buildLiveAutoAudit(ctx context.Context, cfg config.Config, db *storage.DB) 
 	if planErr == nil {
 		report.Proof = liveguard.BuildProofWithChecks(ctx, cfg, plan, balanceReader, filterReader)
 		execCtx := liveguard.ManagedExecutionContext{BTCAccumulationPhase: string(report.Analysis.BTCAccumulation.Phase), FirstOrderDryRunApproved: true}
+		applyPortfolioLossState(cfg, db, &execCtx, time.Now())
 		if hasHistory, err := db.HasManagedRealOrderSubmission(); err == nil {
 			execCtx.ManagedOrderHistoryKnown = true
 			execCtx.HasManagedRealOrderHistory = hasHistory

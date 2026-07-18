@@ -66,6 +66,39 @@ func TestAnalyzeMultiFrameAggregatesBias(t *testing.T) {
 	}
 }
 
+func TestAggregateBiasPreservesAlignedAccumulation(t *testing.T) {
+	got := aggregateBias(
+		Signal{Timeframe: "1d", FlowBias: BiasAccumulation, Confidence: 0.90},
+		Signal{Timeframe: "4h", FlowBias: BiasAccumulation, Confidence: 0.90},
+		Signal{Timeframe: "1w", FlowBias: BiasNeutral, Confidence: 0.50},
+	)
+	if got != BiasAccumulation {
+		t.Fatalf("aligned accumulation must remain accumulation, got %s", got)
+	}
+}
+
+func TestAggregateBiasDoesNotPromoteAccumulationAgainstBearishWeeklyContext(t *testing.T) {
+	got := aggregateBias(
+		Signal{Timeframe: "1d", FlowBias: BiasAccumulation, Confidence: 0.90},
+		Signal{Timeframe: "4h", FlowBias: BiasAccumulation, Confidence: 0.90},
+		Signal{Timeframe: "1w", FlowBias: BiasDistribution, Confidence: 0.90},
+	)
+	if got == BiasAccumulation || got == BiasBearTrap {
+		t.Fatalf("bullish lower timeframes must not promote accumulation against bearish weekly context: %s", got)
+	}
+}
+
+func TestAggregateBiasDoesNotPromoteAccumulationFromIntradayAgainstBearishWeekly(t *testing.T) {
+	got := aggregateBias(
+		Signal{Timeframe: "1d", FlowBias: BiasNeutral, Confidence: 0.10},
+		Signal{Timeframe: "4h", FlowBias: BiasAccumulation, Confidence: 1.0},
+		Signal{Timeframe: "1w", FlowBias: BiasDistribution, Confidence: 1.0},
+	)
+	if got == BiasAccumulation {
+		t.Fatalf("intraday bullish weight must not promote accumulation against bearish weekly context: %s", got)
+	}
+}
+
 func TestAnalyzeWithParamsDetectsBorderlineAbsorption(t *testing.T) {
 	c := flowCandles(80)
 	last := len(c) - 1

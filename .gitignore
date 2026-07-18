@@ -1,0 +1,6 @@
+# VPS runtime artifacts kept outside source control
+/backups/
+/rollbacks/
+/quarantine-old-artifacts-*/
+/sync-inbox-*/
+/btc-agent-runtime-backups/

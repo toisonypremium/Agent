@@ -1,0 +1,21 @@
+[Unit]
+Description=BTC Agent production control center
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/admin/btc-agent/btc-agent
+ExecStart=/home/admin/btc-agent/btc-agent/bin/btc-agent web --config /home/admin/btc-agent/btc-agent/config.yaml --listen 127.0.0.1:20129
+Restart=on-failure
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/home/admin/btc-agent/btc-agent/data /home/admin/btc-agent/btc-agent/reports
+
+[Install]
+WantedBy=default.target

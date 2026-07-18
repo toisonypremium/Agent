@@ -86,6 +86,17 @@ func registerWebDataAPI(mux *http.ServeMux, cfg config.Config, db *storage.DB) {
 			"bang_chung_thuc_thi": loadWebReport("execution_evidence_latest.json", 90*time.Minute),
 		}
 	})
+	registerWebGET(mux, "/api/v1/hermes", func() any {
+		return map[string]any{
+			"bao_cao_quan_ly":     loadWebReport("hermes_report_latest.json", 90*time.Minute),
+			"quyet_dinh_bong":     loadWebReport("hermes_shadow_decision_latest.json", 35*time.Minute),
+			"bo_giam_sat":         loadWebReport("live_supervisor_latest.json", 35*time.Minute),
+			"bang_quyet_dinh":     loadWebReport("decision_dashboard_latest.json", 35*time.Minute),
+			"trang_thai_bot":      loadWebReport("bot_state_latest.json", 35*time.Minute),
+			"bang_chung_thuc_thi": loadWebReport("execution_evidence_latest.json", 90*time.Minute),
+			"bao_cao_vi_the":      loadWebReport("live_position_latest.json", 35*time.Minute),
+		}
+	})
 	registerWebGET(mux, "/api/v1/van-hanh", func() any {
 		return map[string]any{
 			"nhip_song":          loadWebReport("scheduler_heartbeat_latest.json", 10*time.Minute),

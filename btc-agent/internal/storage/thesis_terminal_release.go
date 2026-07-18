@@ -27,15 +27,18 @@ func (d *DB) SaveTerminalLiveOrderStatusAndRelease(o live.OrderStatus) (float64,
 		return 0, false, err
 	}
 	defer tx.Rollback()
-	var clientID, thesisID, side string
+	var clientID, thesisID, side, currentStatus string
 	var orderNotional float64
-	query := `SELECT client_order_id,COALESCE(thesis_id,''),side,notional FROM live_orders WHERE client_order_id=?`
+	query := `SELECT client_order_id,COALESCE(thesis_id,''),side,notional,status FROM live_orders WHERE client_order_id=?`
 	id := o.ClientOrderID
 	if id == "" {
-		query = `SELECT client_order_id,COALESCE(thesis_id,''),side,notional FROM live_orders WHERE order_id=?`
+		query = `SELECT client_order_id,COALESCE(thesis_id,''),side,notional,status FROM live_orders WHERE order_id=?`
 		id = o.OrderID
 	}
-	if err := tx.QueryRow(query, id).Scan(&clientID, &thesisID, &side, &orderNotional); err != nil {
+	if err := tx.QueryRow(query, id).Scan(&clientID, &thesisID, &side, &orderNotional, &currentStatus); err != nil {
+		return 0, false, err
+	}
+	if err := ensureLiveOrderTransition(currentStatus, o.Status); err != nil {
 		return 0, false, err
 	}
 	updatedAt := o.UpdatedAt

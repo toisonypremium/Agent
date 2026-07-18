@@ -85,6 +85,7 @@ func TestLiveProofHumanTextLengthAndSafety(t *testing.T) {
 
 func TestLiveSupervisorHumanText(t *testing.T) {
 	result := liveguard.SupervisorResult{
+		PortfolioRisk:     liveguard.PortfolioRiskTelemetry{Known: true, DrawdownPct: 0.04, DailyRealizedPnL: -2, DailyLossEquityBasis: 100, DailyLossLockActive: true},
 		Status:            liveguard.SupervisorWarn,
 		Action:            liveguard.SupervisorActionManagedCycle,
 		ConsecutiveErrors: 1,
@@ -99,7 +100,7 @@ func TestLiveSupervisorHumanText(t *testing.T) {
 	}
 	result.RefreshSummary()
 	got := LiveSupervisorHumanText(result)
-	for _, want := range []string{"Giám sát giao dịch thật", "GIÁM SÁT CÓ CẢNH BÁO", "mua giao ngay bằng lệnh giới hạn tạo thanh khoản", "mong muốn=1", "chặn=1"} {
+	for _, want := range []string{"Giám sát giao dịch thật", "GIÁM SÁT CÓ CẢNH BÁO", "mua giao ngay bằng lệnh giới hạn tạo thanh khoản", "mong muốn=1", "chặn=1", "PnL đã chốt hôm nay", "Khóa BUY do lỗ"} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("missing %q in %s", want, got)
 		}

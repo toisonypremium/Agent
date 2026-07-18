@@ -19,17 +19,29 @@ const (
 	SupervisorActionSkipped       = "skipped"
 )
 
+type PortfolioRiskTelemetry struct {
+	Known                bool      `json:"known"`
+	UpdatedAt            time.Time `json:"updated_at,omitempty"`
+	DrawdownPct          float64   `json:"drawdown_pct,omitempty"`
+	DrawdownLockActive   bool      `json:"drawdown_lock_active"`
+	DailyRealizedPnL     float64   `json:"daily_realized_pnl,omitempty"`
+	DailyLossEquityBasis float64   `json:"daily_loss_equity_basis,omitempty"`
+	DailyLossLockActive  bool      `json:"daily_loss_lock_active"`
+	Reason               string    `json:"reason,omitempty"`
+}
+
 type SupervisorResult struct {
-	GeneratedAt       time.Time            `json:"generated_at"`
-	Status            string               `json:"status"`
-	Action            string               `json:"action"`
-	ConsecutiveErrors int                  `json:"consecutive_errors"`
-	AutoHalted        bool                 `json:"auto_halted,omitempty"`
-	Reasons           []string             `json:"reasons,omitempty"`
-	Managed           *ManagedCycleResult  `json:"managed,omitempty"`
-	Doctor            *RuntimeDoctorResult `json:"doctor,omitempty"`
-	Exits             []ExitDecision       `json:"exits,omitempty"`
-	Summary           string               `json:"summary"`
+	GeneratedAt       time.Time              `json:"generated_at"`
+	Status            string                 `json:"status"`
+	Action            string                 `json:"action"`
+	ConsecutiveErrors int                    `json:"consecutive_errors"`
+	AutoHalted        bool                   `json:"auto_halted,omitempty"`
+	Reasons           []string               `json:"reasons,omitempty"`
+	Managed           *ManagedCycleResult    `json:"managed,omitempty"`
+	Doctor            *RuntimeDoctorResult   `json:"doctor,omitempty"`
+	Exits             []ExitDecision         `json:"exits,omitempty"`
+	PortfolioRisk     PortfolioRiskTelemetry `json:"portfolio_risk,omitempty"`
+	Summary           string                 `json:"summary"`
 }
 
 func (r *SupervisorResult) RefreshSummary() {

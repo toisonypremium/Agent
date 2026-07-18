@@ -25,6 +25,40 @@ type liveSupervisorState struct {
 	PeakTracker       *liveguard.PeakTracker
 }
 
+func attachPortfolioRiskTelemetry(cfg config.Config, db *storage.DB, result *liveguard.SupervisorResult, now time.Time) {
+	if result == nil || db == nil {
+		return
+	}
+	t := liveguard.PortfolioRiskTelemetry{}
+	eq, err := db.EquityRiskState()
+	if err != nil {
+		t.Reason = "không đọc được trạng thái vốn"
+		result.PortfolioRisk = t
+		return
+	}
+	t.Known = true
+	t.UpdatedAt = eq.UpdatedAt
+	t.DrawdownPct = eq.DrawdownPct
+	t.DrawdownLockActive = cfg.Risk.MaxTotalEquityDrawdownPct > 0 && eq.DrawdownPct >= cfg.Risk.MaxTotalEquityDrawdownPct
+	if cfg.Risk.MaxDailyRealizedLossPct <= 0 {
+		result.PortfolioRisk = t
+		return
+	}
+	dayStart := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	daily, dailyErr := db.PortfolioRealizedPnLSnapshot(dayStart)
+	basis, basisErr := db.DailyOpeningEquity(now, eq.CurrentEquity)
+	if dailyErr != nil || basisErr != nil {
+		t.Known = false
+		t.Reason = "không đọc được PnL ngày hoặc vốn mở ngày"
+		result.PortfolioRisk = t
+		return
+	}
+	t.DailyRealizedPnL = daily.RealizedPnL
+	t.DailyLossEquityBasis = basis.Equity
+	t.DailyLossLockActive = daily.RealizedPnL <= -(basis.Equity * cfg.Risk.MaxDailyRealizedLossPct)
+	result.PortfolioRisk = t
+}
+
 func runLiveSupervisorCycle(ctx context.Context, cfg config.Config, db *storage.DB, state *liveSupervisorState, dryRun bool) (liveguard.SupervisorResult, error) {
 	doctor := buildLiveDoctorResult(ctx, cfg, db)
 	if err := writeLiveDoctorResult(doctor); err != nil {
@@ -49,6 +83,7 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.Reasons = append(result.Reasons, "reconcile after missing doctor: "+err.Error())
 		}
 		result.RefreshSummary()
+		attachPortfolioRiskTelemetry(cfg, db, &result, time.Now())
 		return result, writeLiveSupervisorResult(ctx, cfg, db, result, false)
 	}
 	if doctor != nil && doctor.Status == liveguard.DoctorBlock && !dryRun {
@@ -60,12 +95,14 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.Reasons = append(result.Reasons, "reconcile after doctor block: "+err.Error())
 		}
 		result.RefreshSummary()
+		attachPortfolioRiskTelemetry(cfg, db, &result, time.Now())
 		return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if !cfg.Live.SupervisorEnabled {
 		result.Action = liveguard.SupervisorActionSkipped
 		result.Summary = "SUPERVISOR_OK: action=skipped | live supervisor disabled"
 		result.RefreshSummary()
+		attachPortfolioRiskTelemetry(cfg, db, &result, time.Now())
 		return result, writeLiveSupervisorResult(ctx, cfg, db, result, false)
 	}
 	halted, err := db.IsHalted()
@@ -74,6 +111,7 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		result.ConsecutiveErrors = state.ConsecutiveErrors
 		result.Reasons = append(result.Reasons, "read operator halt: "+err.Error())
 		result.RefreshSummary()
+		attachPortfolioRiskTelemetry(cfg, db, &result, time.Now())
 		return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if halted {
@@ -88,6 +126,7 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			result.ConsecutiveErrors = 0
 		}
 		result.RefreshSummary()
+		attachPortfolioRiskTelemetry(cfg, db, &result, time.Now())
 		return result, writeLiveSupervisorResult(ctx, cfg, db, result, notifyTelegram && shouldNotifySupervisor(cfg, result, state))
 	}
 	if dryRun {

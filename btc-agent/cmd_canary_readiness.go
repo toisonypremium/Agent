@@ -56,7 +56,10 @@ func runCanaryReadiness(cfg config.Config, db *storage.DB) error {
 	legacy = liveguard.EvaluateCanaryReadiness(liveguard.CanaryReadinessInput{QualificationPassed: qualificationOK && qualification.Result == "PASS", QualificationStressPassed: qualification.StressPassed, QualificationStressRequired: 100, Doctor: doctor, Reconcile: reconcile.Safety, OperatorHalted: halted, HermesDemoted: demoted, ExecutionAuthority: cfg.HermesOperator.CanExecute(), OpenLiveOrders: len(open), HermesOwnedPositions: len(owned)})
 	var rehearsal canaryRehearsalReport
 	rehearsalOK := readJSONReport(filepath.Join("reports", "canary_rehearsal_latest.json"), &rehearsal) == nil && rehearsal.Status == "PASS" && rehearsal.NoRealExchange && rehearsal.ForcedSimulation.ExchangeCalls == 0
-	technical := rehearsalOK && doctorOK && doctor.Status == liveguard.DoctorOK && reconcileOK && reconcile.Safety.Status == liveguard.ReconcileClean && !halted && !demoted && len(open) == 0 && len(owned) == 0 && haltErr == nil && demoteErr == nil && openErr == nil && ownedErr == nil
+	// Existing managed holdings are a production-canary blocker, not a
+	// technical rehearsal blocker. The rehearsal uses isolated storage and
+	// already proves order/replay behavior with no exchange calls.
+	technical := rehearsalOK && doctorOK && doctor.Status == liveguard.DoctorOK && reconcileOK && reconcile.Safety.Status == liveguard.ReconcileClean && !halted && !demoted && len(open) == 0 && haltErr == nil && demoteErr == nil && openErr == nil && ownedErr == nil
 	marketAuthority := "BLOCKED"
 	if legacy.Verdict == liveguard.CanaryReady {
 		marketAuthority = "READY"
@@ -67,6 +70,9 @@ func runCanaryReadiness(cfg config.Config, db *storage.DB) error {
 	}
 	if marketAuthority != "READY" {
 		out.Blockers = append(out.Blockers, "market authority blocked; production canary remains unauthorized")
+	}
+	if len(owned) != 0 {
+		out.Blockers = append(out.Blockers, fmt.Sprintf("%d Hermes-owned positions require production reconciliation before canary", len(owned)))
 	}
 	out.Summary = fmt.Sprintf("%s: technical=%v market_authority=%s rehearsal=%s exchange_calls=%d", out.Verdict, out.TechnicalCanaryReady, out.MarketAuthority, out.RehearsalStatus, out.RehearsalExchangeCalls)
 	if err := saveJSONFile("reports", "canary_readiness_latest.json", out); err != nil {

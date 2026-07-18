@@ -1,26 +1,48 @@
-const toast = document.querySelector('#toast');
-const updated = document.querySelector('#last-updated');
-function showToast(message){ toast.textContent = message; toast.classList.add('show'); window.clearTimeout(showToast.timer); showToast.timer = window.setTimeout(()=>toast.classList.remove('show'), 3200); }
-function setUpdated(){ updated.textContent = `Last updated ${new Date().toLocaleTimeString('vi-VN')}`; }
-async function loadSnapshot(){
-  try {
-    const response = await fetch('/api/snapshot', {headers:{Accept:'application/json'}, cache:'no-store'});
-    if (!response.ok) throw new Error('API unavailable');
-    const data = await response.json();
-    if (data.service_status) document.querySelector('#service-status').textContent = data.service_status;
-    if (Number.isFinite(data.open_orders)) document.querySelector('#open-orders').textContent = data.open_orders;
-    if (data.heartbeat_age) document.querySelector('#heartbeat-age').textContent = data.heartbeat_age;
-    if (data.version) document.querySelector('.version').textContent = data.version;
-    document.querySelector('#service-meta').textContent = data.service_meta || 'Scheduler running';
-  } catch { document.querySelector('#service-meta').textContent = 'Demo snapshot · API pending'; }
-  setUpdated();
+const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+const trangThai={ACTIVE:'Đang hoạt động',BLOCKED:'Bị chặn',HALTED:'Đã dừng',WATCH:'Theo dõi',SCOUT:'Thăm dò',RANGE:'Đi ngang',MARKDOWN:'Suy giảm',ALLOWED:'Được phép',DOCTOR_OK:'Đạt',CLEAN:'Sạch',PASS:'Đạt',WARN:'Cảnh báo',RUNNING:'Đang chạy',live:'Trực tiếp'};
+const dich=v=>trangThai[String(v)]||String(v??'—');
+const so=(v,cs=2)=>Number.isFinite(Number(v))?new Intl.NumberFormat('vi-VN',{minimumFractionDigits:0,maximumFractionDigits:cs}).format(Number(v)):'—';
+const tien=v=>so(v,2);
+const phanTram=v=>Number.isFinite(Number(v))?`${so(Number(v)*100,0)}%`:'—';
+const tg=v=>{if(!v)return'—';const d=new Date(v);return Number.isNaN(d.getTime())?'—':new Intl.DateTimeFormat('vi-VN',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}).format(d)};
+const baoCao=(x,k)=>x?.du_lieu?.[k]?.du_lieu||{};
+function thongBao(t){const e=$('#thong-bao');e.textContent=t;e.classList.add('hien');clearTimeout(thongBao.h);thongBao.h=setTimeout(()=>e.classList.remove('hien'),3000)}
+function gan(id,v){const e=$(id);if(e)e.textContent=v??'—'}
+function lop(id,ok){const e=$(id);if(e)e.className=ok?'dat':'chan'}
+async function api(path){const r=await fetch(path,{headers:{Accept:'application/json'},cache:'no-store'});if(!r.ok)throw Error(`HTTP ${r.status}`);return r.json()}
+async function nap(){
+  gan('#ket-noi','Đang cập nhật');
+  try{
+    const [tong, von, thi, taisan, vithe, vanhanh]=await Promise.all(['/api/v1/tong-quan','/api/v1/von','/api/v1/thi-truong','/api/v1/tai-san','/api/v1/vi-the','/api/v1/van-hanh'].map(api));
+    veTongQuan(tong);veVon(von);veThiTruong(thi,taisan);veViThe(vithe);veVanHanh(vanhanh);gan('#ket-noi','Đã kết nối');gan('#cap-nhat-luc',`Cập nhật ${tg(tong.cap_nhat_luc)}`);
+  }catch(e){gan('#ket-noi','Mất kết nối');gan('#quyen-thuc-thi','Không xác định');gan('#ly-do-quyen','Không đọc được dữ liệu production. Hệ thống được xem là không có quyền thực thi.');thongBao('Không thể cập nhật dữ liệu');}
 }
-document.querySelector('#refresh-button').addEventListener('click', ()=>{loadSnapshot(); showToast('Đã làm mới telemetry');});
-document.querySelectorAll('[data-action]').forEach(button=>button.addEventListener('click', ()=>{
-  const action = button.dataset.action;
-  if(action === 'halt') showToast('Control plane sẽ yêu cầu xác nhận operator trước khi halt.');
-  else if(action === 'audit') showToast('Audit endpoint sẽ chạy qua API có xác thực.');
-  else showToast('Tính năng đang được kết nối vào control plane.');
-}));
-loadSnapshot();
-window.setInterval(loadSnapshot, 30000);
+function veTongQuan(x){
+  const d=x.du_lieu||{}, h=d.he_thong||{}, op=baoCao(x,'ke_hoach_van_hanh'), doc=baoCao(x,'kiem_tra_he_thong'), audit=baoCao(x,'kiem_toan'), hb=baoCao(x,'nhip_song'), rec=baoCao(x,'doi_soat'), c=op.capital||{}, m=op.market||{};
+  const biDung=!!h.halted, duoc=!!audit.real_order_approved;
+  gan('#quyen-thuc-thi',biDung?'Đã dừng bởi operator':duoc?'Được phép thực thi':'Chưa được phép thực thi');gan('#ma-quyen',biDung?'ĐÃ DỪNG':duoc?'ĐƯỢC PHÉP':'BỊ CHẶN');
+  gan('#ly-do-quyen',biDung?'Lệnh dừng của người vận hành đang bật.':m.permission!=='ALLOWED'?`BTC đang ở trạng thái ${dich(m.regime)}, quyền ${dich(m.permission)} và pha ${dich(m.accumulation_phase)}.`:'Một hoặc nhiều lớp bảo vệ chưa đạt.');
+  gan('#tong-tai-san',tien(c.total_capital_usdt));gan('#gia-tri-vi-the',tien(c.existing_position_usdt));gan('#giai-ngan-ngay',tien(c.executable_now_usdt));gan('#lenh-dang-mo',so(h.open_orders,0));
+  const doctor=doc.status==='DOCTOR_OK';gan('#doctor',doctor?'ĐẠT':'BỊ CHẶN');lop('#doctor',doctor);gan('#doctor-tong',doctor?'HỆ THỐNG ĐẠT':'CẦN KIỂM TRA');$('#doctor-tong').className=`huy-hieu ${doctor?'dat':'canh-bao'}`;
+  const doi=(rec.unknown||0)===0;gan('#doi-soat',doi?'SẠCH':'CẦN KIỂM TRA');lop('#doi-soat',doi);gan('#gate-btc',m.permission==='ALLOWED'?'ĐẠT':dich(m.permission).toUpperCase());lop('#gate-btc',m.permission==='ALLOWED');
+  const rg=doc.risk_governor||{};gan('#rui-ro-tong',rg.blocked?'BỊ CHẶN':'TRONG GIỚI HẠN');lop('#rui-ro-tong',!rg.blocked);gan('#scheduler',dich(hb.status));gan('#su-kien-gan',hb.last_event||'—');gan('#chu-ky-tiep',tg(hb.next_live_supervisor_cycle));gan('#do-cu-heartbeat',h.heartbeat_age||'—');
+}
+function veVon(x){
+ const op=baoCao(x,'ke_hoach_van_hanh'), ng=baoCao(x,'ke_hoach_nghien_cuu'), c=op.capital||{};gan('#von-tong',tien(c.total_capital_usdt));gan('#von-cau-hinh',tien(ng.total_capital));gan('#von-du-phong',tien(c.reserve_cash_usdt));gan('#von-con-lai',tien(c.available_cycle_capacity_usdt));
+ const tong=Number(c.total_capital_usdt)||0, vt=Number(c.existing_position_usdt)||0, dp=Number(c.reserve_cash_usdt)||0;gan('#ty-le-su-dung',tong?`${so(vt/tong*100,1)}% đã vào vị thế`:'—');$('#thanh-vi-the').style.width=`${tong?vt/tong*100:0}%`;$('#thanh-du-phong').style.width=`${tong?dp/tong*100:0}%`;
+ const ds=c.assets||[];$('#danh-sach-von').innerHTML=ds.length?ds.map(a=>`<div class="the-tai-san"><div class="hang-tai-san"><div><strong>${a.symbol}</strong><small>${dich(a.state)} · sẵn sàng ${phanTram(a.readiness)}</small></div><span class="huy-hieu">${phanTram(a.target_allocation_pct)}</span></div><div class="thanh-tien-do"><i style="width:${Math.min(100,(a.existing_exposure_usdt||0)/(a.strategic_cap_usdt||1)*100)}%"></i></div><div class="luoi-nho"><div><span>Trần chiến lược</span><b>${tien(a.strategic_cap_usdt)} USDT</b></div><div><span>Đã sử dụng</span><b>${tien(a.existing_exposure_usdt)} USDT</b></div><div><span>Dư địa</span><b>${tien(a.remaining_strategic_usdt)} USDT</b></div><div><span>Giải ngân ngay</span><b>${tien(a.executable_budget_usdt)} USDT</b></div></div><p class="ly-do">${a.reason||a.next_trigger||'—'}</p></div>`).join(''):'<div class="rong">Chưa có dữ liệu phân bổ</div>';
+}
+function veThiTruong(x,tx){
+ const op=baoCao(x,'ke_hoach_van_hanh'), m=op.market||{};gan('#btc-bo-ba',`${dich(m.regime)} · ${dich(m.permission)} · ${dich(m.accumulation_phase)}`);gan('#gia-btc',`${tien(m.btc_price)} USDT`);gan('#diem-xu-huong',so(m.trend_score,1));gan('#diem-tich-luy',so(m.accumulation_score,0));gan('#ho-tro-btc',`${tien(m.primary_support_low)} – ${tien(m.primary_support_high)}`);gan('#vo-hieu-btc',tien(m.invalidation_low));gan('#kich-ban-chinh',m.main_scenario);gan('#mo-khoa',m.unlock_scenario);
+ const sc=baoCao(tx,'bang_diem_ky_thuat'), coins=sc.coins||[];$('#danh-sach-tai-san').innerHTML=coins.length?coins.map(a=>`<div class="the-tai-san"><div class="hang-tai-san"><div><strong>${a.symbol}</strong><small>${dich(a.state)} · ${dich(a.verdict)}</small></div><span class="huy-hieu">${so(a.technical_score*100,0)} điểm</span></div><div class="thanh-tien-do"><i style="width:${Math.max(0,Math.min(100,a.technical_score*100))}%"></i></div><div class="luoi-nho"><div><span>Hạng luân chuyển</span><b>#${a.rotation_rank||'—'}</b></div><div><span>Thanh khoản</span><b>${a.liquidity_grade||'—'} · ${so(a.liquidity_score,0)}</b></div><div><span>Tỷ lệ lợi nhuận/rủi ro</span><b>${so(a.reward_risk,2)}</b></div><div><span>Khoảng cách vùng mua</span><b>${so(a.discount_gap_pct*100,2)}%</b></div></div><p class="ly-do"><strong>Điểm chặn:</strong> ${a.top_blocker||'Không có'}</p><p class="ly-do"><strong>Kích hoạt tiếp:</strong> ${a.next_trigger||'—'}</p></div>`).join(''):'<div class="rong">Chưa có dữ liệu tài sản</div>';
+}
+function veViThe(x){
+ const d=x.du_lieu||{}, ps=d.vi_the||[], os=d.lenh_dang_mo||[];gan('#so-vi-the',`${ps.length} VỊ THẾ`);gan('#so-lenh',`${os.length} LỆNH`);
+ $('#danh-sach-vi-the').innerHTML=ps.length?ps.map(p=>`<div class="the-tai-san"><div class="hang-tai-san"><div><strong>${p.Symbol||p.symbol||'—'}</strong><small>${p.InstID||p.inst_id||''}</small></div><span class="huy-hieu dat">ĐANG NẮM GIỮ</span></div><div class="luoi-nho"><div><span>Số lượng</span><b>${so(p.Quantity??p.quantity,8)}</b></div><div><span>Giá vốn</span><b>${tien(p.AvgEntryPrice??p.avg_entry_price)}</b></div><div><span>Giá trị vốn</span><b>${tien(p.CostBasis??p.cost_basis)} USDT</b></div><div><span>Cập nhật</span><b>${tg((p.UpdatedAt??p.updated_at)*1000)}</b></div></div></div>`).join(''):'<div class="rong">Không có vị thế</div>';
+ $('#danh-sach-lenh').innerHTML=os.length?os.map(o=>`<div class="the-tai-san"><div class="hang-tai-san"><strong>${o.Symbol||o.symbol||'—'}</strong><span class="huy-hieu">${dich(o.Status||o.status)}</span></div><p class="ly-do">${o.Side||o.side||'—'} · ${o.Type||o.type||'—'} · ${tien(o.Notional||o.notional)} USDT</p></div>`).join(''):'<div class="rong">Không có lệnh live đang mở</div>';
+}
+function veVanHanh(x){const d=x.du_lieu||{}, hb=d.nhip_song?.du_lieu||{}, doc=d.kiem_tra_he_thong?.du_lieu||{}, rec=d.doi_soat?.du_lieu||{}, p=d.phien_ban||{};gan('#vh-scheduler',dich(hb.status));gan('#vh-supervisor',hb.live_supervisor_enabled?'Đang bật':'Đang tắt');gan('#vh-doctor',dich(doc.status));gan('#vh-doi-soat',(rec.unknown||0)===0?'Sạch':'Cần kiểm tra');gan('#phien-ban',p.ten);gan('#commit',p.commit);gan('#build-luc',p.thoi_gian_build)}
+$$('.dieu-huong-day button').forEach(b=>b.addEventListener('click',()=>{$$('.dieu-huong-day button').forEach(x=>x.classList.toggle('active',x===b));$$('.trang').forEach(t=>{const hien=t.dataset.trang===b.dataset.den;t.hidden=!hien;t.classList.toggle('active',hien)});scrollTo({top:0,behavior:'smooth'})}));
+$('#lam-moi').addEventListener('click',()=>{nap();thongBao('Đang làm mới dữ liệu')});
+const hop=$('#xac-nhan-halt');$('#yeu-cau-halt').addEventListener('click',()=>hop.showModal());$('#xac-nhan-dung').addEventListener('click',async e=>{e.preventDefault();const reason=$('#ly-do-halt').value.trim();if(reason.length<8){thongBao('Lý do cần ít nhất 8 ký tự');return}try{const r=await fetch('/api/operator/halt',{method:'POST',headers:{'X-Operator-Confirm':'HALT','X-Operator-Reason':reason}});if(!r.ok)throw Error();hop.close();thongBao('Đã bật lệnh dừng giao dịch');nap()}catch{thongBao('Không thể thực hiện lệnh dừng giao dịch')}});
+nap();setInterval(()=>{if(!document.hidden)nap()},30000);

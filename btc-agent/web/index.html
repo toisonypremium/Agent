@@ -2,56 +2,97 @@
 <html lang="vi">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="BTC Agent production operations dashboard">
-  <meta name="theme-color" content="#020617">
-  <title>BTC Agent / Control Center</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="description" content="Trung tâm điều hành và giám sát BTC Agent bằng tiếng Việt">
+  <meta name="theme-color" content="#07101f">
+  <title>BTC Agent — Trung tâm điều hành</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/web/index.css">
 </head>
 <body>
-  <a class="skip-link" href="#main-content">Bỏ qua điều hướng</a>
-  <div class="app-shell">
-    <aside class="sidebar" aria-label="Điều hướng chính">
-      <div class="brand"><span class="brand-mark" aria-hidden="true">B</span><span><strong>BTC Agent</strong><small>CONTROL CENTER</small></span></div>
-      <nav class="nav-list">
-        <a class="nav-item active" href="#overview" aria-current="page"><span class="icon">⌁</span>Tổng quan</a>
-        <a class="nav-item" href="#market"><span class="icon">◌</span>Thị trường</a>
-        <a class="nav-item" href="#execution"><span class="icon">⇄</span>Execution</a>
-        <a class="nav-item" href="#risk"><span class="icon">◇</span>Risk &amp; Capital</a>
-        <a class="nav-item" href="#operations"><span class="icon">▦</span>Vận hành</a>
-      </nav>
-      <div class="sidebar-footer"><span class="pulse-dot"></span><span>Live monitoring</span><span class="version">v—</span></div>
-    </aside>
-    <main id="main-content" class="main-content">
-      <header class="topbar">
-        <div><p class="eyebrow">PRODUCTION / READINESS</p><h1>Control Center</h1></div>
-        <div class="top-actions"><span class="connection"><span class="pulse-dot"></span>VPS connected</span><button class="icon-button" id="refresh-button" aria-label="Làm mới dữ liệu" title="Làm mới">↻</button><button class="avatar" aria-label="Tài khoản operator">A</button></div>
-      </header>
-      <section id="overview" class="hero-panel panel-grid">
-        <div><div class="status-label"><span class="status-orb blocked"></span><span id="authority-label">CURRENT AUTHORITY / BLOCKED</span></div><h2>Monitoring ổn định.<br><em>Execution đang bị khóa đúng policy.</em></h2><p class="hero-copy">Market gate chưa đạt điều kiện mở lệnh. Hệ thống tiếp tục quan sát, reconcile và fail-closed.</p><div class="hero-actions"><button class="btn btn-danger" data-action="halt">Yêu cầu operator halt</button><button class="btn btn-ghost" data-action="audit">Chạy live audit</button></div></div>
-        <div class="hero-telemetry"><div class="telemetry-head"><span>RUNTIME TELEMETRY</span><span class="live-tag"><span class="pulse-dot"></span>LIVE</span></div><div class="sparkline" aria-label="Biểu đồ mô phỏng heartbeat ổn định"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div><div class="telemetry-foot"><span>Heartbeat age</span><strong id="heartbeat-age">—</strong></div></div>
-      </section>
-      <section class="metric-grid" aria-label="Chỉ số hệ thống">
-        <article class="metric-card"><span class="metric-kicker">SERVICE</span><strong class="metric-value good" id="service-status">ACTIVE</strong><span class="metric-meta" id="service-meta">Scheduler running</span></article>
-        <article class="metric-card"><span class="metric-kicker">OPEN ORDERS</span><strong class="metric-value" id="open-orders">0</strong><span class="metric-meta">Reconcile clean</span></article>
-        <article class="metric-card"><span class="metric-kicker">EXECUTABLE NOW</span><strong class="metric-value" id="executable-capital">0.00 <small>USDT</small></strong><span class="metric-meta">Blocked by market gate</span></article>
-        <article class="metric-card"><span class="metric-kicker">RISK GOVERNOR</span><strong class="metric-value warn" id="risk-status">WARN</strong><span class="metric-meta">No hard blocker</span></article>
-      </section>
-      <div class="content-grid">
-        <section id="market" class="panel market-panel"><div class="section-head"><div><p class="eyebrow">MARKET AUTHORITY</p><h3>BTC gate &amp; asset readiness</h3></div><button class="text-button" data-action="market-watch">Refresh market <span>↗</span></button></div><div class="gate-row"><div class="gate-icon btc">₿</div><div class="gate-main"><strong>BTC / USDT</strong><span>RANGE · MARKDOWN</span></div><div class="gate-state"><strong>WATCH</strong><span>Permission</span></div><div class="gate-score"><strong>28.8</strong><span>Trend score</span></div></div><div class="readiness-list"><div class="readiness-row"><span class="asset-name">ETHUSDT</span><div class="progress-track"><span style="width:50%"></span></div><span class="readiness-value">50%</span><span class="tag amber">WATCH</span></div><div class="readiness-row"><span class="asset-name">RENDERUSDT</span><div class="progress-track"><span style="width:50%"></span></div><span class="readiness-value">50%</span><span class="tag slate">SCOUT</span></div><div class="readiness-row"><span class="asset-name">SOLUSDT</span><div class="progress-track"><span style="width:43%"></span></div><span class="readiness-value">43%</span><span class="tag amber">WATCH</span></div></div></section>
-        <section id="execution" class="panel execution-panel"><div class="section-head"><div><p class="eyebrow">EXECUTION EVIDENCE</p><h3>Safety pipeline</h3></div><span class="tag green">FAIL-CLOSED</span></div><div class="pipeline"><div class="pipeline-step pass"><span>01</span><div><strong>Doctor</strong><small>Credentials &amp; runtime</small></div><b>PASS</b></div><div class="pipeline-step pass"><span>02</span><div><strong>Data health</strong><small>9 checks / 0 blockers</small></div><b>PASS</b></div><div class="pipeline-step pass"><span>03</span><div><strong>Forced simulation</strong><small>0 exchange calls</small></div><b>PASS</b></div><div class="pipeline-step block"><span>04</span><div><strong>Market authority</strong><small>BTC not confirmed</small></div><b>BLOCK</b></div></div></section>
+<a class="bo-qua" href="#noi-dung">Bỏ qua điều hướng</a>
+<header class="dau-trang">
+  <div class="thuong-hieu"><span class="dau-b">B</span><span><strong>BTC Agent</strong><small>TRUNG TÂM ĐIỀU HÀNH</small></span></div>
+  <div class="trang-thai-ket-noi"><span class="cham-song"></span><span id="ket-noi">Đang kết nối</span></div>
+  <button class="nut-bieu-tuong" id="lam-moi" aria-label="Làm mới dữ liệu" title="Làm mới dữ liệu">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+  </button>
+</header>
+<main id="noi-dung">
+  <section class="canh-bao-quyen" id="the-quyen">
+    <div><span class="nhan-tren">QUYỀN THỰC THI HIỆN TẠI</span><h1 id="quyen-thuc-thi">Đang kiểm tra</h1><p id="ly-do-quyen">Đang đọc trạng thái production…</p></div>
+    <span class="huy-hieu canh-bao" id="ma-quyen">CHỜ</span>
+  </section>
+
+  <section class="trang active" id="trang-tong-quan" data-trang="tong-quan">
+    <div class="tieu-de-muc"><div><span class="nhan-tren">TỔNG QUAN PRODUCTION</span><h2>Tình hình hiện tại</h2></div><time id="cap-nhat-luc">—</time></div>
+    <div class="luoi-so-lieu">
+      <article class="the-so-lieu noi-bat"><span>Tổng tài sản vận hành</span><strong id="tong-tai-san">—</strong><small>USDT · số liệu vận hành</small></article>
+      <article class="the-so-lieu"><span>Giá trị vị thế</span><strong id="gia-tri-vi-the">—</strong><small>USDT đang nắm giữ</small></article>
+      <article class="the-so-lieu"><span>Có thể giải ngân ngay</span><strong id="giai-ngan-ngay">—</strong><small>USDT sau toàn bộ gate</small></article>
+      <article class="the-so-lieu"><span>Lệnh đang mở</span><strong id="lenh-dang-mo">—</strong><small>Trên sàn giao dịch</small></article>
+    </div>
+    <article class="bang dieu-kien">
+      <div class="tieu-de-the"><div><span class="nhan-tren">CHUỖI AN TOÀN</span><h3>Điều kiện thực thi</h3></div><span class="huy-hieu" id="doctor-tong">ĐANG ĐỌC</span></div>
+      <div class="dong-dieu-kien"><span class="so-buoc">01</span><div><strong>Kiểm tra hệ thống</strong><small>Thông tin xác thực, runtime và dữ liệu</small></div><b id="doctor">—</b></div>
+      <div class="dong-dieu-kien"><span class="so-buoc">02</span><div><strong>Đối soát lệnh</strong><small>So sánh ledger với sàn giao dịch</small></div><b id="doi-soat">—</b></div>
+      <div class="dong-dieu-kien"><span class="so-buoc">03</span><div><strong>Quyền thị trường BTC</strong><small>Regime, permission và tích lũy</small></div><b id="gate-btc">—</b></div>
+      <div class="dong-dieu-kien"><span class="so-buoc">04</span><div><strong>Giới hạn rủi ro</strong><small>Vốn, thanh khoản và lệnh post-only</small></div><b id="rui-ro-tong">—</b></div>
+    </article>
+    <article class="bang">
+      <div class="tieu-de-the"><div><span class="nhan-tren">LỊCH HỆ THỐNG</span><h3>Nhịp vận hành</h3></div><span class="cham-song"></span></div>
+      <div class="danh-sach-thong-tin">
+        <div><span>Trạng thái scheduler</span><strong id="scheduler">—</strong></div>
+        <div><span>Sự kiện gần nhất</span><strong id="su-kien-gan">—</strong></div>
+        <div><span>Chu kỳ supervisor tiếp theo</span><strong id="chu-ky-tiep">—</strong></div>
+        <div><span>Độ cũ heartbeat</span><strong id="do-cu-heartbeat">—</strong></div>
       </div>
-      <div class="content-grid lower-grid">
-        <section id="risk" class="panel"><div class="section-head"><div><p class="eyebrow">RISK &amp; CAPITAL</p><h3>Exposure envelope</h3></div><span class="tag green">WITHIN CAPS</span></div><div class="allocation"><div class="donut"><span>0%</span></div><div class="allocation-legend"><div><span class="legend-dot reserve"></span><span>Reserve</span><strong>163.75</strong></div><div><span class="legend-dot available"></span><span>Available</span><strong>2,177.88</strong></div><div><span class="legend-dot committed"></span><span>Committed</span><strong>0.00</strong></div></div></div></section>
-        <section id="operations" class="panel ops-panel"><div class="section-head"><div><p class="eyebrow">OPERATIONS</p><h3>Latest events</h3></div><button class="text-button" data-action="events">View all <span>↗</span></button></div><div class="event-list"><div class="event"><span class="event-dot green"></span><div><strong>Scheduler heartbeat healthy</strong><small>live-auto · 20 seconds ago</small></div><span class="event-code">OK</span></div><div class="event"><span class="event-dot amber"></span><div><strong>Market authority remains blocked</strong><small>BTC MARKDOWN · 1 minute ago</small></div><span class="event-code">GATE</span></div><div class="event"><span class="event-dot green"></span><div><strong>Reconciliation completed cleanly</strong><small>0 open orders · 2 minutes ago</small></div><span class="event-code">SAFE</span></div></div></section>
-      </div>
-      <footer class="footer"><span>BTC Agent Control Center</span><span id="last-updated">Last updated —</span><span>Read-only by default · No order authority</span></footer>
-    </main>
-  </div>
-  <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="/web/app.js"></script>
+    </article>
+  </section>
+
+  <section class="trang" id="trang-von" data-trang="von" hidden>
+    <div class="tieu-de-muc"><div><span class="nhan-tren">VỐN VÀ PHÂN BỔ</span><h2>Bức tranh tài chính</h2></div></div>
+    <div class="luoi-so-lieu">
+      <article class="the-so-lieu noi-bat"><span>Tổng tài sản vận hành</span><strong id="von-tong">—</strong><small>USDT · ledger và số dư vận hành</small></article>
+      <article class="the-so-lieu"><span>Vốn cấu hình chiến lược</span><strong id="von-cau-hinh">—</strong><small>USDT · không phải số dư thực tế</small></article>
+      <article class="the-so-lieu"><span>Tiền mặt dự phòng</span><strong id="von-du-phong">—</strong><small>USDT chưa phân bổ</small></article>
+      <article class="the-so-lieu"><span>Dung lượng chu kỳ còn lại</span><strong id="von-con-lai">—</strong><small>USDT trước market gate</small></article>
+    </div>
+    <div class="ghi-chu-von"><strong>Vì sao có nhiều số vốn?</strong><p>Tài sản vận hành phản ánh ledger và vị thế thật. Vốn cấu hình là quy mô chiến lược. Kế hoạch nghiên cứu chỉ dùng đánh giá cơ hội, không cấp quyền đặt lệnh.</p></div>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">SỬ DỤNG VỐN</span><h3>Cơ cấu hiện tại</h3></div><b id="ty-le-su-dung">—</b></div><div class="thanh-von"><i id="thanh-vi-the"></i><i id="thanh-du-phong"></i></div><div class="chu-giai"><span><i class="mau vi-the"></i>Vị thế</span><span><i class="mau du-phong"></i>Dự phòng</span><span><i class="mau trong"></i>Còn lại</span></div></article>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">TỪNG TÀI SẢN</span><h3>Phân bổ và dư địa</h3></div></div><div id="danh-sach-von" class="danh-sach-the"><div class="khung-xuong"></div></div></article>
+  </section>
+
+  <section class="trang" id="trang-thi-truong" data-trang="thi-truong" hidden>
+    <div class="tieu-de-muc"><div><span class="nhan-tren">THỊ TRƯỜNG</span><h2>BTC và tài sản theo dõi</h2></div></div>
+    <article class="bang btc-panel"><div class="btc-dau"><span class="dong-btc">₿</span><div><strong>BTC / USDT</strong><small id="btc-bo-ba">—</small></div><strong id="gia-btc">—</strong></div><div class="luoi-chi-tiet"><div><span>Điểm xu hướng</span><b id="diem-xu-huong">—</b></div><div><span>Điểm tích lũy</span><b id="diem-tich-luy">—</b></div><div><span>Hỗ trợ chính</span><b id="ho-tro-btc">—</b></div><div><span>Vùng vô hiệu</span><b id="vo-hieu-btc">—</b></div></div><div class="kich-ban"><span>Kịch bản chính</span><p id="kich-ban-chinh">—</p><span>Điều kiện mở khóa</span><p id="mo-khoa">—</p></div></article>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">DANH SÁCH THEO DÕI</span><h3>Điểm, thanh khoản và blocker</h3></div></div><div id="danh-sach-tai-san" class="danh-sach-the"><div class="khung-xuong"></div></div></article>
+  </section>
+
+  <section class="trang" id="trang-vi-the" data-trang="vi-the" hidden>
+    <div class="tieu-de-muc"><div><span class="nhan-tren">SỔ CÁI GIAO DỊCH</span><h2>Vị thế và lệnh</h2></div></div>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">VỊ THẾ</span><h3>Tài sản đang nắm giữ</h3></div><span class="huy-hieu" id="so-vi-the">—</span></div><div id="danh-sach-vi-the" class="danh-sach-the"><div class="khung-xuong"></div></div></article>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">LỆNH</span><h3>Lệnh live đang mở</h3></div><span class="huy-hieu" id="so-lenh">—</span></div><div id="danh-sach-lenh" class="danh-sach-the"><div class="khung-xuong"></div></div></article>
+  </section>
+
+  <section class="trang" id="trang-van-hanh" data-trang="van-hanh" hidden>
+    <div class="tieu-de-muc"><div><span class="nhan-tren">VẬN HÀNH VÀ AN TOÀN</span><h2>Sức khỏe hệ thống</h2></div></div>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">DỊCH VỤ</span><h3>Trạng thái môi trường thật</h3></div><span class="huy-hieu dat">ĐANG CHẠY</span></div><div class="danh-sach-thong-tin"><div><span>Trang điều hành</span><strong>Đang hoạt động</strong></div><div><span>Bộ lập lịch</span><strong id="vh-scheduler">—</strong></div><div><span>Bộ giám sát</span><strong id="vh-supervisor">—</strong></div><div><span>Kiểm tra hệ thống</span><strong id="vh-doctor">—</strong></div><div><span>Đối soát</span><strong id="vh-doi-soat">—</strong></div></div></article>
+    <article class="bang"><div class="tieu-de-the"><div><span class="nhan-tren">PHIÊN BẢN</span><h3>Thông tin phát hành</h3></div></div><div class="danh-sach-thong-tin"><div><span>Tên phiên bản</span><strong id="phien-ban">—</strong></div><div><span>Commit</span><strong id="commit">—</strong></div><div><span>Thời gian build</span><strong id="build-luc">—</strong></div></div></article>
+    <article class="bang khu-vuc-nguy-hiem"><div class="tieu-de-the"><div><span class="nhan-tren">ĐIỀU KHIỂN KHẨN CẤP</span><h3>Dừng quyền giao dịch</h3></div></div><p>Operator halt chỉ khóa quyền giao dịch. Không hủy vị thế và không thể resume từ web.</p><button class="nut-nguy-hiem" id="yeu-cau-halt">Yêu cầu dừng giao dịch</button></article>
+  </section>
+</main>
+<nav class="dieu-huong-day" aria-label="Điều hướng chính">
+  <button class="active" data-den="tong-quan"><svg viewBox="0 0 24 24"><path d="M4 13h6V4H4v9Zm0 7h6v-4H4v4Zm10 0h6v-9h-6v9Zm0-16v4h6V4h-6Z"/></svg><span>Tổng quan</span></button>
+  <button data-den="von"><svg viewBox="0 0 24 24"><path d="M4 7h16v12H4zM16 13h4M7 7V5h10v2"/></svg><span>Vốn</span></button>
+  <button data-den="thi-truong"><svg viewBox="0 0 24 24"><path d="m4 17 5-5 4 3 7-8M16 7h4v4"/></svg><span>Thị trường</span></button>
+  <button data-den="vi-the"><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 10h16M8 14h3"/></svg><span>Vị thế</span></button>
+  <button data-den="van-hanh"><svg viewBox="0 0 24 24"><path d="M12 3v4m0 10v4M3 12h4m10 0h4M5.6 5.6l2.8 2.8m7.2 7.2 2.8 2.8m0-12.8-2.8 2.8m-7.2 7.2-2.8 2.8"/><circle cx="12" cy="12" r="4"/></svg><span>Vận hành</span></button>
+</nav>
+<div class="thong-bao" id="thong-bao" role="status" aria-live="polite"></div>
+<dialog id="xac-nhan-halt"><form method="dialog"><span class="nhan-tren">XÁC NHẬN KHẨN CẤP</span><h2>Dừng quyền giao dịch?</h2><p>Hành động này bật operator halt và được ghi vào nhật ký. Web không cung cấp chức năng khôi phục.</p><label for="ly-do-halt">Lý do</label><textarea id="ly-do-halt" rows="3" minlength="8" placeholder="Nhập lý do cụ thể"></textarea><div class="nut-dialog"><button value="huy">Hủy</button><button value="xac-nhan" id="xac-nhan-dung" class="nut-nguy-hiem">Xác nhận dừng</button></div></form></dialog>
+<script src="/web/app.js"></script>
 </body>
 </html>

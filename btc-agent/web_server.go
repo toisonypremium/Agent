@@ -32,6 +32,7 @@ func runWeb(ctx context.Context, cfg config.Config, db *storage.DB, args []strin
 		listen = "127.0.0.1:20129"
 	}
 	mux := http.NewServeMux()
+	registerWebDataAPI(mux, cfg, db)
 	mux.HandleFunc("/api/health", webHealth)
 	mux.HandleFunc("/api/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {

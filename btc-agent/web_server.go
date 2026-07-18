@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"btc-agent/internal/config"
@@ -41,32 +40,12 @@ func runWeb(ctx context.Context, cfg config.Config, db *storage.DB, args []strin
 		}
 		writeWebJSON(w, buildWebSnapshot(cfg, db))
 	})
-	mux.HandleFunc("/api/operator/halt", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		if r.Header.Get("X-Operator-Confirm") != "HALT" {
-			http.Error(w, "explicit confirmation required", http.StatusBadRequest)
-			return
-		}
-		reason := strings.TrimSpace(r.Header.Get("X-Operator-Reason"))
-		if reason == "" {
-			http.Error(w, "reason required", http.StatusBadRequest)
-			return
-		}
-		now := time.Now().UTC()
-		payload, _ := json.Marshal(map[string]string{"reason": reason})
-		if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Timestamp: now, Source: "web-control-plane", Type: "operator_halt_request", Severity: "critical", Fingerprint: "web-halt:" + now.Format("20060102150405"), PayloadJSON: string(payload)}); err != nil {
-			http.Error(w, "audit failed", http.StatusInternalServerError)
-			return
-		}
-		if err := db.SetHaltStatus(true); err != nil {
-			http.Error(w, "halt failed", http.StatusInternalServerError)
-			return
-		}
-		writeWebJSON(w, map[string]any{"status": "HALTED", "reason": reason, "at": now})
-	})
+	operatorSecurity, err := newWebOperatorSecurity()
+	if err != nil {
+		return fmt.Errorf("initialize web operator security: %w", err)
+	}
+	mux.HandleFunc("/api/operator/session", operatorSecurity.session)
+	mux.HandleFunc("/api/operator/halt", operatorSecurity.halt(db))
 	mux.Handle("/web/", http.StripPrefix("/web/", http.FileServer(http.Dir("web"))))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/dashboard" || r.URL.Path == "/dashboard/" {

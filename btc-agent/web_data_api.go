@@ -87,9 +87,23 @@ func registerWebDataAPI(mux *http.ServeMux, cfg config.Config, db *storage.DB) {
 		}
 	})
 	registerWebGET(mux, "/api/v1/hermes", func() any {
+		management := loadWebReport("hermes_report_latest.json", 90*time.Minute)
+		shadow := loadWebReport("hermes_shadow_decision_latest.json", 35*time.Minute)
+		warnings := []string{}
+		if management.CapNhatLuc.IsZero() {
+			warnings = append(warnings, "báo cáo quản lý Hermes chưa có thời điểm cập nhật")
+		}
+		if shadow.CapNhatLuc.IsZero() {
+			warnings = append(warnings, "quyết định bóng Hermes chưa có thời điểm cập nhật")
+		}
+		if !management.CapNhatLuc.IsZero() && !shadow.CapNhatLuc.IsZero() && shadow.CapNhatLuc.After(management.CapNhatLuc) {
+			warnings = append(warnings, "báo cáo quản lý Hermes cũ hơn quyết định bóng mới nhất")
+		}
 		return map[string]any{
-			"bao_cao_quan_ly":     loadWebReport("hermes_report_latest.json", 90*time.Minute),
-			"quyet_dinh_bong":     loadWebReport("hermes_shadow_decision_latest.json", 35*time.Minute),
+			"bao_cao_quan_ly":  management,
+			"quyet_dinh_bong":  shadow,
+			"canh_bao_do_tuoi": warnings,
+
 			"bo_giam_sat":         loadWebReport("live_supervisor_latest.json", 35*time.Minute),
 			"bang_quyet_dinh":     loadWebReport("decision_dashboard_latest.json", 35*time.Minute),
 			"trang_thai_bot":      loadWebReport("bot_state_latest.json", 35*time.Minute),

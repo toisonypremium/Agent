@@ -28,15 +28,17 @@ func TestAcquireSchedulerProcessLockCreatesAndReleasesLock(t *testing.T) {
 	}
 }
 
-func TestAcquireSchedulerProcessLockBlocksLivePID(t *testing.T) {
+func TestAcquireSchedulerProcessLockBlocksSecondHandle(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "scheduler.lock")
 	t.Setenv("BTC_AGENT_SCHEDULER_LOCK_FILE", path)
-	if err := os.WriteFile(path, []byte(strconv.Itoa(os.Getpid())+"\n"), 0600); err != nil {
+	release, err := acquireSchedulerProcessLock()
+	if err != nil {
 		t.Fatal(err)
 	}
-	_, err := acquireSchedulerProcessLock()
+	defer release()
+	_, err = acquireSchedulerProcessLock()
 	if err == nil {
-		t.Fatal("expected lock acquire error for live pid")
+		t.Fatal("expected lock acquire error for second handle")
 	}
 	if !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("unexpected error: %v", err)

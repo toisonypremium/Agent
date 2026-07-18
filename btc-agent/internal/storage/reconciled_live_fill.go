@@ -132,6 +132,13 @@ func (d *DB) ApplyReconciledLiveFill(event live.LivePositionEvent, snapshot live
 			}
 		}
 	}
+	evaluatedAt := time.Now().UTC()
+	if event.Timestamp > 0 {
+		evaluatedAt = time.Unix(event.Timestamp, 0).UTC()
+	}
+	if err := projectThesisPositionLifecycleTx(tx, pos, event.Side, evaluatedAt); err != nil {
+		return live.LivePosition{}, false, err
+	}
 	if err := tx.Commit(); err != nil {
 		return live.LivePosition{}, false, err
 	}

@@ -2,6 +2,8 @@ package storage
 
 import (
 	"database/sql"
+
+	"btc-agent/internal/exchange/live"
 	"encoding/json"
 	"fmt"
 	"math"
@@ -152,4 +154,57 @@ func (d *DB) ThesisPositionLifecycleByID(id string) (ThesisPositionLifecycle, er
 		v.LastEvaluatedAt = time.Unix(evaluated, 0).UTC()
 	}
 	return v, ValidateThesisPositionLifecycle(v)
+}
+
+func projectThesisPositionLifecycleTx(tx *sql.Tx, pos live.LivePosition, side string, evaluatedAt time.Time) error {
+	thesisID := strings.TrimSpace(pos.ThesisID)
+	if thesisID == "" {
+		return nil
+	}
+	var current ThesisPositionLifecycle
+	var opened, evaluated int64
+	err := tx.QueryRow(`SELECT thesis_id,symbol,state,invalidation_price,primary_target_price,protection_price,position_quantity,avg_entry_price,opened_at,last_evaluated_at,version FROM thesis_position_lifecycles WHERE thesis_id=?`, thesisID).Scan(&current.ThesisID, &current.Symbol, &current.State, &current.InvalidationPrice, &current.PrimaryTargetPrice, &current.ProtectionPrice, &current.PositionQuantity, &current.AvgEntryPrice, &opened, &evaluated, &current.Version)
+	found := err == nil
+	if err != nil && err != sql.ErrNoRows {
+		return err
+	}
+	if found && current.Symbol != strings.ToUpper(pos.Symbol) {
+		return fmt.Errorf("lifecycle position symbol conflict: lifecycle=%s position=%s", current.Symbol, pos.Symbol)
+	}
+	if !found {
+		current = ThesisPositionLifecycle{ThesisID: thesisID, Symbol: strings.ToUpper(pos.Symbol), State: ThesisPositionOpen, Version: 1}
+	}
+	if opened > 0 {
+		current.OpenedAt = time.Unix(opened, 0).UTC()
+	}
+	if current.OpenedAt.IsZero() && pos.OpenedAt > 0 {
+		current.OpenedAt = time.Unix(pos.OpenedAt, 0).UTC()
+	}
+	current.PositionQuantity = pos.Quantity
+	current.AvgEntryPrice = pos.AvgEntryPrice
+	current.LastEvaluatedAt = evaluatedAt.UTC()
+	next := current.State
+	if pos.Quantity <= 1e-12 {
+		next = ThesisPositionClosed
+		current.PositionQuantity = 0
+		current.AvgEntryPrice = 0
+	} else if !found {
+		if strings.EqualFold(side, "BUY") {
+			next = ThesisPositionProbeOpen
+		} else {
+			next = ThesisPositionOpen
+		}
+	} else if current.State == ThesisPositionProbeOpen && strings.EqualFold(side, "BUY") {
+		next = ThesisPositionAccumulating
+	}
+	if found && !validThesisPositionTransition(current.State, next) {
+		return fmt.Errorf("fill projection cannot transition lifecycle %s to %s", current.State, next)
+	}
+	current.State = next
+	if err := ValidateThesisPositionLifecycle(current); err != nil {
+		return err
+	}
+	payload, _ := json.Marshal(current)
+	_, err = tx.Exec(`INSERT INTO thesis_position_lifecycles(thesis_id,symbol,state,invalidation_price,primary_target_price,protection_price,position_quantity,avg_entry_price,opened_at,last_evaluated_at,version,payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(thesis_id) DO UPDATE SET state=excluded.state,position_quantity=excluded.position_quantity,avg_entry_price=excluded.avg_entry_price,opened_at=excluded.opened_at,last_evaluated_at=excluded.last_evaluated_at,version=thesis_position_lifecycles.version+1,payload_json=excluded.payload_json`, current.ThesisID, current.Symbol, current.State, current.InvalidationPrice, current.PrimaryTargetPrice, current.ProtectionPrice, current.PositionQuantity, current.AvgEntryPrice, current.OpenedAt.Unix(), current.LastEvaluatedAt.Unix(), current.Version, string(payload))
+	return err
 }

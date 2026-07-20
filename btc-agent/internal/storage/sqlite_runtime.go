@@ -114,6 +114,11 @@ func (d *DB) ClaimOutbox(ctx context.Context, now time.Time, limit int) ([]outbo
 		return nil, err
 	}
 	defer tx.Rollback()
+	staleBefore := now.Add(-5 * time.Minute).Unix()
+	_, err = tx.ExecContext(ctx, `UPDATE outbox_events SET status=?, next_retry_at=?, updated_at=? WHERE status=? AND updated_at<=?`, outbox.StatusPending, now.Unix(), now.Unix(), outbox.StatusProcessing, staleBefore)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := tx.QueryContext(ctx, `SELECT id,event_type,destination,payload,idempotency_key,status,retry_count,next_retry_at,last_error,created_at FROM outbox_events WHERE status=? AND next_retry_at<=? ORDER BY created_at LIMIT ?`, outbox.StatusPending, now.Unix(), limit)
 	if err != nil {
 		return nil, err

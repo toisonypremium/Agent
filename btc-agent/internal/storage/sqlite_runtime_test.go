@@ -67,3 +67,38 @@ func TestSQLiteOutboxIdempotencyClaimAndRetry(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestSQLiteOutboxProcessingIsRecoverable(t *testing.T) {
+	db, err := Open(t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	i := outbox.Item{ID: "crash-1", EventType: "heartbeat", Destination: "supabase", Payload: []byte("{}"), IdempotencyKey: "crash-1", CreatedAt: now}
+	if err = db.EnqueueOutbox(ctx, i); err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := db.ClaimOutbox(ctx, now, 1)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("claim=%v %v", claimed, err)
+	}
+	if _, err = db.ExecContext(ctx, `UPDATE outbox_events SET status=? WHERE id=?`, outbox.StatusProcessing, i.ID); err != nil {
+		t.Fatal(err)
+	}
+	active, err := db.ClaimOutbox(ctx, now.Add(4*time.Minute), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(active) != 0 {
+		t.Fatalf("active processing row must not be stolen: %v", active)
+	}
+	recovered, err := db.ClaimOutbox(ctx, now.Add(6*time.Minute), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(recovered) != 1 {
+		t.Fatalf("stale processing row should recover: %v", recovered)
+	}
+}

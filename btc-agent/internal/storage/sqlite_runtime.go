@@ -66,7 +66,7 @@ func (d *DB) RenewExecutionLease(ctx context.Context, lease ownership.Lease, now
 }
 
 func (d *DB) ReleaseExecutionLease(ctx context.Context, lease ownership.Lease) error {
-	_, err := d.ExecContext(ctx, `DELETE FROM execution_leases WHERE name=? AND instance_id=? AND fencing_token=?`, lease.Name, lease.InstanceID, lease.FencingToken)
+	_, err := d.ExecContext(ctx, `UPDATE execution_leases SET expires_at=0 WHERE name=? AND instance_id=? AND fencing_token=?`, lease.Name, lease.InstanceID, lease.FencingToken)
 	return err
 }
 

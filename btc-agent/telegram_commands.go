@@ -334,7 +334,7 @@ func telegramCommandFreeAPI(sources bool) string {
 		}
 		return b.String()
 	}
-	return fmt.Sprintf("HERMES — MACRO / SENTIMENT / FX\nGlobal cap: %.0f USD\nGlobal volume: %.0f USD\nBTC dominance: %.2f%%\nFear & Greed: %d (%s)\nEUR/USD: %.5f\nNews items: %d\nFree API chỉ là context; không tự tạo hard block hay order authority.", r.GlobalMarketCapUSD, r.GlobalVolumeUSD, r.BTCDominancePct, r.FearGreedValue, r.FearGreedLabel, r.EURUSD, len(r.News))
+	return fmt.Sprintf("HERMES — MACRO / SENTIMENT / FX\nGlobal cap: %.0f USD\nGlobal volume: %.0f USD\nBTC dominance: %.2f%%\nFear & Greed: %d (%s)\nEUR/USD: %.5f\n%s funding: %.6f%%\n%s open interest: %.0f USD\nDeFi TVL: %.0f USD\nNews items: %d\nFree API chỉ là context; không tự tạo hard block hay order authority.", r.GlobalMarketCapUSD, r.GlobalVolumeUSD, r.BTCDominancePct, r.FearGreedValue, r.FearGreedLabel, r.EURUSD, r.DerivativesSymbol, r.FundingRate*100, r.DerivativesSymbol, r.OpenInterestUSD, r.DeFiTVLUSD, len(r.News))
 }
 
 func hermesTelegramMenuText(cfg config.Config) string {

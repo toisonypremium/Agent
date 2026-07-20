@@ -44,8 +44,10 @@ func RunLiveManagerSimulation(cfg config.Config) LiveManagerSimulationResult {
 		simScenario("ACTIVE_LIMIT single asset places layers", "would place ETH layers or block ETH only if D-grade", cfg, simPlan("ETHUSDT"), nil, func(r ManagedCycleResult) bool {
 			return (len(r.Placed) >= 1 || blockedSymbolReason(r, "ETHUSDT", "live quality filter blocked D-grade coin")) && len(r.Canceled) == 0
 		}),
-		simScenario("ACTIVE_LIMIT multi asset places multiple coins", "would place/probe ETH/SOL or block D-grade coins", cfg, simPlan("ETHUSDT", "SOLUSDT"), nil, func(r ManagedCycleResult) bool {
-			return placedSymbol(r, "ETHUSDT") && (placedSymbol(r, "SOLUSDT") || blockedSymbolReason(r, "SOLUSDT", "live quality filter blocked D-grade coin"))
+		simScenario("ACTIVE_LIMIT multi asset respects first-order quarantine", "places one ranked asset and quarantines the remaining asset, or blocks it by live quality", cfg, simPlan("ETHUSDT", "SOLUSDT"), nil, func(r ManagedCycleResult) bool {
+			ethHandled := placedSymbol(r, "ETHUSDT") || blockedByLiveQuality(r, "ETHUSDT") || blockedSymbolReason(r, "ETHUSDT", "first-order quarantine: only one live order allowed until first order is reviewed")
+			solHandled := placedSymbol(r, "SOLUSDT") || blockedByLiveQuality(r, "SOLUSDT") || blockedSymbolReason(r, "SOLUSDT", "first-order quarantine: only one live order allowed until first order is reviewed")
+			return len(r.Placed) == 1 && ethHandled && solHandled && blockedByReason(r, "first-order quarantine: only one live order allowed until first order is reviewed")
 		}),
 		simScenario("Matching open order is kept", "keeps matching ETH layer unless ETH is D-grade blocked", cfg, simPlan("ETHUSDT"), []live.OrderStatus{simOpen("ETHUSDT", 1, 100)}, func(r ManagedCycleResult) bool {
 			return (len(r.Kept) == 1 && len(r.Canceled) == 0) || (len(r.Canceled) == 1 && blockedSymbolReason(r, "ETHUSDT", "live quality filter blocked D-grade coin"))
@@ -176,6 +178,15 @@ func placedOrBlockedByLiveQuality(r ManagedCycleResult, symbol string) bool {
 
 func blockedByLiveQuality(r ManagedCycleResult, symbol string) bool {
 	return blockedSymbolReason(r, symbol, "live quality filter blocked D-grade coin") || blockedSymbolReason(r, symbol, "live quality filter blocked NO_SAMPLE coin")
+}
+
+func blockedByReason(r ManagedCycleResult, reason string) bool {
+	for _, b := range r.Blocked {
+		if b.Reason == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func blockedSymbolReason(r ManagedCycleResult, symbol, reason string) bool {

@@ -12,6 +12,8 @@ import (
 	"btc-agent/internal/market"
 )
 
+const managedExchangeTimeout = 10 * time.Second
+
 const (
 	ManagedCycleCompleted = "MANAGED_CYCLE_COMPLETED"
 	ManagedCycleBlocked   = "MANAGED_CYCLE_BLOCKED"
@@ -173,6 +175,9 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 		desiredByKey[managedKey(d.Symbol, d.LayerIndex)] = d
 	}
 	openByKey := map[string]live.OrderStatus{}
+	duplicateKeys := map[string]bool{}
+	openOrderCount := 0
+	openOrderCountBySymbol := map[string]int{}
 	openNotionalTotal := 0.0
 	openNotionalBySymbol := map[string]float64{}
 	for _, order := range openOrders {
@@ -184,10 +189,27 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 		}
 		key := orderKey(order)
 		if key != "" {
-			openByKey[key] = order
+			if _, exists := openByKey[key]; exists {
+				duplicateKeys[key] = true
+			} else {
+				openByKey[key] = order
+			}
 		}
+		symbol := strings.ToUpper(order.Symbol)
+		openOrderCount++
+		openOrderCountBySymbol[symbol]++
 		openNotionalTotal += order.Notional
-		openNotionalBySymbol[strings.ToUpper(order.Symbol)] += order.Notional
+		openNotionalBySymbol[symbol] += order.Notional
+	}
+	if len(duplicateKeys) > 0 {
+		for key := range duplicateKeys {
+			result.Blocked = append(result.Blocked, ManagedOrderDecision{Action: "block", Reason: "duplicate open order managed key requires reconciliation: " + key})
+		}
+		result.Status = ManagedCycleBlocked
+		result.Reasons = append(result.Reasons, "duplicate open order managed key")
+		result.PerCoin = BuildManagedCoinSummaries(cfg, plan, openOrders, result)
+		result.Summary = managedSummary(result)
+		return result
 	}
 
 	for _, order := range openOrders {
@@ -213,7 +235,9 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 				}
 				continue
 			}
-			cancel, err := canceler.CancelOrder(ctx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+			cancelCtx, cancelDone := context.WithTimeout(ctx, managedExchangeTimeout)
+			cancel, err := canceler.CancelOrder(cancelCtx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+			cancelDone()
 			decision.CancelResult = cancel
 			if err != nil {
 				decision.Error = err.Error()
@@ -222,6 +246,8 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 				continue
 			}
 			result.Canceled = append(result.Canceled, decision)
+			openOrderCount--
+			openOrderCountBySymbol[strings.ToUpper(orderSymbol(order))]--
 			openNotionalTotal -= order.Notional
 			openNotionalBySymbol[strings.ToUpper(orderSymbol(order))] -= order.Notional
 			delete(openByKey, key)
@@ -241,11 +267,11 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 		if _, exists := openByKey[key]; exists {
 			continue
 		}
-		if countOpenForSymbol(openByKey, desiredOrder.Symbol) >= normalizedMaxOpenLiveOrdersPerAsset(cfg) {
+		if openOrderCountBySymbol[strings.ToUpper(desiredOrder.Symbol)] >= normalizedMaxOpenLiveOrdersPerAsset(cfg) {
 			result.Blocked = append(result.Blocked, ManagedOrderDecision{Action: "block", Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Desired: desiredOrder, Reason: "per-asset open order limit reached"})
 			continue
 		}
-		if len(openByKey) >= normalizedMaxOpenLiveOrdersTotal(cfg) {
+		if openOrderCount >= normalizedMaxOpenLiveOrdersTotal(cfg) {
 			result.Blocked = append(result.Blocked, ManagedOrderDecision{Action: "block", Symbol: desiredOrder.Symbol, LayerIndex: desiredOrder.LayerIndex, Desired: desiredOrder, Reason: "total open order limit reached"})
 			continue
 		}
@@ -267,7 +293,9 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 			result.Status = ManagedCyclePartial
 			continue
 		}
-		mmGate := EvaluateMMExecutionGate(ctx, cfg, desiredOrder, orderBookProviderFromPlacer(placer))
+		mmCtx, mmDone := context.WithTimeout(ctx, managedExchangeTimeout)
+		mmGate := EvaluateMMExecutionGate(mmCtx, cfg, desiredOrder, orderBookProviderFromPlacer(placer))
+		mmDone()
 		if !mmGate.Pass {
 			decision.Action = "block"
 			decision.Reason = "MM execution gate blocked: " + strings.Join(mmGate.Reasons, "; ")
@@ -295,7 +323,9 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 			}
 		}
 		req := live.LimitOrderRequest{InstID: desiredOrder.InstID, Side: strings.ToLower(desiredOrder.Side), Price: desiredOrder.Price, Quantity: desiredOrder.Quantity, PostOnly: desiredOrder.PostOnly, ClientOrderID: clientID}
-		placed, err := placer.PlaceSpotLimitOrder(ctx, req)
+		placeCtx, placeDone := context.WithTimeout(ctx, managedExchangeTimeout)
+		placed, err := placer.PlaceSpotLimitOrder(placeCtx, req)
+		placeDone()
 		decision.PlaceResult = placed
 		if err != nil {
 			safeErr := sanitizeExchangeError(cfg, err)
@@ -328,7 +358,10 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 				decision.Error = err.Error()
 				result.Blocked = append(result.Blocked, decision)
 				result.Status = ManagedCyclePartial
-				continue
+				result.Reasons = append(result.Reasons, "submitted order persistence failed")
+				result.PerCoin = BuildManagedCoinSummaries(cfg, plan, openOrders, result)
+				result.Summary = managedSummary(result)
+				return result
 			}
 		}
 		result.Placed = append(result.Placed, decision)

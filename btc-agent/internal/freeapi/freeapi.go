@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -104,6 +106,62 @@ func (c *Client) Run(ctx context.Context) Report {
 		e := c.get(ctx, "https://api.frankfurter.app/latest?from=EUR&to=USD", &x)
 		r.EURUSD = x.Rates["USD"]
 		add("frankfurter", "https://api.frankfurter.app/latest?from=EUR&to=USD", true, e)
+	}
+	if c.cfg.FreeAPI.Derivatives.Enabled {
+		baseURL := strings.TrimRight(strings.TrimSpace(c.cfg.FreeAPI.Derivatives.BaseURL), "/")
+		if baseURL == "" {
+			baseURL = "https://fapi.binance.com"
+		}
+		symbol := strings.ToUpper(strings.TrimSpace(c.cfg.FreeAPI.Derivatives.Symbol))
+		if symbol == "" {
+			symbol = "BTCUSDT"
+		}
+		r.DerivativesSymbol = symbol
+		premiumURL := baseURL + "/fapi/v1/premiumIndex?symbol=" + url.QueryEscape(symbol)
+		var premium struct {
+			MarkPrice       string `json:"markPrice"`
+			LastFundingRate string `json:"lastFundingRate"`
+		}
+		premiumErr := c.get(ctx, premiumURL, &premium)
+		markPrice, markErr := strconv.ParseFloat(premium.MarkPrice, 64)
+		fundingRate, fundingErr := strconv.ParseFloat(premium.LastFundingRate, 64)
+		if premiumErr == nil && (markErr != nil || fundingErr != nil) {
+			premiumErr = fmt.Errorf("invalid premium index response")
+		}
+		if premiumErr == nil {
+			r.FundingRate = fundingRate
+		}
+		add("binance_funding", premiumURL, true, premiumErr)
+
+		openInterestURL := baseURL + "/fapi/v1/openInterest?symbol=" + url.QueryEscape(symbol)
+		var oi struct {
+			OpenInterest string `json:"openInterest"`
+		}
+		oiErr := c.get(ctx, openInterestURL, &oi)
+		openInterest, parseErr := strconv.ParseFloat(oi.OpenInterest, 64)
+		if oiErr == nil && parseErr != nil {
+			oiErr = fmt.Errorf("invalid open interest response")
+		}
+		if oiErr == nil {
+			r.OpenInterest = openInterest
+			r.OpenInterestUSD = openInterest * markPrice
+		}
+		add("binance_open_interest", openInterestURL, true, oiErr)
+	}
+	if c.cfg.FreeAPI.OnChain.Enabled {
+		const chainsURL = "https://api.llama.fi/v2/chains"
+		var chains []struct {
+			TVL float64 `json:"tvl"`
+		}
+		e := c.get(ctx, chainsURL, &chains)
+		if e == nil {
+			for _, chain := range chains {
+				if chain.TVL > 0 {
+					r.DeFiTVLUSD += chain.TVL
+				}
+			}
+		}
+		add("defillama_chains", chainsURL, true, e)
 	}
 	if c.cfg.FreeAPI.News.Enabled {
 		limit := c.cfg.FreeAPI.News.MaxItems

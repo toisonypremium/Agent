@@ -18,6 +18,11 @@ type Report struct {
 	FearGreedValue     int            `json:"fear_greed_value,omitempty"`
 	FearGreedLabel     string         `json:"fear_greed_label,omitempty"`
 	EURUSD             float64        `json:"eurusd,omitempty"`
+	DerivativesSymbol  string         `json:"derivatives_symbol,omitempty"`
+	FundingRate        float64        `json:"funding_rate,omitempty"`
+	OpenInterest       float64        `json:"open_interest,omitempty"`
+	OpenInterestUSD    float64        `json:"open_interest_usd,omitempty"`
+	DeFiTVLUSD         float64        `json:"defi_tvl_usd,omitempty"`
 	News               []NewsItem     `json:"news,omitempty"`
 	Sources            []SourceStatus `json:"sources"`
 	Missing            []string       `json:"missing,omitempty"`

@@ -168,10 +168,25 @@ func applyMicrostructureAssetGate(cfg config.Config, p agent2.Plan, summary micr
 	changed := false
 	for i := range p.Assets {
 		asset := &p.Assets[i]
-		if microstructure.SymbolFresh(summary, asset.Symbol) {
+		symbol := strings.ToUpper(asset.Symbol)
+		if microstructure.SymbolFresh(summary, symbol) {
+			// Independent executed-flow/order-book evidence may only reduce authority.
+			// It never promotes WATCH/SCOUT/ARMED or creates layers.
+			if fp, ok := summary.MMFootprint[symbol]; ok && microstructure.FootprintBlocksNewExposure(fp) {
+				reason := symbol + " microstructure footprint risky/ask-pressure; max WATCH"
+				asset.Reasons = agent2.AddReason(asset.Reasons, agent2.NewDecisionReason(agent2.ReasonDataWait, agent2.ReasonSoftWait, agent2.ReasonScopeData, reason))
+				asset.SoftBlockers = appendUniqueMain(asset.SoftBlockers, reason)
+				asset.Layers = nil
+				if asset.State == agent2.StateActiveLimit || asset.State == agent2.StateArmed || asset.State == agent2.StateScout {
+					asset.State = agent2.StateWatch
+					asset.Reason = reason
+					asset.NextTrigger = "Chờ microstructure hết ask pressure/risky footprint trước khi xét ACTIVE_LIMIT."
+					changed = true
+				}
+			}
 			continue
 		}
-		reason := strings.ToUpper(asset.Symbol) + " microstructure stale/missing; max WATCH"
+		reason := symbol + " microstructure stale/missing; max WATCH"
 		asset.Reasons = agent2.AddReason(asset.Reasons, agent2.NewDecisionReason(agent2.ReasonDataWait, agent2.ReasonSoftWait, agent2.ReasonScopeData, reason))
 		asset.SoftBlockers = appendUniqueMain(asset.SoftBlockers, reason)
 		asset.Layers = nil

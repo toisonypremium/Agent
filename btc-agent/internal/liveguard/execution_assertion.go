@@ -76,28 +76,25 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 	if !cfg.Risk.NoFutures || !cfg.Risk.NoLeverage || !cfg.Risk.SpotLimitOnly {
 		reasons = append(reasons, "risk flags must enforce no futures/no leverage/spot limit only")
 	}
-	hermesProbe := strings.EqualFold(d.Source, "HERMES_OPERATOR") && strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") && (strings.EqualFold(in.HermesMode, "canary") || strings.EqualFold(in.HermesMode, "autonomous"))
-	hermesAutonomousExposure := strings.EqualFold(d.Source, "HERMES_OPERATOR") && strings.EqualFold(in.HermesMode, "autonomous") && (strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") || strings.EqualFold(in.HermesIntent, "OPEN_LIMIT") || strings.EqualFold(in.HermesIntent, "SCALE_LIMIT"))
-	if !hermesProbe && !hermesAutonomousExposure {
-		if in.Plan.State != agent2.StateActiveLimit {
-			reasons = append(reasons, "plan state must be ACTIVE_LIMIT")
-		}
-		if in.Plan.ActionPermission != agent1.Allowed {
-			reasons = append(reasons, "plan action permission must be ALLOWED")
-		}
-		phase := strings.ToUpper(strings.TrimSpace(in.BTCAccumulationPhase))
-		if phase == "" {
-			if !in.DryRun {
-				reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
-			}
-		} else if phase != "ACCUMULATION_CONFIRMED" {
+	if in.Plan.State != agent2.StateActiveLimit {
+		reasons = append(reasons, "plan state must be ACTIVE_LIMIT")
+	}
+	if in.Plan.ActionPermission != agent1.Allowed {
+		reasons = append(reasons, "plan action permission must be ALLOWED")
+	}
+	phase := strings.ToUpper(strings.TrimSpace(in.BTCAccumulationPhase))
+	if phase == "" {
+		if !in.DryRun {
 			reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
 		}
-	} else {
+	} else if phase != "ACCUMULATION_CONFIRMED" {
+		reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
+	}
+	if strings.EqualFold(d.Source, "HERMES_OPERATOR") {
 		if strings.TrimSpace(in.HermesDecisionID) == "" {
 			reasons = append(reasons, "Hermes decision_id required")
 		}
-		if strings.EqualFold(in.HermesMode, "canary") && d.AllocationTier != string(OpportunityProbe) {
+		if strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") && d.AllocationTier != string(OpportunityProbe) {
 			reasons = append(reasons, "Hermes canary order must use PROBE allocation tier")
 		}
 	}

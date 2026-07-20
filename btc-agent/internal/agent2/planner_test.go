@@ -194,7 +194,7 @@ func TestBuildPlanWithBenchmarksBlocksLowRotationRank(t *testing.T) {
 	}
 }
 
-func TestBuildPlanWithBenchmarksBlocksNeutralAssetFlowEntry(t *testing.T) {
+func TestBuildPlanWithBenchmarksBlocksNeutralAccumulationStructure(t *testing.T) {
 	cfg := testConfig()
 	cfg.Risk.DisableRelativeStrengthFilter = true
 	cfg.Risk.DisableRotationScoreFilter = true
@@ -202,12 +202,12 @@ func TestBuildPlanWithBenchmarksBlocksNeutralAssetFlowEntry(t *testing.T) {
 	asset := assetCandles(80, true)
 	btc := assetCandles(80, false)
 	got := BuildPlanWithBenchmarks(cfg, allowedAnalysis(), map[string][]market.Candle{"ETHUSDT": asset, "SOLUSDT": nil, "RENDERUSDT": nil}, map[string][]market.Candle{"BTCUSDT": btc})
-	if len(got.Assets) == 0 || got.Assets[0].State != StateWatch || !hasReason(got.Assets[0].Reasons, ReasonAssetFlowEntry, ReasonSoftWait) {
-		t.Fatalf("expected neutral flow entry soft-wait watch: %+v", got)
+	if len(got.Assets) == 0 || got.Assets[0].State != StateWatch || !hasReason(got.Assets[0].Reasons, ReasonMMAccumulation, ReasonSoftWait) {
+		t.Fatalf("expected neutral accumulation structure soft-wait watch: %+v", got)
 	}
 }
 
-func TestBuildPlanWithBenchmarksAllowsBullishAssetFlowEntry(t *testing.T) {
+func TestBuildPlanWithBenchmarksAllowsBullishAccumulationStructure(t *testing.T) {
 	cfg := testConfig()
 	cfg.Risk.DisableRelativeStrengthFilter = true
 	cfg.Risk.DisableRotationScoreFilter = true
@@ -217,8 +217,8 @@ func TestBuildPlanWithBenchmarksAllowsBullishAssetFlowEntry(t *testing.T) {
 	last := len(asset) - 1
 	asset[last] = market.Candle{Symbol: "ETHUSDT", Interval: "1d", Open: 100, High: 108, Low: 96, Close: 101, Volume: 2200}
 	got := BuildPlanWithBenchmarks(cfg, allowedAnalysis(), map[string][]market.Candle{"ETHUSDT": asset, "SOLUSDT": nil, "RENDERUSDT": nil}, map[string][]market.Candle{"BTCUSDT": btc})
-	if len(got.Assets) == 0 || got.Assets[0].Reason == "" || strings.Contains(got.Assets[0].Reason, "asset flow entry chưa") {
-		t.Fatalf("bullish flow should pass flow gate: %+v", got)
+	if len(got.Assets) == 0 || got.Assets[0].Reason == "" || strings.Contains(got.Assets[0].Reason, "OHLCV accumulation structure") {
+		t.Fatalf("bullish structure should pass structure gate: %+v", got)
 	}
 }
 

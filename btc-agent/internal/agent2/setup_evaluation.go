@@ -128,19 +128,13 @@ func evaluateAssetSetup(cfg config.Config, sym string, c []market.Candle, benchm
 	} else if useAssetFlowEntry {
 		add(EntryCheckMMAccumulation, SetupGateSoft, mm.Pass, clamp01(mm.Score/100), mmReason(mm), mm.NextTrigger)
 	}
+	// Do not add ASSET_FLOW_ENTRY from the same OHLCV detector. Doing so counts one
+	// evidence source twice (MM_ACCUMULATION and ASSET_FLOW_ENTRY). Asset flow is
+	// reserved for independent, fresh microstructure evidence at the integration layer.
 	if enabled, minBull, allowNeutral := assetFlowEntryParams(cfg); enabled && useAssetFlowEntry {
 		entry := AssetFlowEntryFromMMWithConfig(cfg, mm, minBull, allowNeutral)
 		ap.AssetFlowBias = entry.Bias
 		ap.AssetFlowScore = entry.BullScore
-		severity := SetupGateSoft
-		if entry.HardBlock {
-			severity = SetupGateHard
-		}
-		reason := entry.Reason
-		if !entry.Pass && !entry.HardBlock && reason != "" && !containsAny(strings.ToLower(reason), "asset flow entry") {
-			reason = "asset flow entry chưa xác nhận: " + reason
-		}
-		add(EntryCheckAssetFlowEntry, severity, entry.Pass, entryScore(entry), reason, firstNonEmptyMM(entry.NextTrigger, "Chờ sweep low + reclaim support hoặc absorption volume gần support."))
 	}
 	if cfg.Live.LiquidityGateEnabled && ap.LiquidityQuality.Enabled {
 		add(EntryCheckLiquidityQuality, SetupGateSoft, ap.LiquidityQuality.Pass, clamp01(ap.LiquidityQuality.Score/100), "liquidity gate blocked: "+liquidity.FirstReason(ap.LiquidityQuality.Reasons), "Chờ spread/depth/volume đủ dày trước khi tạo live layer.")

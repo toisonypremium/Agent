@@ -1,10 +1,13 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"btc-agent/internal/config"
@@ -13,9 +16,14 @@ import (
 )
 
 type lifecycleQualificationFile struct {
-	GeneratedAt  time.Time `json:"generated_at"`
-	Result       string    `json:"result"`
-	StressPassed int       `json:"stress_passed"`
+	GeneratedAt       time.Time `json:"generated_at"`
+	Qualification     string    `json:"qualification"`
+	Result            string    `json:"result"`
+	FullGoTest        string    `json:"full_go_test"`
+	GoVet             string    `json:"go_vet"`
+	StressPassed      int       `json:"stress_passed"`
+	ProductionTouched bool      `json:"production_touched"`
+	Exchange          string    `json:"exchange"`
 }
 
 type canaryReadinessReport struct {
@@ -37,8 +45,12 @@ type canaryReadinessReport struct {
 
 func runCanaryReadiness(cfg config.Config, db *storage.DB) error {
 	var legacy liveguard.CanaryReadinessResult
-	var qualification lifecycleQualificationFile
-	qualificationOK := readJSONReport(filepath.Join("reports", "hermes_synthetic_lifecycle_qualification_20260716.json"), &qualification) == nil
+	qualification, qualificationPath, qualificationHash, qualificationErr := latestLifecycleQualification("reports")
+	qualificationAge := time.Duration(0)
+	if !qualification.GeneratedAt.IsZero() {
+		qualificationAge = time.Since(qualification.GeneratedAt)
+	}
+	qualificationOK := qualificationErr == nil && qualification.Qualification == "HERMES_SYNTHETIC_LIFECYCLE" && qualification.Result == "PASS" && qualification.FullGoTest == "PASS" && qualification.GoVet == "PASS" && !qualification.ProductionTouched && qualification.Exchange == "FakeOKX"
 	var doctor liveguard.RuntimeDoctorResult
 	doctorOK := readJSONReport(filepath.Join("reports", "live_doctor_latest.json"), &doctor) == nil
 	if !doctorOK {
@@ -53,7 +65,7 @@ func runCanaryReadiness(cfg config.Config, db *storage.DB) error {
 	demoted, demoteErr := db.IsHermesDemoted()
 	open, openErr := db.OpenLiveOrdersDetailed()
 	owned, ownedErr := db.HermesOwnedPositions()
-	legacy = liveguard.EvaluateCanaryReadiness(liveguard.CanaryReadinessInput{QualificationPassed: qualificationOK && qualification.Result == "PASS", QualificationStressPassed: qualification.StressPassed, QualificationStressRequired: 100, Doctor: doctor, Reconcile: reconcile.Safety, OperatorHalted: halted, HermesDemoted: demoted, ExecutionAuthority: cfg.HermesOperator.CanExecute(), OpenLiveOrders: len(open), HermesOwnedPositions: len(owned)})
+	legacy = liveguard.EvaluateCanaryReadiness(liveguard.CanaryReadinessInput{QualificationPassed: qualificationOK, QualificationStressPassed: qualification.StressPassed, QualificationStressRequired: 100, QualificationArtifact: qualificationPath, QualificationSHA256: qualificationHash, QualificationAge: qualificationAge, QualificationMaxAge: 30 * 24 * time.Hour, Doctor: doctor, Reconcile: reconcile.Safety, OperatorHalted: halted, HermesDemoted: demoted, ExecutionAuthority: cfg.HermesOperator.CanExecute(), OpenLiveOrders: len(open), HermesOwnedPositions: len(owned)})
 	var rehearsal canaryRehearsalReport
 	rehearsalOK := readJSONReport(filepath.Join("reports", "canary_rehearsal_latest.json"), &rehearsal) == nil && rehearsal.Status == "PASS" && rehearsal.NoRealExchange && rehearsal.ForcedSimulation.ExchangeCalls == 0
 	// Existing managed holdings are a production-canary blocker, not a
@@ -78,6 +90,9 @@ func runCanaryReadiness(cfg config.Config, db *storage.DB) error {
 	if err := saveJSONFile("reports", "canary_readiness_latest.json", out); err != nil {
 		return err
 	}
+	if err := saveJSONFile("reports", "hermes_canary_readiness_latest.json", legacy); err != nil {
+		return err
+	}
 	b, _ := json.MarshalIndent(out, "", "  ")
 	fmt.Println(string(b))
 	return nil
@@ -89,4 +104,35 @@ func readJSONReport(path string, out any) error {
 		return err
 	}
 	return json.Unmarshal(b, out)
+}
+
+func latestLifecycleQualification(dir string) (lifecycleQualificationFile, string, string, error) {
+	paths, err := filepath.Glob(filepath.Join(dir, "hermes_synthetic_lifecycle_qualification*.json"))
+	if err != nil {
+		return lifecycleQualificationFile{}, "", "", err
+	}
+	type candidate struct {
+		path string
+		data []byte
+		file lifecycleQualificationFile
+	}
+	candidates := []candidate{}
+	for _, path := range paths {
+		b, readErr := os.ReadFile(path)
+		if readErr != nil {
+			continue
+		}
+		var q lifecycleQualificationFile
+		if json.Unmarshal(b, &q) != nil || q.GeneratedAt.IsZero() {
+			continue
+		}
+		candidates = append(candidates, candidate{path: path, data: b, file: q})
+	}
+	if len(candidates) == 0 {
+		return lifecycleQualificationFile{}, "", "", fmt.Errorf("no valid lifecycle qualification artifact found")
+	}
+	sort.Slice(candidates, func(i, j int) bool { return candidates[i].file.GeneratedAt.After(candidates[j].file.GeneratedAt) })
+	selected := candidates[0]
+	sum := sha256.Sum256(selected.data)
+	return selected.file, selected.path, hex.EncodeToString(sum[:]), nil
 }

@@ -11,9 +11,11 @@ import (
 type MMCase string
 
 const (
-	MMCaseNoEdge              MMCase = "NO_EDGE"
-	MMCaseFallingKnife        MMCase = "FALLING_KNIFE"
-	MMCaseFailedSweep         MMCase = "FAILED_SWEEP"
+	MMCaseNoEdge       MMCase = "NO_EDGE"
+	MMCaseFallingKnife MMCase = "FALLING_KNIFE"
+	// MMCaseFailedSweep is retained as a source-compatible alias. The phase is a sweep awaiting reclaim, not a failed sweep.
+	MMCaseSweepPendingReclaim MMCase = "SWEEP_PENDING_RECLAIM"
+	MMCaseFailedSweep                = MMCaseSweepPendingReclaim
 	MMCaseAbsorptionWatch     MMCase = "ABSORPTION_WATCH"
 	MMCaseSpringReclaim       MMCase = "SPRING_RECLAIM"
 	MMCaseArmedProbeCandidate MMCase = "ARMED_PROBE_CANDIDATE"
@@ -21,6 +23,8 @@ const (
 )
 
 type MMAccumulationSignal struct {
+	// Source identifies the evidence class. This detector is OHLCV structure, not direct market-maker flow.
+	Source          string             `json:"source"`
 	Symbol          string             `json:"symbol"`
 	Case            MMCase             `json:"case"`
 	Phase           accumulation.Phase `json:"phase,omitempty"`
@@ -49,6 +53,7 @@ type MMAccumulationSignal struct {
 func AnalyzeMMAccumulation(symbol string, candles []market.Candle) MMAccumulationSignal {
 	result := accumulation.Analyze(symbol, candles)
 	s := MMAccumulationSignal{
+		Source:          "OHLCV_ACCUMULATION_STRUCTURE",
 		Symbol:          symbol,
 		Phase:           result.Phase,
 		Case:            mmCaseFromAccumulation(result),
@@ -94,7 +99,7 @@ func mmCaseFromAccumulation(result accumulation.Result) MMCase {
 	case accumulation.PhaseDistribution:
 		return MMCaseDistributionTrap
 	case accumulation.PhaseSweep:
-		return MMCaseFailedSweep
+		return MMCaseSweepPendingReclaim
 	case accumulation.PhaseAbsorption:
 		return MMCaseAbsorptionWatch
 	case accumulation.PhaseReclaim:
@@ -108,10 +113,10 @@ func mmCaseFromAccumulation(result accumulation.Result) MMCase {
 
 func mmReason(sig MMAccumulationSignal) string {
 	if len(sig.Reasons) > 0 {
-		return fmt.Sprintf("MM case %s score %.0f: %s", sig.Case, sig.Score, sig.Reasons[0])
+		return fmt.Sprintf("OHLCV accumulation structure %s score %.0f: %s", sig.Case, sig.Score, sig.Reasons[0])
 	}
 	if len(sig.Missing) > 0 {
-		return fmt.Sprintf("MM case %s score %.0f: %s", sig.Case, sig.Score, sig.Missing[0])
+		return fmt.Sprintf("OHLCV accumulation structure %s score %.0f: %s", sig.Case, sig.Score, sig.Missing[0])
 	}
-	return fmt.Sprintf("MM case %s score %.0f", sig.Case, sig.Score)
+	return fmt.Sprintf("OHLCV accumulation structure %s score %.0f", sig.Case, sig.Score)
 }

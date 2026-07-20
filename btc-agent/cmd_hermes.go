@@ -15,6 +15,7 @@ import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/freeapi"
 	"btc-agent/internal/hermesagent"
+	"btc-agent/internal/hermesmemory"
 	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/llm"
@@ -42,10 +43,21 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		if err := freeapi.Save(report, "reports"); err != nil {
 			log.Printf("[Hermes] free API report save warning: %v", err)
 		}
-		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f fear_greed=%d/%s eurusd=%.5f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, len(report.News), strings.Join(report.Missing, ","))
+		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f fear_greed=%d/%s eurusd=%.5f funding=%.8f open_interest_usd=%.0f defi_tvl_usd=%.0f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, report.FundingRate, report.OpenInterestUSD, report.DeFiTVLUSD, len(report.News), strings.Join(report.Missing, ","))
 	}
 	if plan, err := db.LatestPlan(); err == nil {
 		enrichHermesAssetsFromPlan(cfg, db, &snap, plan)
+	}
+	// Recall similar situations before narrative generation. Memory is evidence only;
+	// it cannot grant execution authority or override deterministic gates.
+	if db != nil {
+		mem, memErr := hermesmemory.Recall(db, hermesmemory.Situation{Regime: snap.BTCRegime, Phase: snap.BTCPhase, Permission: snap.BTCPermission, PlanState: snap.PlanState, DoctorStatus: snap.DoctorStatus, Trend: snap.BTCTrend, MMVerdict: snap.BTCMMVerdict, MMQuality: snap.BTCMMDataQuality, AuditAgeMinutes: snap.AuditAgeMinutes, ForcedSimulationPassed: snap.ForcedSimPassed, Authority: snap.MarketAuthority}, 5)
+		if memErr != nil {
+			log.Printf("[Hermes] memory recall warning: %v", memErr)
+		} else {
+			b, _ := json.Marshal(mem)
+			snap.ResearchSummary += " | cognitive_memory=" + string(b)
+		}
 	}
 	caller := hermesCallerFromConfig(cfg)
 	narrativeStarted := time.Now()
@@ -59,6 +71,125 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 	}
 	if err := saveJSONFile(hermesReportDir, "hermes_report_latest.json", report); err != nil {
 		return fmt.Errorf("hermes report save: %w", err)
+	}
+	if db != nil {
+		situation := hermesmemory.Situation{GeneratedAt: snap.GeneratedAt, Regime: snap.BTCRegime, Phase: snap.BTCPhase, Permission: snap.BTCPermission, PlanState: snap.PlanState, DoctorStatus: snap.DoctorStatus, Trend: snap.BTCTrend, MMVerdict: snap.BTCMMVerdict, MMQuality: snap.BTCMMDataQuality, AuditAgeMinutes: snap.AuditAgeMinutes, ForcedSimulationPassed: snap.ForcedSimPassed, Authority: snap.MarketAuthority}
+		episode := hermesmemory.BuildEpisode(situation, report.GateSummary, []string{snap.AuditVerdict, snap.DoctorStatus, snap.MarketAuthority}, []string{report.AssetSummary, report.ExitSummary}, snap.DoctorBlockers)
+		if err := hermesmemory.Save(db, episode); err != nil {
+			log.Printf("[Hermes] memory save warning: %v", err)
+		}
+		_ = hermesmemory.SaveProvenance(db, hermesmemory.Provenance{ProvenanceID: "prov:" + episode.EpisodeID, EpisodeID: episode.EpisodeID, DerivationMethod: "deterministic_snapshot_plus_readonly_narrative", DerivationLayer: "derived", CreatedAt: episode.CreatedAt, MetadataJSON: `{"authority":"deterministic_engine_only","source":"live_auto_audit+plan+microstructure"}`})
+		mem, memErr := hermesmemory.Recall(db, situation, 5)
+		if memErr != nil {
+			log.Printf("[Hermes] reasoning recall warning: %v", memErr)
+		} else {
+			for _, similar := range mem.Similar {
+				relation := "supports"
+				if !strings.EqualFold(similar.Episode.Situation.Permission, situation.Permission) {
+					relation = "contradicts"
+				}
+				if similar.Episode.EpisodeID != episode.EpisodeID {
+					_ = hermesmemory.SaveReasoningEdge(db, hermesmemory.ReasoningEdge{FromEpisodeID: similar.Episode.EpisodeID, ToEpisodeID: episode.EpisodeID, Relation: relation, Confidence: similar.Similarity, DecayWeight: 1, ValidFrom: episode.CreatedAt, Rationale: "deterministic situation similarity"})
+				}
+			}
+			reasoning := hermesmemory.BuildReasoning(episode, mem, []string{"WAIT/NO_ACTION", "WATCH until deterministic gate improves"})
+			if err := saveJSONFile(hermesReportDir, "hermes_reasoning_latest.json", reasoning); err != nil {
+				log.Printf("[Hermes] reasoning report warning: %v", err)
+			}
+			// Predictions are research-only and neutral until a calibrated forecasting
+			// model exists. They create measurable outcomes without inventing edge.
+			for _, asset := range snap.Assets {
+				candles, candleErr := db.LoadCandles(asset.Symbol, "1d", 1)
+				if candleErr != nil || len(candles) == 0 || candles[0].Close <= 0 {
+					continue
+				}
+				for _, horizon := range []string{"1d", "3d", "7d"} {
+					pred, due, predErr := hermesmemory.NewPrediction(episode.EpisodeID, asset.Symbol, horizon, asset.State, candles[0].Close, 0, reasoning.Confidence, episode.CreatedAt)
+					if predErr == nil {
+						_ = hermesmemory.SavePrediction(db, pred, due)
+					}
+				}
+			}
+			if due, dueErr := hermesmemory.PendingPredictions(db, time.Now().UTC(), 100); dueErr == nil {
+				for _, pred := range due {
+					candles, candleErr := db.LoadCandles(pred.Symbol, "1d", 1)
+					if candleErr != nil || len(candles) == 0 || pred.BasePrice <= 0 {
+						continue
+					}
+					// Never score against a candle that predates the prediction horizon.
+					if pred.DueAt.IsZero() || candles[0].CloseTime.Before(pred.DueAt) {
+						continue
+					}
+					actual := candles[0].Close/pred.BasePrice - 1
+					_ = hermesmemory.PersistScore(db, hermesmemory.ScorePrediction(pred, actual, time.Now().UTC()))
+				}
+			}
+			if calibration, calErr := hermesmemory.LoadCalibration(db, 1000); calErr == nil {
+				_ = saveJSONFile(hermesReportDir, "hermes_calibration_latest.json", calibration)
+			}
+			if backfillErr := hermesmemory.BackfillEpisodeProvenance(db); backfillErr != nil {
+				log.Printf("[Hermes] provenance backfill warning: %v", backfillErr)
+			}
+			if brainAudit, auditErr := hermesmemory.AuditBrain(db, episode.EpisodeID); auditErr == nil {
+				_ = saveJSONFile(hermesReportDir, "hermes_brain_audit_latest.json", brainAudit)
+			} else {
+				log.Printf("[Hermes] brain audit warning: %v", auditErr)
+			}
+			if hypothesisAudit, hypothesisErr := hermesmemory.AuditHypotheses(db); hypothesisErr == nil {
+				_ = saveJSONFile(hermesReportDir, "hermes_hypothesis_audit_latest.json", hypothesisAudit)
+			} else {
+				log.Printf("[Hermes] hypothesis audit warning: %v", hypothesisErr)
+			}
+			if researchInvariantErr := hermesmemory.EnsureResearchInvariants(db); researchInvariantErr != nil {
+				log.Printf("[Hermes] research invariant warning: %v", researchInvariantErr)
+			}
+			if researchAudit, researchErr := hermesmemory.AuditResearch(db); researchErr == nil {
+				_ = saveJSONFile(hermesReportDir, "hermes_research_audit_latest.json", researchAudit)
+			} else {
+				log.Printf("[Hermes] research audit warning: %v", researchErr)
+			}
+			// Register a read-only daily dataset snapshot from canonical SQLite candles.
+			// This creates research provenance only; it never reaches planning or execution.
+			for _, symbol := range []string{"BTCUSDT", "ETHUSDT", "SOLUSDT"} {
+				candles, candleErr := db.LoadCandles(symbol, "1d", 600)
+				if candleErr != nil || len(candles) == 0 {
+					continue
+				}
+				// Exclude the still-forming daily bar. An open bar changes every cycle
+				// and would create false dataset versions and unstable research hashes.
+				closed := candles[:0]
+				now := time.Now().UTC()
+				for _, candle := range candles {
+					if !candle.CloseTime.IsZero() && candle.CloseTime.After(now) {
+						continue
+					}
+					closed = append(closed, candle)
+				}
+				if len(closed) == 0 {
+					continue
+				}
+				if dataset, datasetErr := hermesmemory.BuildDatasetFromCandles(symbol, "1d", "canonical_sqlite_candles_closed", closed, 1); datasetErr == nil {
+					if saveErr := hermesmemory.SaveDataset(db, dataset); saveErr != nil {
+						log.Printf("[Hermes] dataset snapshot warning: %v", saveErr)
+					}
+				}
+			}
+			// Re-run after persistence; otherwise this cycle's report describes the
+			// pre-snapshot database state.
+			if researchAudit, researchErr := hermesmemory.AuditResearch(db); researchErr == nil {
+				_ = saveJSONFile(hermesReportDir, "hermes_research_audit_latest.json", researchAudit)
+			} else {
+				log.Printf("[Hermes] research audit post-snapshot warning: %v", researchErr)
+			}
+			if planErr := hermesmemory.EnsureBaselineResearchPlan(db, episode.EpisodeID); planErr != nil {
+				log.Printf("[Hermes] baseline research plan warning: %v", planErr)
+			}
+			if researchAudit, researchErr := hermesmemory.AuditResearch(db); researchErr == nil {
+				_ = saveJSONFile(hermesReportDir, "hermes_research_audit_latest.json", researchAudit)
+			} else {
+				log.Printf("[Hermes] research audit final warning: %v", researchErr)
+			}
+		}
 	}
 	if err := runHermesShadowDecision(ctx, cfg, snap, caller, trigger); err != nil {
 		log.Printf("[Hermes] shadow decision warning: %v", err)

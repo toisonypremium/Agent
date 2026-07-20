@@ -134,6 +134,9 @@ func TestP0HermesBuyExecutionInvariants(t *testing.T) {
 		{name: "zero notional", mutate: func(f *hermesInvariantFixture) { f.desired.Notional = 0 }},
 		{name: "per order cap exceeded", mutate: func(f *hermesInvariantFixture) { f.desired.Notional = 11 }},
 		{name: "canary allocation is not probe", mutate: func(f *hermesInvariantFixture) { f.desired.AllocationTier = string(OpportunityNormal) }},
+		{name: "plan not active", mutate: func(f *hermesInvariantFixture) { f.plan.State = agent2.StateScout }},
+		{name: "permission not allowed", mutate: func(f *hermesInvariantFixture) { f.plan.ActionPermission = agent1.Watch }},
+		{name: "BTC accumulation not confirmed", mutate: func(f *hermesInvariantFixture) { f.exec.BTCAccumulationPhase = "MARKDOWN" }},
 		{name: "duplicate reservation", mutate: func(f *hermesInvariantFixture) { f.recorder.reserveErr = os.ErrExist }},
 	}
 
@@ -274,8 +277,8 @@ func newHermesInvariantFixture() hermesInvariantFixture {
 		AllocationTier: string(OpportunityProbe),
 	}
 	return hermesInvariantFixture{
-		cfg: cfg, plan: agent2.Plan{State: agent2.StateScout}, desired: desired,
-		exec:   ManagedExecutionContext{HermesMode: "canary"},
+		cfg: cfg, plan: agent2.Plan{State: agent2.StateActiveLimit, ActionPermission: agent1.Allowed}, desired: desired,
+		exec:   ManagedExecutionContext{BTCAccumulationPhase: "ACCUMULATION_CONFIRMED", FirstOrderDryRunApproved: true, HermesMode: "canary"},
 		placer: &hermesTestPlacer{}, recorder: &hermesTestRecorder{},
 	}
 }

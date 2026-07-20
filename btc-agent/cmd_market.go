@@ -286,6 +286,9 @@ func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, 
 	if err := storage.SaveReportFiles("reports", analysis, p, report); err != nil {
 		return err
 	}
+	if _, err := saveOperationsPlan(cfg, db, analysis, p); err != nil {
+		return fmt.Errorf("refresh operations plan: %w", err)
+	}
 	// #5: auto live order in runDaily bypasses supervisor state tracking.
 	// Supervisor handles auto live order execution via its own cycle.
 	// runDaily only triggers if supervisor is NOT enabled (standalone daily run).

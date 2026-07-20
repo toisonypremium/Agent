@@ -250,3 +250,10 @@ func mmClamp01(v float64) float64 {
 	}
 	return v
 }
+
+// FootprintBlocksNewExposure is deliberately asymmetric: independent
+// microstructure evidence can reduce authority, never grant it. Missing or
+// neutral evidence is handled by freshness policy and does not promote state.
+func FootprintBlocksNewExposure(sig MMFootprintSignal) bool {
+	return sig.Fresh && (sig.CurrentAskPressure || sig.Verdict == "DISTRIBUTING")
+}

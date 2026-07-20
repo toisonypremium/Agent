@@ -6,6 +6,8 @@ import (
 	"btc-agent/internal/storage"
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 )
@@ -27,6 +29,13 @@ func run(ctx context.Context, args []string) error {
 	}
 	if cmd == "eval-ai" {
 		return runAIEvaluation()
+	}
+	cfgPath, err := canonicalConfigPath(cfgPath)
+	if err != nil {
+		return err
+	}
+	if err := os.Chdir(filepath.Dir(cfgPath)); err != nil {
+		return fmt.Errorf("enter config directory: %w", err)
 	}
 	cfg, err := config.Load(cfgPath)
 	if err != nil {
@@ -177,6 +186,25 @@ func run(ctx context.Context, args []string) error {
 	default:
 		return usage()
 	}
+}
+
+func canonicalConfigPath(path string) (string, error) {
+	absolute, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve config path: %w", err)
+	}
+	canonical, err := filepath.EvalSymlinks(absolute)
+	if err != nil {
+		return "", fmt.Errorf("resolve config symlinks: %w", err)
+	}
+	info, err := os.Stat(canonical)
+	if err != nil {
+		return "", fmt.Errorf("stat config: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return "", fmt.Errorf("config path is not a regular file: %s", canonical)
+	}
+	return canonical, nil
 }
 
 func usage() error {

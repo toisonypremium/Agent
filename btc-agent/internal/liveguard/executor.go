@@ -60,7 +60,9 @@ func ExecuteManualProofOrder(ctx context.Context, cfg config.Config, proof Proof
 		PostOnly:      proof.Candidate.PostOnly,
 		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
 	}
-	order, err := placer.PlaceSpotLimitOrder(ctx, req)
+	placeCtx, cancel := context.WithTimeout(ctx, managedExchangeTimeout)
+	order, err := placer.PlaceSpotLimitOrder(placeCtx, req)
+	cancel()
 	result.Order = order
 	if err != nil {
 		safeErr := sanitizeExchangeError(cfg, err)
@@ -90,7 +92,9 @@ func ExecuteAutoProofOrder(ctx context.Context, cfg config.Config, proof Proof, 
 		PostOnly:      proof.Candidate.PostOnly,
 		ClientOrderID: clientOrderID(proof.Candidate.Symbol),
 	}
-	order, err := placer.PlaceSpotLimitOrder(ctx, req)
+	placeCtx, cancel := context.WithTimeout(ctx, managedExchangeTimeout)
+	order, err := placer.PlaceSpotLimitOrder(placeCtx, req)
+	cancel()
 	result.Order = order
 	if err != nil {
 		safeErr := sanitizeExchangeError(cfg, err)

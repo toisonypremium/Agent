@@ -12,6 +12,9 @@ type SchedulerHeartbeat struct {
 	GeneratedAt             string `json:"generated_at"`
 	PID                     int    `json:"pid"`
 	Status                  string `json:"status"`
+	StartupPhase            string `json:"startup_phase,omitempty"`
+	PhaseStartedAt          string `json:"phase_started_at,omitempty"`
+	LastSuccessfulPhase     string `json:"last_successful_phase,omitempty"`
 	Timezone                string `json:"timezone"`
 	Mode                    string `json:"mode"`
 	DryRun                  bool   `json:"dry_run"`

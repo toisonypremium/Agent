@@ -18,7 +18,7 @@ func TestSetupEvaluationAccumulatesSoftMisses(t *testing.T) {
 	if len(eval.HardBlockers) != 0 {
 		t.Fatalf("expected no hard blockers: %+v", eval)
 	}
-	for _, name := range []string{EntryCheckRotationScore, EntryCheckRotationRank, EntryCheckAssetFlowEntry, EntryCheckMMAccumulation} {
+	for _, name := range []string{EntryCheckRotationScore, EntryCheckRotationRank, EntryCheckMMAccumulation} {
 		if !setupGateFailed(eval.Gates, name) {
 			t.Fatalf("expected failed setup gate %s: %+v", name, eval.Gates)
 		}
@@ -90,4 +90,23 @@ func setupGateFailed(gates []SetupGateResult, name string) bool {
 		}
 	}
 	return false
+}
+
+func TestEvaluateAssetSetupDoesNotDoubleCountOHLCVAsAssetFlow(t *testing.T) {
+	cfg := testConfig()
+	asset := assetCandles(80, false)
+	rotation := AssetRotationScore{Symbol: "ETHUSDT", Rank: 1, Score: 1, Eligible: true}
+	_, eval := evaluateAssetSetup(cfg, "ETHUSDT", asset, asset, rotation, true)
+	seenMM, seenFlow := false, false
+	for _, gate := range eval.Gates {
+		if gate.Name == EntryCheckMMAccumulation {
+			seenMM = true
+		}
+		if gate.Name == EntryCheckAssetFlowEntry {
+			seenFlow = true
+		}
+	}
+	if !seenMM || seenFlow {
+		t.Fatalf("OHLCV structure must appear once; mm=%v flow=%v gates=%+v", seenMM, seenFlow, eval.Gates)
+	}
 }

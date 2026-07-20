@@ -131,3 +131,38 @@ formal service ownership remains operational debt.
 **Execution remains halted. P1 lease defect is fixed. P0 code wiring is fixed, but
 P0 production delivery cannot pass until the operator provisions Supabase/R2
 credentials. Systemd P1 also requires privileged operator action.**
+
+---
+
+# Final systemd and durability re-audit — 2026-07-20 11:57 UTC
+
+## Closed findings
+
+- **P1 systemd ownership: CLOSED.** `btc-agent-v2.service` is the authoritative,
+  enabled user service. The legacy root timer is inactive and disabled. Controlled
+  restart and full VPS reboot both produced exactly one scheduler process.
+- **P1 fencing continuity: CLOSED.** Graceful release now expires the ownership row
+  instead of deleting it, preserving the monotonic sequence. Fence advanced `1 -> 2`
+  on controlled restart and `2 -> 3` after reboot.
+- **P1 R2 contract: CODE CLOSED.** Production SigV4 signing, checksum, deterministic
+  object keys and strict credential-set validation are implemented and tested.
+- **P2 Supabase conflict mapping: CODE CLOSED.** Event/table/conflict mappings are
+  explicit rather than universal.
+- **Outbox crash recovery: CLOSED.** Stale processing claims recover after timeout;
+  active claims are not stolen.
+
+## Deployment evidence
+
+- Commit `09bd78e` preserves fencing across graceful restart.
+- Commit `1ba46e5` packages the proven V2 unit plus install/verify scripts.
+- Production binary SHA-256:
+  `bd50a15c9604e5dc474b3f3c7e140d5e066d98669bb7b2cf73b7368682c716cf`.
+- Post-reboot service PID `1349`, restart count `0`, owner `v2-prod-01`, fence `3`.
+- Operator halt active; doctor blocker only the halt; reconcile clean; open/unknown/
+  manual checks `0`; no order placed.
+
+## Deferred external activation
+
+Real Supabase/R2 delivery remains intentionally deferred. This is an external service
+activation gate, not an open code or systemd defect. Unrestricted live trading is not
+approved while operator halt is active and shadow observation is incomplete.

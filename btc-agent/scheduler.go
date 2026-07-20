@@ -34,6 +34,20 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		defer releaseLock()
 	}
 
+	owner, ownedCtx, stopOwnership, err := startSchedulerOwnership(ctx, db)
+	if err != nil {
+		return err
+	}
+	defer stopOwnership()
+	ctx = ownedCtx
+	cloud, err := newCloudRuntime(db)
+	if err != nil {
+		return fmt.Errorf("cloud runtime configuration: %w", err)
+	}
+	go cloud.run(ctx)
+	lease := owner.snapshot()
+	log.Printf("[Scheduler] Execution owner instance=%s fencing=%d expires=%s", lease.InstanceID, lease.FencingToken, lease.ExpiresAt.Format(time.RFC3339))
+
 	tz := cfg.App.Timezone
 	if tz == "" {
 		tz = "Asia/Ho_Chi_Minh"

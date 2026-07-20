@@ -23,8 +23,15 @@ func (d *DB) AcquireExecutionLease(ctx context.Context, name, instanceID string,
 	if err != nil && err != sql.ErrNoRows {
 		return ownership.Lease{}, false, err
 	}
-	if err == nil && expiresAt > now.Unix() && currentInstance != instanceID {
-		return ownership.Lease{}, false, nil
+	if err == nil && expiresAt > now.Unix() {
+		if currentInstance != instanceID {
+			return ownership.Lease{}, false, nil
+		}
+		lease := ownership.Lease{Name: name, InstanceID: currentInstance, FencingToken: fence, AcquiredAt: time.Unix(acquiredAt, 0).UTC(), ExpiresAt: time.Unix(expiresAt, 0).UTC()}
+		if err = tx.Commit(); err != nil {
+			return ownership.Lease{}, false, err
+		}
+		return lease, true, nil
 	}
 	fence++
 	if fence < 1 {

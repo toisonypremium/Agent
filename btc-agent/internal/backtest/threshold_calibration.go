@@ -24,10 +24,16 @@ type ThresholdCalibrationConfig struct {
 }
 
 type ThresholdCalibrationResult struct {
-	Enabled bool                  `json:"enabled"`
-	Rows    []ThresholdProfileRow `json:"rows"`
-	Summary string                `json:"summary"`
+	Enabled         bool                      `json:"enabled"`
+	Rows            []ThresholdProfileRow     `json:"rows"`
+	ProfileRows     []ThresholdProfileRow     `json:"profile_rows"`
+	CalibrationRows []ThresholdProfileRow     `json:"calibration_rows"`
+	ValidationRows  []ThresholdProfileRow     `json:"validation_rows"`
+	SelectedProfile string                    `json:"selected_profile"`
+	Split           ThresholdCalibrationSplit `json:"split"`
+	Summary         string                    `json:"summary"`
 }
+type ThresholdCalibrationSplit struct{ ProfileEnd, CalibrationStart, CalibrationEnd, ValidationStart, ValidationEnd, Embargo int }
 
 type ThresholdProfile = researchprofile.Profile
 
@@ -62,23 +68,61 @@ func RunThresholdCalibration(cfg config.Config, btc map[string][]market.Candle, 
 	auditCfg = normalizeThresholdCalibrationConfig(auditCfg)
 	btc1d := btc["1d"]
 	maxH := maxHorizon(auditCfg.HorizonDays)
-	need := auditCfg.MinWindow1D + maxH + 1
+	need := auditCfg.MinWindow1D + maxH*2 + 30
 	if len(btc1d) < need {
-		return ThresholdCalibrationResult{}, fmt.Errorf("not enough BTC 1d candles for threshold calibration; need %d got %d", need, len(btc1d))
+		return ThresholdCalibrationResult{}, fmt.Errorf("not enough BTC 1d candles for purged threshold calibration; need %d got %d", need, len(btc1d))
+	}
+	available := len(btc1d) - auditCfg.MinWindow1D - 2*maxH
+	profileN := available * 60 / 100
+	calibrationN := available * 20 / 100
+	profileEnd := auditCfg.MinWindow1D + profileN
+	calibrationStart := profileEnd + maxH
+	calibrationEnd := calibrationStart + calibrationN
+	validationStart := calibrationEnd + maxH
+	if validationStart+maxH >= len(btc1d) {
+		return ThresholdCalibrationResult{}, fmt.Errorf("insufficient purged validation window")
 	}
 	profiles := researchprofile.Profiles()
-	accs := make([]*thresholdProfileAcc, len(profiles))
-	for i := range profiles {
-		accs[i] = newThresholdProfileAcc(auditCfg.HorizonDays)
+	ranges := [][2]int{{auditCfg.MinWindow1D, profileEnd}, {calibrationStart, calibrationEnd}, {validationStart, len(btc1d) - maxH}}
+	all := make([][]ThresholdProfileRow, 3)
+	for r, bounds := range ranges {
+		accs := make([]*thresholdProfileAcc, len(profiles))
+		for i := range accs {
+			accs[i] = newThresholdProfileAcc(auditCfg.HorizonDays)
+		}
+		accumulateThresholdRange(cfg, btc, auditCfg, profiles, accs, bounds[0], bounds[1])
+		for i, p := range profiles {
+			all[r] = append(all[r], finalizeThresholdProfileRow(p, accs[i], auditCfg.HorizonDays, len(cfg.Data.Symbols.Assets)))
+		}
 	}
+	selected := 0
+	for i := range all[1] {
+		all[1][i].Verdict = thresholdProfileVerdict(all[1][i], all[1][0])
+		if all[1][i].Verdict == ThresholdCandidateReview && selected == 0 {
+			selected = i
+		}
+	}
+	for i := range all[2] {
+		if i == 0 {
+			all[2][i].Verdict = ThresholdKeepCurrent
+		} else if i == selected {
+			all[2][i].Verdict = thresholdProfileVerdict(all[2][i], all[2][0])
+		} else {
+			all[2][i].Verdict = ThresholdNeedMoreData
+		}
+	}
+	result := ThresholdCalibrationResult{Enabled: true, Rows: all[2], ProfileRows: all[0], CalibrationRows: all[1], ValidationRows: all[2], SelectedProfile: profiles[selected].Name, Split: ThresholdCalibrationSplit{profileEnd, calibrationStart, calibrationEnd, validationStart, len(btc1d) - maxH, maxH}}
+	result.Summary = fmt.Sprintf("purged 60/20/20 threshold calibration selected=%s embargo=%d; validation-only verdict, research-only", result.SelectedProfile, maxH)
+	return result, nil
+}
+func accumulateThresholdRange(cfg config.Config, btc map[string][]market.Candle, auditCfg ThresholdCalibrationConfig, profiles []ThresholdProfile, accs []*thresholdProfileAcc, start, end int) {
 	neutralFG := exchange.FearGreed{Value: 50, Classification: "Neutral"}
-	for i := auditCfg.MinWindow1D; i+maxH < len(btc1d); i++ {
-		entry := btc1d[i].Close
+	for i := start; i < end; i++ {
+		entry := btc["1d"][i].Close
 		if entry <= 0 {
 			continue
 		}
-		btcWindow := btcTimeframeWindow(btc, i)
-		analysis, err := agent1.Analyze(cfg, btcWindow, neutralFG)
+		analysis, err := agent1.Analyze(cfg, btcTimeframeWindow(btc, i), neutralFG)
 		if err != nil {
 			continue
 		}
@@ -93,8 +137,8 @@ func RunThresholdCalibration(cfg config.Config, btc map[string][]market.Candle, 
 			}
 			if perm == agent1.Armed || perm == agent1.Allowed {
 				for _, h := range auditCfg.HorizonDays {
-					ret := (btc1d[i+h].Close - entry) / entry
-					dd := worstDrawdown(btc1d[i+1:i+h+1], entry)
+					ret := (btc["1d"][i+h].Close - entry) / entry
+					dd := worstDrawdown(btc["1d"][i+1:i+h+1], entry)
 					acc.returns[h] += ret
 					if ret > 0 {
 						acc.wins[h]++
@@ -107,15 +151,6 @@ func RunThresholdCalibration(cfg config.Config, btc map[string][]market.Candle, 
 			}
 		}
 	}
-	result := ThresholdCalibrationResult{Enabled: true}
-	for i, profile := range profiles {
-		result.Rows = append(result.Rows, finalizeThresholdProfileRow(profile, accs[i], auditCfg.HorizonDays, len(cfg.Data.Symbols.Assets)))
-	}
-	for i := range result.Rows {
-		result.Rows[i].Verdict = thresholdProfileVerdict(result.Rows[i], result.Rows[0])
-	}
-	result.Summary = summarizeThresholdCalibration(result.Rows)
-	return result, nil
 }
 
 func normalizeThresholdCalibrationConfig(auditCfg ThresholdCalibrationConfig) ThresholdCalibrationConfig {

@@ -223,3 +223,21 @@ func TestResearchPermissionOverrideAddsSafetyNote(t *testing.T) {
 		t.Fatalf("expected research-only safety note")
 	}
 }
+
+func TestRealisticFillSlippageFeeAndPartialConservation(t *testing.T) {
+	sim := Agent2Simulation{Assets: map[string]AssetSimStats{"ETHUSDT": {Symbol: "ETHUSDT"}}}
+	orders := map[string][]simOrder{"ETHUSDT": {{symbol: "ETHUSDT", price: 100, quantity: 1, notional: 100, activeFromIndex: 0}}}
+	positions := map[string]*simPosition{"ETHUSDT": {}}
+	assets := map[string][]market.Candle{"ETHUSDT": {{Low: 90, High: 110, Close: 100}}}
+	processOrdersAndPositionsWithOverrides(&sim, orders, positions, assets, 0, 5, "now", SimulationOverrides{SlippageBps: 100, FeeBps: 10, FillFraction: .5})
+	p := positions["ETHUSDT"]
+	if p.qty != .5 {
+		t.Fatalf("qty=%v", p.qty)
+	}
+	if len(orders["ETHUSDT"]) != 1 || orders["ETHUSDT"][0].quantity != .5 {
+		t.Fatalf("remaining=%+v", orders)
+	}
+	if p.cost <= 50.5 {
+		t.Fatalf("slippage/fee not charged cost=%v", p.cost)
+	}
+}

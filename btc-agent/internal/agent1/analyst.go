@@ -203,8 +203,20 @@ func fomoRisk(w, d, h4 market.FrameSignal, price float64, r market.Zone, fg exch
 	if fg.Value >= 80 {
 		return High
 	}
-	if r.Valid() && price > r.Low*0.98 {
-		return High
+	if r.Valid() {
+		atr := h4.ATR14
+		if atr <= 0 {
+			atr = d.ATR14
+		}
+		if price > r.High {
+			return High
+		}
+		if atr > 0 && r.Low-price >= 0 && r.Low-price <= atr*0.35 {
+			return High
+		}
+		if atr <= 0 && price >= r.Low {
+			return High
+		}
 	}
 	if h4.RSI14 > 75 || (d.EMA20 > 0 && price > d.EMA20*1.12) {
 		return High

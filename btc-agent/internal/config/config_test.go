@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"math"
+	"testing"
+)
 
 func TestValidateManualLiveTradingRequiresManualConfirm(t *testing.T) {
 	cfg := validTestConfig()
@@ -696,5 +699,27 @@ func TestHermesCanaryRequiresLiveExecution(t *testing.T) {
 	cfg.Live.MaxLiveNotionalTotalUSDT = 2
 	if err := cfg.Validate(); err == nil {
 		t.Fatal("canary without live execution should fail")
+	}
+}
+
+func TestValidateRejectsYAMLTelegramTokenAndNonFiniteCapitalValues(t *testing.T) {
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"telegram token in YAML", func(c *Config) { c.Notify.TelegramToken = "secret" }},
+		{"reserve NaN", func(c *Config) { c.Portfolio.ReserveCashRatio = math.NaN() }},
+		{"capital infinity", func(c *Config) { c.Portfolio.TotalCapital = math.Inf(1) }},
+		{"layer NaN", func(c *Config) { c.Execution.LayerDistribution = []float64{math.NaN()} }},
+		{"layer infinity", func(c *Config) { c.Execution.LayerDistribution = []float64{math.Inf(1)} }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected fail-closed validation error")
+			}
+		})
 	}
 }

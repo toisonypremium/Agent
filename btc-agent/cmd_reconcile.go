@@ -72,6 +72,16 @@ func runReconcileLiveOrdersWithNotify(ctx context.Context, cfg config.Config, db
 		return fmt.Errorf("read operator halt for reconcile invariant: %w", err)
 	}
 	result = liveguard.ApplyHaltedReconcileInvariant(result, positions, halted)
+	if result.Safety.Unknown > 0 {
+		payload, marshalErr := json.Marshal(map[string]any{"status": result.Safety.Status, "unknown_orders": result.Safety.Unknown, "blockers": result.Safety.Blockers})
+		if marshalErr != nil {
+			return fmt.Errorf("marshal reconcile unknown incident: %w", marshalErr)
+		}
+		fingerprint := fmt.Sprintf("reconcile-unknown:%d:%s", result.Safety.Unknown, result.Safety.Status)
+		if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Timestamp: time.Now().UTC(), Source: "btc-agent-reconcile", Type: "RECONCILE_UNKNOWN_OUTCOME", Severity: "critical", Fingerprint: fingerprint, PayloadJSON: string(payload)}); err != nil {
+			return fmt.Errorf("save reconcile unknown incident: %w", err)
+		}
+	}
 	if halted && result.Safety.Status == liveguard.ReconcileBlock {
 		if err := db.SetHermesDemoted(true); err != nil {
 			return fmt.Errorf("demote Hermes after halted reconcile invariant: %w", err)

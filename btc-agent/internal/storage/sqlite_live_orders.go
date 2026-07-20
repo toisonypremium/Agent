@@ -230,7 +230,10 @@ func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
 	if updatedAt == 0 {
 		updatedAt = time.Now().Unix()
 	}
-	b, _ := json.Marshal(o)
+	b, err := json.Marshal(o)
+	if err != nil {
+		return fmt.Errorf("marshal live order status: %w", err)
+	}
 	update := func(where string, id string) (int64, error) {
 		res, err := d.Exec(
 			`UPDATE live_orders SET
@@ -273,8 +276,11 @@ func (d *DB) SaveLiveOrderStatus(o live.OrderStatus) error {
 
 func (d *DB) SaveLiveOrderEvent(o live.OrderStatus) error {
 	now := time.Now().Unix()
-	b, _ := json.Marshal(o)
-	_, err := d.Exec(
+	b, err := json.Marshal(o)
+	if err != nil {
+		return fmt.Errorf("marshal live order event: %w", err)
+	}
+	_, err = d.Exec(
 		`INSERT INTO live_order_events(timestamp, client_order_id, order_id, status, payload_json) VALUES(?,?,?,?,?)`,
 		now, o.ClientOrderID, o.OrderID, o.Status, string(b),
 	)
@@ -304,8 +310,11 @@ func (d *DB) SaveLiveFillSnapshot(fill live.LiveFillSnapshot) error {
 	if fill.ClientOrderID == "" {
 		return fmt.Errorf("live fill snapshot client_order_id required")
 	}
-	b, _ := json.Marshal(fill)
-	_, err := d.Exec(`INSERT OR REPLACE INTO live_fills(client_order_id, order_id, inst_id, symbol, side, filled_quantity, avg_price, fee, fee_currency, updated_at, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, fill.ClientOrderID, fill.OrderID, fill.InstID, fill.Symbol, strings.ToUpper(fill.Side), fill.FilledQuantity, fill.AvgPrice, fill.Fee, strings.ToUpper(fill.FeeCurrency), fill.UpdatedAt, string(b), nullableString(fill.ThesisID))
+	b, err := json.Marshal(fill)
+	if err != nil {
+		return fmt.Errorf("marshal live fill snapshot: %w", err)
+	}
+	_, err = d.Exec(`INSERT OR REPLACE INTO live_fills(client_order_id, order_id, inst_id, symbol, side, filled_quantity, avg_price, fee, fee_currency, updated_at, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`, fill.ClientOrderID, fill.OrderID, fill.InstID, fill.Symbol, strings.ToUpper(fill.Side), fill.FilledQuantity, fill.AvgPrice, fill.Fee, strings.ToUpper(fill.FeeCurrency), fill.UpdatedAt, string(b), nullableString(fill.ThesisID))
 	return err
 }
 

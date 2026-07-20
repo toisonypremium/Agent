@@ -46,24 +46,25 @@ type FlowDiagnostics struct {
 }
 
 type Signal struct {
-	Timeframe        string          `json:"timeframe"`
-	Support          market.Zone     `json:"support"`
-	Resistance       market.Zone     `json:"resistance"`
-	SweepLow         bool            `json:"sweep_low"`
-	SweepHigh        bool            `json:"sweep_high"`
-	ReclaimSupport   bool            `json:"reclaim_support"`
-	RejectResistance bool            `json:"reject_resistance"`
-	FailedBreakdown  bool            `json:"failed_breakdown"`
-	FailedBreakout   bool            `json:"failed_breakout"`
-	Absorption       bool            `json:"absorption"`
-	Distribution     bool            `json:"distribution"`
-	BullScore        float64         `json:"bull_score"`
-	BearScore        float64         `json:"bear_score"`
-	FlowBias         Bias            `json:"flow_bias"`
-	Confidence       float64         `json:"confidence"`
-	Components       []FlowComponent `json:"components,omitempty"`
-	Diagnostics      FlowDiagnostics `json:"diagnostics,omitempty"`
-	Notes            []string        `json:"notes"`
+	Timeframe                string          `json:"timeframe"`
+	Support                  market.Zone     `json:"support"`
+	Resistance               market.Zone     `json:"resistance"`
+	SweepLow                 bool            `json:"sweep_low"`
+	SweepHigh                bool            `json:"sweep_high"`
+	ReclaimSupport           bool            `json:"reclaim_support"`
+	RejectResistance         bool            `json:"reject_resistance"`
+	FailedBreakdown          bool            `json:"failed_breakdown"`
+	CandidateFailedBreakdown bool            `json:"candidate_failed_breakdown"`
+	FailedBreakout           bool            `json:"failed_breakout"`
+	Absorption               bool            `json:"absorption"`
+	Distribution             bool            `json:"distribution"`
+	BullScore                float64         `json:"bull_score"`
+	BearScore                float64         `json:"bear_score"`
+	FlowBias                 Bias            `json:"flow_bias"`
+	Confidence               float64         `json:"confidence"`
+	Components               []FlowComponent `json:"components,omitempty"`
+	Diagnostics              FlowDiagnostics `json:"diagnostics,omitempty"`
+	Notes                    []string        `json:"notes"`
 }
 
 type MultiFrame struct {

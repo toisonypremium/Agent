@@ -81,7 +81,6 @@ maintenance:
 notify:
   enabled: false
   provider: "telegram"
-  telegram_token: ""
   telegram_chat_id: ""
   ntfy_topic: ""
 

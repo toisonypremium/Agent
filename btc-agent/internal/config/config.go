@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
@@ -384,6 +385,9 @@ func validClockTime(value string) bool {
 }
 
 func (c Config) Validate() error {
+	if strings.TrimSpace(c.Notify.TelegramToken) != "" {
+		return errors.New("notify.telegram_token is forbidden in YAML; use TELEGRAM_TOKEN environment variable")
+	}
 	if c.App.Mode == "" {
 		return errors.New("app.mode required")
 	}
@@ -532,10 +536,10 @@ func (c Config) Validate() error {
 	if !c.Risk.NoFutures || !c.Risk.NoLeverage || !c.Risk.SpotLimitOnly {
 		return errors.New("risk flags must enforce no futures, no leverage, spot limit only")
 	}
-	if c.Portfolio.TotalCapital <= 0 {
+	if !finiteConfigFloat(c.Portfolio.TotalCapital) || c.Portfolio.TotalCapital <= 0 {
 		return errors.New("portfolio.total_capital must be positive")
 	}
-	if c.Portfolio.ReserveCashRatio < 0 || c.Portfolio.ReserveCashRatio >= 1 {
+	if !finiteConfigFloat(c.Portfolio.ReserveCashRatio) || c.Portfolio.ReserveCashRatio < 0 || c.Portfolio.ReserveCashRatio >= 1 {
 		return errors.New("portfolio.reserve_cash_ratio must be >=0 and <1")
 	}
 	if strings.ToUpper(c.Portfolio.BaseCurrency) != "USDT" {
@@ -734,7 +738,7 @@ func (c Config) Validate() error {
 	}
 	ls := 0.0
 	for _, v := range c.Execution.LayerDistribution {
-		if v <= 0 {
+		if !finiteConfigFloat(v) || v <= 0 {
 			return errors.New("layer_distribution values must be positive")
 		}
 		ls += v
@@ -747,3 +751,5 @@ func (c Config) Validate() error {
 	}
 	return nil
 }
+
+func finiteConfigFloat(v float64) bool { return !math.IsNaN(v) && !math.IsInf(v, 0) }

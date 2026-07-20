@@ -3,6 +3,7 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -47,7 +48,10 @@ func (d *DB) ConfirmOperatorChange(id, identity string, at time.Time) (operatorc
 	if e != nil {
 		return r, e
 	}
-	b, _ := json.Marshal(r)
+	b, marshalErr := json.Marshal(r)
+	if marshalErr != nil {
+		return r, fmt.Errorf("marshal operator change confirmation: %w", marshalErr)
+	}
 	if _, e = tx.Exec(`INSERT INTO operator_change_confirmations(request_id,identity,confirmed_at) VALUES(?,?,?)`, id, strings.ToLower(identity), at.Unix()); e != nil {
 		return r, e
 	}

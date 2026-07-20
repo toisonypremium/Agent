@@ -154,3 +154,22 @@ func TestNeutralFlowHasNextTrigger(t *testing.T) {
 		t.Fatalf("expected neutral next trigger: %+v", got)
 	}
 }
+
+func TestCandidateFailedBreakdownIsShadowOnly(t *testing.T) {
+	cs := flowCandles(30)
+	supportZone, _ := market.RangeZone(cs[:len(cs)-1], len(cs)-1)
+	support := supportZone.Low
+	last := &cs[len(cs)-1]
+	last.Low = support * 0.98
+	last.Open = support * 1.02
+	last.Close = support * 1.005
+	last.High = support * 1.03
+	last.Volume = 100000
+	got := Analyze(cs, "1d", len(cs))
+	if !got.CandidateFailedBreakdown {
+		t.Fatalf("candidate reclaim not detected: %+v", got)
+	}
+	if got.FailedBreakdown {
+		t.Fatalf("strict production detector must remain unchanged: %+v", got)
+	}
+}

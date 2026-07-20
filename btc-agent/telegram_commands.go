@@ -88,7 +88,7 @@ func saveTelegramRateLimits(state *telegramCommandState) {
 }
 
 func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB) error {
-	token := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
+	token := os.Getenv("TELEGRAM_TOKEN")
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
 	if strings.TrimSpace(token) == "" || strings.TrimSpace(chatID) == "" {
 		return fmt.Errorf("telegram command config missing token/chat_id")
@@ -114,7 +114,7 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 			if cmd == "" {
 				if trigger, ok := parseTelegramHermesRequest(update.Message.Text); ok {
 					result := runHermesTelegramReply(context.Background(), cfg, db, trigger)
-					telegramToken := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
+					telegramToken := os.Getenv("TELEGRAM_TOKEN")
 					telegramChatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
 					if err := func() error {
 						_, e := notify.TelegramSendAndHideKeyboard(ctx, telegramToken, telegramChatID, usertext.TelegramVietnamese(result))

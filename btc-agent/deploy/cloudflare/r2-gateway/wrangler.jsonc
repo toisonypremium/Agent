@@ -3,8 +3,17 @@
   "name": "btc-agent-r2-gateway",
   "main": "worker.js",
   "compatibility_date": "2026-07-20",
-  "workers_dev": true,
+  "workers_dev": false,
   "r2_buckets": [
-    { "binding": "ARTIFACTS", "bucket_name": "btc-agent-v2-artifacts" }
+    {
+      "binding": "ARTIFACTS",
+      "bucket_name": "btc-agent-v2-artifacts"
+    }
+  ],
+  "routes": [
+    {
+      "pattern": "btc-r2-gateway.linhbot.xyz",
+      "custom_domain": true
+    }
   ]
 }

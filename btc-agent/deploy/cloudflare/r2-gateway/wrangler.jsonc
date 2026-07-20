@@ -1,0 +1,10 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "btc-agent-r2-gateway",
+  "main": "worker.js",
+  "compatibility_date": "2026-07-20",
+  "workers_dev": true,
+  "r2_buckets": [
+    { "binding": "ARTIFACTS", "bucket_name": "btc-agent-v2-artifacts" }
+  ]
+}

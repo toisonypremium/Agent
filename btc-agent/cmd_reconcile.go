@@ -246,6 +246,10 @@ func runCancelAllLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 	if len(open) == 0 {
 		result.Summary = "cancel-all: no open live orders"
 	} else if dryRun {
+		_, guardedCanceler, err := guardedLiveExchange(ctx, cfg, db, client)
+		if err != nil {
+			return err
+		}
 		for _, order := range open {
 			result.Canceled = append(result.Canceled, liveguard.ManagedOrderDecision{Action: "would_cancel", Symbol: live.InternalSymbol(order.InstID), LayerIndex: order.LayerIndex, Order: order, Reason: "emergency cancel all dry-run"})
 		}
@@ -258,7 +262,7 @@ func runCancelAllLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 		}
 		for _, order := range open {
 			decision := liveguard.ManagedOrderDecision{Action: "cancel", Symbol: live.InternalSymbol(order.InstID), LayerIndex: order.LayerIndex, Order: order, Reason: "emergency cancel all"}
-			cancel, err := client.CancelOrder(ctx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+			cancel, err := guardedCanceler.CancelOrder(ctx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
 			decision.CancelResult = cancel
 			if err != nil {
 				decision.Error = err.Error()

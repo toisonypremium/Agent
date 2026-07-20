@@ -36,6 +36,7 @@ func runWeb(ctx context.Context, cfg config.Config, db *storage.DB, args []strin
 	}
 	mux := http.NewServeMux()
 	registerWebDataAPI(mux, cfg, db)
+	registerCloudDashboardAPI(mux)
 	// Operator mutation controls remain fail-closed unless explicitly enabled.
 	// HALT is the only Phase 2 capability and has no direct order path.
 	if os.Getenv("BTC_AGENT_WEB_HALT_ENABLED") == "true" {

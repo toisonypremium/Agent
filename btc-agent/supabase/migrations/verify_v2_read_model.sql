@@ -1,0 +1,4 @@
+select count(*) as table_count from information_schema.tables where table_schema='public' and table_name in ('bot_instances','bot_heartbeats','agent_decisions','capital_plans','order_intents','exchange_orders','order_events','fills','positions','balance_snapshots','runtime_alerts','report_artifacts','audit_logs','bot_commands');
+select count(*) as rls_count from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relrowsecurity and c.relname in ('bot_instances','bot_heartbeats','agent_decisions','capital_plans','order_intents','exchange_orders','order_events','fills','positions','balance_snapshots','runtime_alerts','report_artifacts','audit_logs','bot_commands');
+select count(*) as view_count from information_schema.views where table_schema='public' and table_name like 'dashboard_%';
+select instance_name,run_mode,execution_enabled from public.bot_instances where instance_name='v2-prod-01';

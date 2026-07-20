@@ -74,3 +74,21 @@ func containsText(s, sub string) bool {
 	}
 	return false
 }
+
+func TestThresholdCalibrationUsesPurgedChronologicalSplits(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Data.Symbols.Assets = []string{"ETHUSDT"}
+	got, err := RunThresholdCalibration(cfg, map[string][]market.Candle{"1d": calibrationCandles(240)}, ThresholdCalibrationConfig{MinWindow1D: 60, HorizonDays: []int{7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Split.CalibrationStart-got.Split.ProfileEnd < 7 || got.Split.ValidationStart-got.Split.CalibrationEnd < 7 {
+		t.Fatalf("embargo missing: %+v", got.Split)
+	}
+	if got.Split.ProfileEnd >= got.Split.CalibrationStart || got.Split.CalibrationEnd >= got.Split.ValidationStart {
+		t.Fatalf("non chronological: %+v", got.Split)
+	}
+	if len(got.ValidationRows) == 0 || got.Rows[0].Profile.Name != got.ValidationRows[0].Profile.Name {
+		t.Fatalf("final rows must be validation only")
+	}
+}

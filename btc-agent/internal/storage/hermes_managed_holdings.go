@@ -43,7 +43,10 @@ func (d *DB) SaveHermesManagedHolding(h HermesManagedHolding) error {
 	if h.ThesisID == "" {
 		h.ThesisID = existingThesis
 	}
-	b, _ := json.Marshal(h)
+	b, marshalErr := json.Marshal(h)
+	if marshalErr != nil {
+		return fmt.Errorf("marshal Hermes managed holding: %w", marshalErr)
+	}
 	_, err = tx.Exec(`INSERT INTO hermes_managed_holdings(symbol,inst_id,quantity,avg_entry_price,adopted_at,updated_at,source,payload_json,thesis_id) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(symbol) DO UPDATE SET inst_id=excluded.inst_id,quantity=excluded.quantity,avg_entry_price=excluded.avg_entry_price,updated_at=excluded.updated_at,source=excluded.source,payload_json=excluded.payload_json,thesis_id=excluded.thesis_id`, h.Symbol, h.InstID, h.Quantity, h.AvgEntryPrice, h.AdoptedAt.Unix(), h.UpdatedAt.Unix(), h.Source, string(b), nullableString(h.ThesisID))
 	if err != nil {
 		return err

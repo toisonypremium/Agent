@@ -89,6 +89,8 @@ func AnalyzeWithParams(c []market.Candle, timeframe string, lookback int, params
 	s.SweepLow = last.Low < s.Support.Low || prev.Low < s.Support.Low
 	s.ReclaimSupport = last.Low < s.Support.Low && last.Close >= s.Support.Low
 	s.FailedBreakdown = last.Low < s.Support.Low && last.Close >= s.Support.High
+	// Candidate detector is shadow-only: reclaiming the support zone with wick/volume evidence.
+	s.CandidateFailedBreakdown = last.Low < s.Support.Low && last.Close >= s.Support.Low && wide && volumeHigh && lowerWickRatio >= params.WickRatio
 	s.SweepHigh = last.High > s.Resistance.High || prev.High > s.Resistance.High
 	s.RejectResistance = last.High > s.Resistance.High && last.Close <= s.Resistance.High
 	s.FailedBreakout = last.High > s.Resistance.High && last.Close <= s.Resistance.Low

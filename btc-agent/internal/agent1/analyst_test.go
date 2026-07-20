@@ -151,3 +151,17 @@ func TestAnalyzeFlowAppearsInJSONAndReport(t *testing.T) {
 		t.Fatal("expected flow section in report")
 	}
 }
+
+func TestFOMORiskUsesATRDistanceAndBreakout(t *testing.T) {
+	r := market.Zone{Low: 100, High: 105}
+	base := market.FrameSignal{ATR14: 10, RSI14: 50, EMA20: 90}
+	if got := fomoRisk(base, base, base, 96, r, exchange.FearGreed{Value: 50}); got == High {
+		t.Fatalf("price outside ATR proximity should not be high: %s", got)
+	}
+	if got := fomoRisk(base, base, base, 97, r, exchange.FearGreed{Value: 50}); got != High {
+		t.Fatalf("ATR proximity should be high: %s", got)
+	}
+	if got := fomoRisk(base, base, base, 106, r, exchange.FearGreed{Value: 50}); got != High {
+		t.Fatalf("breakout should be high: %s", got)
+	}
+}

@@ -91,6 +91,9 @@ type SimulationOverrides struct {
 	TakeProfitPct        float64
 	TimeStopDays         int
 	AllowArmedAsAllowed  bool
+	SlippageBps          float64
+	FillFraction         float64
+	FeeBps               float64
 }
 
 func RunAgent2Simulation(cfg config.Config, btc map[string][]market.Candle, assets map[string][]market.Candle) (Agent2Simulation, error) {
@@ -361,6 +364,13 @@ func processOrdersAndPositionsWithOverrides(sim *Agent2Simulation, openOrders ma
 				continue
 			}
 			if candle.Low <= order.price {
+				fillFraction := overrides.FillFraction
+				if fillFraction <= 0 || fillFraction > 1 {
+					fillFraction = 1
+				}
+				fillPrice := order.price * (1 + math.Max(0, overrides.SlippageBps)/10000)
+				fillQty := order.quantity * fillFraction
+				fillCost := fillPrice * fillQty * (1 + math.Max(0, overrides.FeeBps)/10000)
 				pos := positions[sym]
 				if pos == nil {
 					pos = &simPosition{}
@@ -369,11 +379,16 @@ func processOrdersAndPositionsWithOverrides(sim *Agent2Simulation, openOrders ma
 				if pos.qty == 0 {
 					pos.firstFillIndex = index
 				}
-				pos.qty += order.quantity
-				pos.cost += order.notional
+				pos.qty += fillQty
+				pos.cost += fillCost
 				pos.invalidation = order.invalidation
 				stats.OrdersFilled++
-				appendEvent(sim, Agent2SimEvent{Time: eventAt, Symbol: sym, Type: "FILL", Layer: order.layer, Price: order.price, Invalidation: order.invalidation})
+				appendEvent(sim, Agent2SimEvent{Time: eventAt, Symbol: sym, Type: "FILL", Layer: order.layer, Price: fillPrice, Invalidation: order.invalidation})
+				if fillFraction < 1 {
+					order.quantity -= fillQty
+					order.notional = order.price * order.quantity
+					remaining = append(remaining, order)
+				}
 				if pos.cost > stats.MaxDeployed {
 					stats.MaxDeployed = pos.cost
 				}

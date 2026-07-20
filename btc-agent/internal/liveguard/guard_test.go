@@ -2,6 +2,7 @@ package liveguard
 
 import (
 	"context"
+	"math"
 	"strings"
 	"testing"
 
@@ -155,4 +156,23 @@ func liveTestConfig(t *testing.T) config.Config {
 	cfg.Live.RequirePostOnly = true
 	cfg.Live.ProofOnly = true
 	return cfg
+}
+
+func TestFirstCandidateRequiresActiveAssetAtSelectionTime(t *testing.T) {
+	cfg := liveTestConfig(t)
+	for _, state := range []agent2.State{agent2.StateScout, agent2.StateArmed, agent2.StateWatch} {
+		plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: state, Layers: []agent2.Layer{{Index: 1, Price: 100, Notional: 10}}}}}
+		if got, ok := firstCandidate(cfg, plan); ok {
+			t.Fatalf("state=%s unexpectedly produced %+v", state, got)
+		}
+	}
+}
+func TestFirstCandidateRejectsNonFiniteLayer(t *testing.T) {
+	cfg := liveTestConfig(t)
+	for _, price := range []float64{math.NaN(), math.Inf(1), 0} {
+		plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1, Price: price, Notional: 10}}}}}
+		if got, ok := firstCandidate(cfg, plan); ok {
+			t.Fatalf("price=%v unexpectedly produced %+v", price, got)
+		}
+	}
 }

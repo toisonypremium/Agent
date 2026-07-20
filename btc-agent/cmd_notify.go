@@ -152,7 +152,7 @@ func sendScheduledTelegram(ctx context.Context, cfg config.Config, label, text s
 }
 
 func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {
-	token := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
+	token := os.Getenv("TELEGRAM_TOKEN")
 	chatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
 	text = usertext.TelegramVietnamese(text)
 	result, err := telegramManager.Send(ctx, token, chatID, label, text)

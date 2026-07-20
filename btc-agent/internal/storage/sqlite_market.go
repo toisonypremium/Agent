@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -74,8 +75,11 @@ func (d *DB) LoadCandles(symbol, interval string, limit int) ([]market.Candle, e
 	return out, rows.Err()
 }
 func (d *DB) SaveAnalysis(a agent1.MarketAnalysis) error {
-	b, _ := json.Marshal(a)
-	_, err := d.Exec(`INSERT INTO market_analyses(timestamp,btc_price,regime,action_permission,risk_level,falling_knife_risk,fomo_risk,payload_json) VALUES(?,?,?,?,?,?,?,?)`, a.Timestamp.Unix(), a.BTCPrice, a.MarketRegime, string(a.ActionPermission), string(a.RiskLevel), string(a.FallingKnifeRisk), string(a.FomoRisk), string(b))
+	b, err := json.Marshal(a)
+	if err != nil {
+		return fmt.Errorf("marshal market analysis: %w", err)
+	}
+	_, err = d.Exec(`INSERT INTO market_analyses(timestamp,btc_price,regime,action_permission,risk_level,falling_knife_risk,fomo_risk,payload_json) VALUES(?,?,?,?,?,?,?,?)`, a.Timestamp.Unix(), a.BTCPrice, a.MarketRegime, string(a.ActionPermission), string(a.RiskLevel), string(a.FallingKnifeRisk), string(a.FomoRisk), string(b))
 	return err
 }
 func (d *DB) LatestAnalysis() (agent1.MarketAnalysis, error) {
@@ -99,7 +103,10 @@ func (d *DB) LatestPlan() (agent2.Plan, error) {
 }
 
 func (d *DB) SavePlan(p agent2.Plan) error {
-	b, _ := json.Marshal(p)
-	_, err := d.Exec(`INSERT INTO accumulation_plans(timestamp,state,action_permission,payload_json) VALUES(?,?,?,?)`, p.Timestamp.Unix(), string(p.State), string(p.ActionPermission), string(b))
+	b, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("marshal accumulation plan: %w", err)
+	}
+	_, err = d.Exec(`INSERT INTO accumulation_plans(timestamp,state,action_permission,payload_json) VALUES(?,?,?,?)`, p.Timestamp.Unix(), string(p.State), string(p.ActionPermission), string(b))
 	return err
 }

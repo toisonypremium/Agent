@@ -127,7 +127,10 @@ func applyLivePositionEventTx(tx *sql.Tx, event live.LivePositionEvent) (live.Li
 	} else {
 		pos.UpdatedAt = time.Now().Unix()
 	}
-	b, _ := json.Marshal(pos)
+	b, marshalErr := json.Marshal(pos)
+	if marshalErr != nil {
+		return live.LivePosition{}, fmt.Errorf("marshal live position: %w", marshalErr)
+	}
 	if _, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b), nullableString(pos.ThesisID)); err != nil {
 		return live.LivePosition{}, err
 	}
@@ -149,8 +152,11 @@ func livePositionBySymbol(q interface {
 }
 
 func (d *DB) SaveLivePositionEvent(event live.LivePositionEvent) error {
-	b, _ := json.Marshal(event)
-	_, err := d.Exec(`INSERT INTO live_position_events(timestamp, client_order_id, order_id, inst_id, symbol, side, delta_quantity, fill_price, notional_delta, fee_delta, fee_currency, position_qty, avg_entry_price, status, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, strings.ToUpper(event.Side), event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, strings.ToUpper(event.FeeCurrency), event.PositionQty, event.AvgEntryPrice, event.Status, string(b), nullableString(event.ThesisID))
+	b, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("marshal live position event: %w", err)
+	}
+	_, err = d.Exec(`INSERT INTO live_position_events(timestamp, client_order_id, order_id, inst_id, symbol, side, delta_quantity, fill_price, notional_delta, fee_delta, fee_currency, position_qty, avg_entry_price, status, payload_json, thesis_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, strings.ToUpper(event.Side), event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, strings.ToUpper(event.FeeCurrency), event.PositionQty, event.AvgEntryPrice, event.Status, string(b), nullableString(event.ThesisID))
 	return err
 }
 

@@ -396,7 +396,7 @@ func writeLiveDoctorResult(result liveguard.RuntimeDoctorResult) error {
 
 func buildLiveDoctorResult(ctx context.Context, cfg config.Config, db *storage.DB) liveguard.RuntimeDoctorResult {
 	envFiles := inspectRuntimeEnvFiles()
-	result := liveguard.RuntimeDoctorResult{GeneratedAt: time.Now(), CredentialEnvPresent: liveCredentialEnvPresent(cfg), EnvFiles: envFiles, AutoLiveEnv: os.Getenv("BTC_AGENT_ALLOW_AUTO_LIVE") == "true", TelegramTokenPresent: firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN")) != "", TelegramChatPresent: firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")) != ""}
+	result := liveguard.RuntimeDoctorResult{GeneratedAt: time.Now(), CredentialEnvPresent: liveCredentialEnvPresent(cfg), EnvFiles: envFiles, AutoLiveEnv: os.Getenv("BTC_AGENT_ALLOW_AUTO_LIVE") == "true", TelegramTokenPresent: os.Getenv("TELEGRAM_TOKEN") != "", TelegramChatPresent: firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID")) != ""}
 	result.Warnings = append(result.Warnings, envFileConflictWarnings(envFiles)...)
 	if !result.AutoLiveEnv && cfg.Live.Enabled && cfg.Live.AutoExecute {
 		result.Blockers = append(result.Blockers, "BTC_AGENT_ALLOW_AUTO_LIVE=true required for auto live execution")

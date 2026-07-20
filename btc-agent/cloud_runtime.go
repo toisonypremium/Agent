@@ -36,6 +36,16 @@ func newCloudRuntime(db *storage.DB) (*cloudRuntime, error) {
 	if u := strings.TrimSpace(os.Getenv("R2_PRESIGNED_PUT_URL")); u != "" {
 		pubs["r2"] = r2.Publisher{Endpoint: u}
 		dest = append(dest, "r2")
+	} else {
+		endpoint, bucket := strings.TrimSpace(os.Getenv("R2_ENDPOINT")), strings.TrimSpace(os.Getenv("R2_BUCKET"))
+		access, secret := strings.TrimSpace(os.Getenv("R2_ACCESS_KEY_ID")), strings.TrimSpace(os.Getenv("R2_SECRET_ACCESS_KEY"))
+		if endpoint != "" || bucket != "" || access != "" || secret != "" {
+			if endpoint == "" || bucket == "" || access == "" || secret == "" {
+				return nil, fmt.Errorf("R2_ENDPOINT, R2_BUCKET, R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY are all required")
+			}
+			pubs["r2"] = r2.Publisher{Endpoint: endpoint, Bucket: bucket, AccessKeyID: access, SecretAccessKey: secret, SessionToken: strings.TrimSpace(os.Getenv("R2_SESSION_TOKEN")), Region: "auto"}
+			dest = append(dest, "r2")
+		}
 	}
 	instance := strings.TrimSpace(os.Getenv("BTC_AGENT_INSTANCE_ID"))
 	if instance == "" {

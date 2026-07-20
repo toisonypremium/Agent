@@ -21,7 +21,7 @@ func TestPublisherHeadersIdempotentAndRedacts(t *testing.T) {
 		_, _ = w.Write([]byte(secret))
 	}))
 	defer srv.Close()
-	p := Publisher{BaseURL: srv.URL, ServiceKey: secret, Client: srv.Client(), TableForEvent: map[string]string{"decision": "agent_decisions"}}
+	p := Publisher{BaseURL: srv.URL, ServiceKey: secret, Client: srv.Client(), TableForEvent: map[string]string{"decision": "agent_decisions"}, ConflictForEvent: map[string]string{"decision": "id"}}
 	err := p.Publish(context.Background(), outbox.Item{EventType: "decision", Payload: []byte(`{"id":"1"}`)})
 	if err == nil || strings.Contains(err.Error(), secret) {
 		t.Fatalf("unsafe err=%v", err)

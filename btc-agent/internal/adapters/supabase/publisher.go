@@ -17,6 +17,7 @@ type Publisher struct {
 	BaseURL, ServiceKey string
 	Client              *http.Client
 	TableForEvent       map[string]string
+	ConflictForEvent    map[string]string
 }
 
 func (p Publisher) Publish(ctx context.Context, item outbox.Item) error {
@@ -32,8 +33,12 @@ func (p Publisher) Publish(ctx context.Context, item outbox.Item) error {
 		return fmt.Errorf("unsupported supabase event type %q", item.EventType)
 	}
 	base.Path = "/rest/v1/" + url.PathEscape(table)
+	conflict := p.ConflictForEvent[item.EventType]
+	if conflict == "" {
+		return fmt.Errorf("supabase conflict mapping required for event type %q", item.EventType)
+	}
 	q := base.Query()
-	q.Set("on_conflict", "id")
+	q.Set("on_conflict", conflict)
 	base.RawQuery = q.Encode()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base.String(), bytes.NewReader(item.Payload))
 	if err != nil {

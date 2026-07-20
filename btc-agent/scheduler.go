@@ -153,6 +153,8 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	writeHeartbeat := func(event string) {
 		heartbeat.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
 		heartbeat.Status = "running"
+		heartbeat.StartupPhase = ""
+		heartbeat.PhaseStartedAt = ""
 		heartbeat.LastEvent = event
 		heartbeat.LastEventAt = heartbeat.GeneratedAt
 		heartbeat.NextDailyRun = schedulerHeartbeatTime(nextDaily)
@@ -169,6 +171,21 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		heartbeat.ConsecutiveMarketErrors = consecutiveMarketErrors
 		if err := writeSchedulerHeartbeat(heartbeat); err != nil {
 			log.Printf("[Scheduler] Heartbeat write warning: %v", err)
+		}
+	}
+	writeStartupPhase := func(phase string) {
+		now := time.Now().UTC().Format(time.RFC3339)
+		if heartbeat.StartupPhase != "" {
+			heartbeat.LastSuccessfulPhase = heartbeat.StartupPhase
+		}
+		heartbeat.GeneratedAt = now
+		heartbeat.Status = "starting"
+		heartbeat.StartupPhase = phase
+		heartbeat.PhaseStartedAt = now
+		heartbeat.LastEvent = "startup phase: " + phase
+		heartbeat.LastEventAt = now
+		if err := writeSchedulerHeartbeat(heartbeat); err != nil {
+			log.Printf("[Scheduler] Startup heartbeat write warning: %v", err)
 		}
 	}
 
@@ -218,6 +235,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	// #4: runNow sequence — research (read-only) BEFORE daily run, BEFORE supervisor.
 	// For --run-now, suppress individual Telegram sends and send one combined summary.
 	if runNow && cfg.Research.Enabled {
+		writeStartupPhase("research")
 		log.Println("[Scheduler] Executing initial research doctor/brief (--run-now)...")
 		researchCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
 		if _, err := runResearchDoctor(researchCtx, cfg); err != nil {
@@ -234,6 +252,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	if runNow {
+		writeStartupPhase("daily")
 		log.Println("[Scheduler] Executing initial daily run (--run-now)...")
 		if err := runDailyWithNotify(shutdownCtx, cfg, db, false); err != nil {
 			log.Printf("[Scheduler] Initial daily run error: %v", err)
@@ -243,6 +262,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		}
 		// AI watch runs after daily so it has fresh analysis/plan.
 		if expertScheduled {
+			writeStartupPhase("expert_research")
 			log.Println("[Scheduler] Executing initial expert research report (--run-now)...")
 			expertCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
 			if err := runExpertResearch(expertCtx, cfg, db, false, true); err != nil {
@@ -252,6 +272,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			cancel()
 		}
 		if cfg.AI.Enabled {
+			writeStartupPhase("ai_watch")
 			log.Println("[Scheduler] Executing initial AI watch (--run-now)...")
 			aiCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAIWatchTimeout)
 			if err := runAIWatch(aiCtx, cfg, db); err != nil {
@@ -294,6 +315,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	// Run reconciliation once on start if live is enabled. Recovery must fail
 	// closed before any supervisor cycle can be scheduled after a restart.
 	if cfg.Live.Enabled {
+		writeStartupPhase("reconcile")
 		log.Println("[Scheduler] Executing initial live order reconciliation...")
 		notifyReconcile := !runNow
 		reconcileErr := runReconcileLiveOrdersWithNotify(shutdownCtx, cfg, db, notifyReconcile)
@@ -325,6 +347,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 
 	liveSupervisor := liveSupervisorState{}
 	if cfg.Live.SupervisorEnabled {
+		writeStartupPhase("live_doctor")
 		doctor, err := runLiveDoctor(shutdownCtx, cfg, db)
 		if err != nil {
 			log.Printf("[Scheduler] Live doctor error: %v", err)
@@ -343,6 +366,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	if auditEnabled {
 		nextAudit = time.Now().Add(auditInterval)
 		if runNow {
+			writeStartupPhase("live_auto_audit")
 			log.Println("[Scheduler] Executing initial live-auto-audit (--run-now)...")
 			auditCtx, cancel := context.WithTimeout(shutdownCtx, schedulerAuditTimeout)
 			if err := runLiveAutoAudit(auditCtx, cfg, db); err != nil {
@@ -357,6 +381,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	if hermesEnabled {
 		nextHermes = time.Now().Add(hermesInterval)
 		if runNow {
+			writeStartupPhase("hermes")
 			log.Println("[Scheduler] Executing initial Hermes cycle (--run-now)...")
 			hermesCtx, cancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
 			if err := runHermesCycle(hermesCtx, cfg, db); err != nil {
@@ -369,6 +394,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	if runNow && cfg.Live.SupervisorEnabled {
+		writeStartupPhase("live_supervisor")
 		if hermesEnabled && cfg.HermesOperator.CanExecute() {
 			log.Println("[Scheduler] Fresh Hermes decision generated before initial supervisor execution.")
 		}
@@ -383,8 +409,10 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 
 	if runNow && cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		writeStartupPhase("notification")
 		sendScheduledTelegram(shutdownCtx, cfg, "scheduler-run-now", schedulerRunNowTelegram(shutdownCtx, cfg, db, runNowResearchSummary, runNowDailyOK, runNowReconcileOK, runNowSupervisor, runNowSupervisorSet, runNowNotes))
 	}
+	heartbeat.LastSuccessfulPhase = heartbeat.StartupPhase
 	writeHeartbeat("scheduler ready")
 
 	for {

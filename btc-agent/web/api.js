@@ -1,0 +1,2 @@
+const cache=new Map();
+export async function getJSON(path,signal){const old=cache.get(path)||{};const headers={Accept:'application/json'};if(old.etag)headers['If-None-Match']=old.etag;const r=await fetch(path,{headers,cache:'no-store',signal});if(r.status===304&&old.value)return old.value;if(!r.ok)throw new Error(`HTTP ${r.status}`);const value=await r.json();cache.set(path,{value,etag:r.headers.get('ETag')||''});return value}

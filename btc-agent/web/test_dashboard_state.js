@@ -1,0 +1,1 @@
+import assert from'node:assert/strict';import{statusClass,domain}from'./state.js';assert.equal(statusClass('FRESH'),'pass');assert.equal(statusClass('MISSING'),'unknown');assert.equal(statusClass('BLOCKED'),'block');assert.equal(domain({domains:{}},'doctor').status,'MISSING');console.log('dashboard state tests: PASS');

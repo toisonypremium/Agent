@@ -39,3 +39,31 @@ func TestApplyMicrostructureAssetGateDowngradesActive(t *testing.T) {
 		t.Fatalf("asset not downgraded safely: %+v", out.Assets[0])
 	}
 }
+
+func TestApplyMicrostructureAssetGateRiskyFootprintOnlyDowngrades(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Microstructure.Enabled = true
+	cfg.Microstructure.RequireFreshForActive = true
+	plan := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateActiveLimit, Layers: []agent2.Layer{{Index: 1}}}}}
+	now := time.Now()
+	summary := microstructure.BuildSummary(true, "BTCUSDT", []microstructure.Snapshot{{Symbol: "BTCUSDT", Timestamp: now, Health: microstructure.Health{Fresh: true}}, {Symbol: "ETHUSDT", Timestamp: now, Health: microstructure.Health{Fresh: true}}}, 1, now)
+	summary.MMFootprint = map[string]microstructure.MMFootprintSignal{"ETHUSDT": {Fresh: true, CurrentAskPressure: true, Verdict: "WATCH"}}
+	out := applyMicrostructureAssetGate(cfg, plan, summary)
+	if out.Assets[0].State != agent2.StateWatch || len(out.Assets[0].Layers) != 0 {
+		t.Fatalf("risky footprint did not reduce authority: %+v", out)
+	}
+}
+
+func TestApplyMicrostructureAssetGateSupportiveFootprintDoesNotPromote(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Microstructure.Enabled = true
+	cfg.Microstructure.RequireFreshForActive = true
+	plan := agent2.Plan{State: agent2.StateWatch, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", State: agent2.StateWatch}}}
+	now := time.Now()
+	summary := microstructure.BuildSummary(true, "BTCUSDT", []microstructure.Snapshot{{Symbol: "BTCUSDT", Timestamp: now, Health: microstructure.Health{Fresh: true}}, {Symbol: "ETHUSDT", Timestamp: now, Health: microstructure.Health{Fresh: true}}}, 1, now)
+	summary.MMFootprint = map[string]microstructure.MMFootprintSignal{"ETHUSDT": {Fresh: true, Verdict: "MM_ACCUMULATING", FootprintScore: 1}}
+	out := applyMicrostructureAssetGate(cfg, plan, summary)
+	if out.Assets[0].State != agent2.StateWatch || len(out.Assets[0].Layers) != 0 {
+		t.Fatalf("supportive footprint promoted authority: %+v", out)
+	}
+}

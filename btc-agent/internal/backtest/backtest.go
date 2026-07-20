@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"btc-agent/internal/agent1"
+	"btc-agent/internal/agent2"
 	"btc-agent/internal/flow"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
@@ -377,18 +378,32 @@ func Markdown(r Result) string {
 		b.WriteString("\n")
 	}
 
-	b.WriteString("10c. MM Accumulation / Liquidity Sanity\n")
+	b.WriteString("10c. OHLCV Accumulation Structure / Liquidity Sanity\n")
 	if !r.MMAccumulationAudit.Enabled {
-		b.WriteString("- MM accumulation audit: skipped\n\n")
+		b.WriteString("- OHLCV accumulation structure audit: skipped\n\n")
 	} else {
 		b.WriteString("- " + r.MMAccumulationAudit.Summary + "\n")
-		b.WriteString("| Symbol | Samples | Top case | MM pass | Hard block | Avg MM | Liq pass | Avg liq |\n")
+		b.WriteString("| Symbol | Samples | Top case | Structure pass | Hard block | Avg structure | Liq pass | Avg liq |\n")
 		b.WriteString("|---|---:|---|---:|---:|---:|---:|---:|\n")
 		for _, row := range r.MMAccumulationAudit.Rows {
 			b.WriteString(fmt.Sprintf("| %s | %d | %s | %.1f%% | %.1f%% | %.1f | %.1f%% | %.1f |\n", row.Symbol, row.Samples, row.TopCase, row.PassRate*100, row.HardBlockRate*100, row.AvgScore, row.LiquidityPassRate*100, row.AvgLiquidityScore))
 		}
+		b.WriteString("\nForward return / MAE / MFE by structure case (diagnostic only):\n")
+		b.WriteString("| Symbol | Case | Samples | Quality | 7D return | 14D return | 14D MAE | 14D MFE |\n")
+		b.WriteString("|---|---|---:|---|---:|---:|---:|---:|\n")
+		for _, row := range r.MMAccumulationAudit.Rows {
+			cases := make([]string, 0, len(row.ByCase))
+			for c := range row.ByCase {
+				cases = append(cases, string(c))
+			}
+			sort.Strings(cases)
+			for _, name := range cases {
+				stats := row.ByCase[agent2.MMCase(name)]
+				b.WriteString(fmt.Sprintf("| %s | %s | %d | %s | %.2f%% | %.2f%% | %.2f%% | %.2f%% |\n", row.Symbol, name, stats.Samples, stats.SampleQuality, stats.AvgReturn[7]*100, stats.AvgReturn[14]*100, stats.AvgMAE[14]*100, stats.AvgMFE[14]*100))
+			}
+		}
 		if len(r.MMAccumulationAudit.TopMissing) > 0 {
-			b.WriteString("Top MM/liquidity blockers:\n")
+			b.WriteString("Top OHLCV structure/liquidity blockers:\n")
 			for _, item := range r.MMAccumulationAudit.TopMissing {
 				b.WriteString(fmt.Sprintf("- %s: %d\n", item.Reason, item.Count))
 			}

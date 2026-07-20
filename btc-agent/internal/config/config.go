@@ -182,6 +182,16 @@ type Config struct {
 			Enabled         bool `yaml:"enabled"`
 			IntervalMinutes int  `yaml:"interval_minutes"`
 		} `yaml:"fx"`
+		Derivatives struct {
+			Enabled         bool   `yaml:"enabled"`
+			IntervalMinutes int    `yaml:"interval_minutes"`
+			BaseURL         string `yaml:"base_url"`
+			Symbol          string `yaml:"symbol"`
+		} `yaml:"derivatives"`
+		OnChain struct {
+			Enabled         bool `yaml:"enabled"`
+			IntervalMinutes int  `yaml:"interval_minutes"`
+		} `yaml:"on_chain"`
 		News struct {
 			Enabled         bool `yaml:"enabled"`
 			IntervalMinutes int  `yaml:"interval_minutes"`

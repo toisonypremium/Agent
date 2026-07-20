@@ -1,18 +1,1 @@
-const fs = require("fs");
-const vm = require("vm");
-
-const source = fs.readFileSync(process.argv[2], "utf8");
-const match = source.match(/const html=.*?;\n/);
-if (!match) throw new Error("Không tìm thấy hàm html escape");
-
-const context = {};
-vm.createContext(context);
-vm.runInContext(`${match[0]}globalThis.escapeHTML = html;`, context);
-
-const payload = `<img src=x onerror=alert(1)> & " '`;
-const expected = `&lt;img src=x onerror=alert(1)&gt; &amp; &quot; &#39;`;
-const actual = context.escapeHTML(payload);
-if (actual !== expected) {
-  throw new Error(`Escape sai: ${actual}`);
-}
-console.log("XSS_ESCAPE=OK", actual);
+import assert from'node:assert/strict';import{shortHash}from'./render.js';const payload='<img src=x onerror=alert(1)>';assert.equal(shortHash(payload),'<img src…lert(1)>');const html=await import('node:fs/promises').then(fs=>fs.readFile(new URL('./app.js',import.meta.url),'utf8'));assert(!html.includes('innerHTML'));assert(!html.includes('eval('));console.log('dashboard escape tests: PASS');

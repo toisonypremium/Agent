@@ -32,8 +32,8 @@ func TestAnalyzeMMAccumulationFailedSweep(t *testing.T) {
 	last := len(c) - 1
 	c[last] = market.Candle{Symbol: "ETHUSDT", Interval: "1d", Open: 99, High: 101, Low: 88, Close: 97, Volume: 900}
 	got := AnalyzeMMAccumulation("ETHUSDT", c)
-	if got.Case != MMCaseFailedSweep {
-		t.Fatalf("expected failed sweep: %+v", got)
+	if got.Case != MMCaseSweepPendingReclaim {
+		t.Fatalf("expected sweep pending reclaim: %+v", got)
 	}
 }
 
@@ -57,5 +57,25 @@ func TestAnalyzeMMAccumulationDistributionTrap(t *testing.T) {
 	got := AnalyzeMMAccumulation("ETHUSDT", c)
 	if got.Case != MMCaseDistributionTrap || !got.HardBlock {
 		t.Fatalf("expected distribution trap: %+v", got)
+	}
+}
+
+func TestAnalyzeMMAccumulationInsufficientDataHardBlocks(t *testing.T) {
+	got := AnalyzeMMAccumulation("ETHUSDT", mmCandles(24))
+	if !got.HardBlock || got.Pass {
+		t.Fatalf("insufficient data must fail closed: %+v", got)
+	}
+	if got.Source != "OHLCV_ACCUMULATION_STRUCTURE" {
+		t.Fatalf("unexpected evidence source: %q", got.Source)
+	}
+}
+
+func TestSweepCaseUsesPendingReclaimTerminology(t *testing.T) {
+	c := mmCandles(80)
+	last := len(c) - 1
+	c[last] = market.Candle{Symbol: "ETHUSDT", Interval: "1d", Open: 99, High: 101, Low: 88, Close: 97, Volume: 900}
+	got := AnalyzeMMAccumulation("ETHUSDT", c)
+	if got.Case != MMCaseSweepPendingReclaim || string(got.Case) == "FAILED_SWEEP" {
+		t.Fatalf("sweep must be pending reclaim, not failed: %+v", got)
 	}
 }

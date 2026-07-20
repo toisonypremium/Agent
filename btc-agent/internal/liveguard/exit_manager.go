@@ -193,5 +193,7 @@ func PlaceSellLimitOrder(ctx context.Context, decision ExitDecision, placer Orde
 		PostOnly:      false, // Use regular limit for sell exits — fills faster
 		ClientOrderID: clOrdID,
 	}
-	return placer.PlaceSpotLimitOrder(ctx, req)
+	placeCtx, cancel := context.WithTimeout(ctx, managedExchangeTimeout)
+	defer cancel()
+	return placer.PlaceSpotLimitOrder(placeCtx, req)
 }

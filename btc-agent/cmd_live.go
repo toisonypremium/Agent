@@ -862,7 +862,7 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		execCtx.HasManagedRealOrderHistory = hasHistory
 	}
 	if cfg.HermesOperator.CanExecute() {
-		if hermesResult, handled := executeLatestHermesDecision(ctx, cfg, db, p, analysis, open, positions, filters, dataHealth, reconcileSafety, riskGovernor, placer, dryRun); handled {
+		if hermesResult, handled := executeLatestHermesDecision(ctx, cfg, db, p, analysis, open, positions, filters, dataHealth, reconcileSafety, riskGovernor, placer, execCtx, dryRun); handled {
 			if !dryRun {
 				_ = persistManagedCycleResult(db, hermesResult)
 			}

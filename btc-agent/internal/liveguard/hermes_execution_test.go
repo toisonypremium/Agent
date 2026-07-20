@@ -55,7 +55,15 @@ func (r *hermesTestRecorder) MarkManagedLiveOrderSubmitted(id string, _ live.Ord
 func (r *hermesTestRecorder) MarkManagedLiveOrderRejected(string, string) error { return nil }
 func (r *hermesTestRecorder) MarkManagedLiveOrderUnknown(string, string) error  { return nil }
 
-func TestExecuteHermesCanaryProbeCallsSpotLimitOnce(t *testing.T) {
+func hermesExecutablePlan() agent2.Plan {
+	return agent2.Plan{State: agent2.StateActiveLimit, ActionPermission: "ALLOWED"}
+}
+
+func hermesExecutableContext() ManagedExecutionContext {
+	return ManagedExecutionContext{BTCAccumulationPhase: "ACCUMULATION_CONFIRMED", FirstOrderDryRunApproved: true, HermesMode: "canary"}
+}
+
+func TestExecuteHermesCanaryProbeRequiresDeterministicGates(t *testing.T) {
 	cfg := config.Config{}
 	cfg.HermesOperator.Enabled, cfg.HermesOperator.Mode = true, "canary"
 	cfg.Live.Enabled, cfg.Live.AutoExecute = true, true
@@ -65,12 +73,14 @@ func TestExecuteHermesCanaryProbeCallsSpotLimitOnce(t *testing.T) {
 	cfg.Risk.NoFutures, cfg.Risk.NoLeverage, cfg.Risk.SpotLimitOnly = true, true, true
 	d := ManagedDesiredOrder{Symbol: "RENDERUSDT", InstID: "RENDER-USDT", LayerIndex: 1, Side: "BUY", Type: "limit", Price: 1.5, Quantity: 2, Notional: 3, PostOnly: true, Source: "HERMES_OPERATOR", DecisionID: "decision-1", Intent: "PROBE_LIMIT", AllocationTier: string(OpportunityProbe)}
 	placer, recorder := &hermesTestPlacer{}, &hermesTestRecorder{}
-	result := ExecuteHermesDesiredOrders(context.Background(), cfg, agent2.Plan{State: agent2.StateScout}, []ManagedDesiredOrder{d}, nil, placer, recorder, ManagedExecutionContext{HermesMode: "canary"}, false)
-	if result.Status != ManagedCycleCompleted || len(placer.calls) != 1 || len(recorder.reserved) != 1 {
-		t.Fatalf("result=%+v calls=%d reserved=%d", result, len(placer.calls), len(recorder.reserved))
+	blocked := ExecuteHermesDesiredOrders(context.Background(), cfg, agent2.Plan{State: agent2.StateScout}, []ManagedDesiredOrder{d}, nil, placer, recorder, ManagedExecutionContext{BTCAccumulationPhase: "MARKDOWN", HermesMode: "canary"}, false)
+	if len(placer.calls) != 0 || len(blocked.Blocked) != 1 {
+		t.Fatalf("unsafe Scout probe reached exchange: %+v", blocked)
 	}
-	if placer.calls[0].Side != "buy" || !placer.calls[0].PostOnly {
-		t.Fatalf("unsafe request: %+v", placer.calls[0])
+	placer, recorder = &hermesTestPlacer{}, &hermesTestRecorder{}
+	result := ExecuteHermesDesiredOrders(context.Background(), cfg, hermesExecutablePlan(), []ManagedDesiredOrder{d}, nil, placer, recorder, hermesExecutableContext(), false)
+	if result.Status != ManagedCycleCompleted || len(placer.calls) != 1 || len(recorder.reserved) != 1 {
+		t.Fatalf("qualified result=%+v calls=%d reserved=%d", result, len(placer.calls), len(recorder.reserved))
 	}
 }
 
@@ -83,7 +93,7 @@ func TestExecuteHermesCanaryDuplicateReservationDoesNotCallExchange(t *testing.T
 	cfg.Risk.NoFutures, cfg.Risk.NoLeverage, cfg.Risk.SpotLimitOnly = true, true, true
 	d := ManagedDesiredOrder{Symbol: "RENDERUSDT", InstID: "RENDER-USDT", LayerIndex: 1, Side: "BUY", Type: "limit", Price: 1.5, Quantity: 2, Notional: 3, PostOnly: true, Source: "HERMES_OPERATOR", DecisionID: "decision-1", Intent: "PROBE_LIMIT", AllocationTier: string(OpportunityProbe)}
 	placer, recorder := &hermesTestPlacer{}, &hermesTestRecorder{reserveErr: fmt.Errorf("UNIQUE constraint")}
-	result := ExecuteHermesDesiredOrders(context.Background(), cfg, agent2.Plan{State: agent2.StateScout}, []ManagedDesiredOrder{d}, nil, placer, recorder, ManagedExecutionContext{HermesMode: "canary"}, false)
+	result := ExecuteHermesDesiredOrders(context.Background(), cfg, hermesExecutablePlan(), []ManagedDesiredOrder{d}, nil, placer, recorder, hermesExecutableContext(), false)
 	if len(placer.calls) != 0 || len(result.Blocked) != 1 {
 		t.Fatalf("duplicate reached exchange: %+v", result)
 	}

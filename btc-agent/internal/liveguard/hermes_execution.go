@@ -61,7 +61,9 @@ func ExecuteHermesDesiredOrders(ctx context.Context, cfg config.Config, plan age
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
-		placed, err := placer.PlaceSpotLimitOrder(ctx, live.LimitOrderRequest{InstID: d.InstID, Side: "buy", Price: d.Price, Quantity: d.Quantity, PostOnly: true, ClientOrderID: clientID})
+		placeCtx, placeDone := context.WithTimeout(ctx, managedExchangeTimeout)
+		placed, err := placer.PlaceSpotLimitOrder(placeCtx, live.LimitOrderRequest{InstID: d.InstID, Side: "buy", Price: d.Price, Quantity: d.Quantity, PostOnly: true, ClientOrderID: clientID})
+		placeDone()
 		decision.PlaceResult = placed
 		if err != nil {
 			safeErr := sanitizeExchangeError(cfg, err)
@@ -155,7 +157,9 @@ func ExecuteHermesCancelActions(ctx context.Context, cfg config.Config, decision
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
-		cancel, err := canceler.CancelOrder(ctx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+		cancelCtx, cancelDone := context.WithTimeout(ctx, managedExchangeTimeout)
+		cancel, err := canceler.CancelOrder(cancelCtx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+		cancelDone()
 		decision.CancelResult = cancel
 		if err != nil || !cancel.Canceled {
 			decision.Action = "block"
@@ -166,7 +170,9 @@ func ExecuteHermesCancelActions(ctx context.Context, cfg config.Config, decision
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
-		remote, err := statusReader.OrderStatus(ctx, order.InstID, order.OrderID, order.ClientOrderID)
+		statusCtx, statusDone := context.WithTimeout(ctx, managedExchangeTimeout)
+		remote, err := statusReader.OrderStatus(statusCtx, order.InstID, order.OrderID, order.ClientOrderID)
+		statusDone()
 		if err != nil {
 			decision.Action = "block"
 			decision.Reason = "post-cancel status unknown; reconcile required"
@@ -349,7 +355,9 @@ func executeHermesOwnedSellActions(ctx context.Context, cfg config.Config, decis
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
-		placed, err := placer.PlaceSpotLimitOrder(ctx, live.LimitOrderRequest{InstID: desired.InstID, Side: "sell", Price: price, Quantity: qty, PostOnly: false, ClientOrderID: clientID})
+		placeCtx, placeDone := context.WithTimeout(ctx, managedExchangeTimeout)
+		placed, err := placer.PlaceSpotLimitOrder(placeCtx, live.LimitOrderRequest{InstID: desired.InstID, Side: "sell", Price: price, Quantity: qty, PostOnly: false, ClientOrderID: clientID})
+		placeDone()
 		decision.PlaceResult = placed
 		if err != nil {
 			// Submission may have reached the exchange. Keep PLANNED so startup

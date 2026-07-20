@@ -21,7 +21,7 @@ import (
 	"btc-agent/internal/storage"
 )
 
-func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *storage.DB, plan agent2.Plan, analysis agent1.MarketAnalysis, open []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, dataHealth liveguard.DataHealthResult, reconcile liveguard.ReconcileSafetyResult, risk liveguard.RiskGovernorResult, placer liveguard.OrderPlacer, dryRun bool) (liveguard.ManagedCycleResult, bool) {
+func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *storage.DB, plan agent2.Plan, analysis agent1.MarketAnalysis, open []live.OrderStatus, positions []live.LivePosition, filters []live.InstrumentFilter, dataHealth liveguard.DataHealthResult, reconcile liveguard.ReconcileSafetyResult, risk liveguard.RiskGovernorResult, placer liveguard.OrderPlacer, execCtx liveguard.ManagedExecutionContext, dryRun bool) (liveguard.ManagedCycleResult, bool) {
 	if demoted, err := db.IsHermesDemoted(); err != nil && !dryRun {
 		return blockedHermesCycle(plan, dryRun, "Hermes circuit-breaker state unavailable"), true
 	} else if demoted && !dryRun {
@@ -71,6 +71,25 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		return blockedHermesCycle(plan, dryRun, "Hermes validated actions differ from signed decision payload"), true
 	}
 	audit.Validation = executionValidation
+	if !dryRun && cfg.HermesOperator.NormalizedMode() == "canary" && hermesActionsIncreaseExposure(audit.Validation.Actions) {
+		if len(open) != 0 {
+			return blockedHermesCycle(plan, dryRun, fmt.Sprintf("Hermes canary requires zero current open orders; found %d", len(open))), true
+		}
+		owned, ownedErr := db.HermesOwnedPositions()
+		if ownedErr != nil {
+			return blockedHermesCycle(plan, dryRun, "Hermes canary owned-position state unavailable"), true
+		}
+		if len(owned) != 0 {
+			return blockedHermesCycle(plan, dryRun, fmt.Sprintf("Hermes canary requires zero current owned positions; found %d", len(owned))), true
+		}
+		readiness, readinessErr := loadHermesCanaryReadiness(filepath.Join("reports", "hermes_canary_readiness_latest.json"))
+		if readinessErr != nil {
+			return blockedHermesCycle(plan, dryRun, "Hermes canary readiness unavailable: "+readinessErr.Error()), true
+		}
+		if blockers := liveguard.ValidateCanaryReadinessReport(readiness, time.Now().UTC()); len(blockers) > 0 {
+			return blockedHermesCycle(plan, dryRun, "Hermes canary readiness blocked: "+strings.Join(blockers, "; ")), true
+		}
+	}
 	if len(audit.Validation.Actions) == 0 {
 		saveBaseProtectionStatus(db, cfg)
 		return noActionHermesCycle(plan, dryRun, "valid Hermes HOLD/WATCH decision; no action requested"), true
@@ -311,7 +330,8 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		result.Blocked = append(result.Blocked, blocked...)
 		return result, true
 	}
-	execCtx := liveguard.ManagedExecutionContext{BTCAccumulationPhase: string(analysis.BTCAccumulation.Phase), HermesMode: cfg.HermesOperator.NormalizedMode()}
+	execCtx.BTCAccumulationPhase = string(analysis.BTCAccumulation.Phase)
+	execCtx.HermesMode = cfg.HermesOperator.NormalizedMode()
 	applyPortfolioLossState(cfg, db, &execCtx, time.Now())
 	result := liveguard.ExecuteHermesDesiredOrders(ctx, cfg, plan, desired, open, placer, db, execCtx, dryRun)
 	result.DataHealth, result.ReconcileSafety, result.RiskGovernor = dataHealth, reconcile, risk
@@ -457,4 +477,24 @@ func saveBaseProtectionStatus(db *storage.DB, cfg config.Config) {
 		}
 	}
 	_ = db.SaveProtectionStatuses(protections, time.Now())
+}
+func hermesActionsIncreaseExposure(actions []hermesoperator.Action) bool {
+	for _, action := range actions {
+		if action.Intent.IncreasesExposure() {
+			return true
+		}
+	}
+	return false
+}
+
+func loadHermesCanaryReadiness(path string) (liveguard.CanaryReadinessResult, error) {
+	var report liveguard.CanaryReadinessResult
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return report, err
+	}
+	if err := json.Unmarshal(b, &report); err != nil {
+		return report, err
+	}
+	return report, nil
 }

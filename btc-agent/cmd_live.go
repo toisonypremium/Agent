@@ -678,7 +678,10 @@ func runExecuteLiveProofOrder(ctx context.Context, cfg config.Config, db *storag
 	if err == nil {
 		balanceReader = client
 		filterReader = client
-		placer = client
+		guardedPlacer, _, guardErr := guardedLiveExchange(ctx, cfg, db, client)
+		if guardErr == nil {
+			placer = guardedPlacer
+		}
 	}
 	proof := liveguard.BuildProofWithChecks(ctx, cfg, p, balanceReader, filterReader)
 	result := liveguard.ExecuteManualProofOrder(ctx, cfg, proof, confirm, placer, db)
@@ -795,8 +798,17 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 	var canceler liveguard.OrderCanceler
 	if err == nil {
 		filterReader = client
-		placer = client
-		canceler = client
+		guardedPlacer, guardedCanceler, guardErr := guardedLiveExchange(ctx, cfg, db, client)
+		if guardErr != nil && !dryRun {
+			return guardErr
+		}
+		if guardErr == nil {
+			placer = guardedPlacer
+			canceler = guardedCanceler
+		} else {
+			placer = client
+			canceler = client
+		}
 		// Refresh total capital from complete live equity: free USDT plus
 		// material managed spot holdings. Using cash alone would make deployment
 		// percentages expand as positions are sold and contract as they are bought.

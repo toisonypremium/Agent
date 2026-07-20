@@ -6,6 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/home/admin/btc-agent/btc-agent
+EnvironmentFile=/home/admin/btc-agent-systemd.env
 ExecStart=/home/admin/btc-agent/btc-agent/bin/btc-agent web --config /home/admin/btc-agent/btc-agent/config.yaml --listen 127.0.0.1:20129
 Restart=on-failure
 RestartSec=5

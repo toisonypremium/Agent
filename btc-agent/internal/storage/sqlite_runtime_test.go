@@ -102,3 +102,27 @@ func TestSQLiteOutboxProcessingIsRecoverable(t *testing.T) {
 		t.Fatalf("stale processing row should recover: %v", recovered)
 	}
 }
+
+func TestSQLiteLeaseFenceSurvivesGracefulRelease(t *testing.T) {
+	db, err := Open(t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	first, ok, err := db.AcquireExecutionLease(ctx, "okx", "instance", now, time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("first ok=%v err=%v", ok, err)
+	}
+	if err = db.ReleaseExecutionLease(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	second, ok, err := db.AcquireExecutionLease(ctx, "okx", "instance", now.Add(time.Second), time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("second ok=%v err=%v", ok, err)
+	}
+	if second.FencingToken <= first.FencingToken {
+		t.Fatalf("fence did not advance across release: %d <= %d", second.FencingToken, first.FencingToken)
+	}
+}

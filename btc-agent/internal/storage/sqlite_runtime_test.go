@@ -1,0 +1,69 @@
+package storage
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"btc-agent/internal/runtime/outbox"
+)
+
+func TestSQLiteExecutionLeaseFencing(t *testing.T) {
+	db, err := Open(t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	a, ok, err := db.AcquireExecutionLease(ctx, "okx", "a", now, time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("first: ok=%v err=%v", ok, err)
+	}
+	if _, ok, err = db.AcquireExecutionLease(ctx, "okx", "b", now, time.Minute); err != nil || ok {
+		t.Fatalf("second: ok=%v err=%v", ok, err)
+	}
+	b, ok, err := db.AcquireExecutionLease(ctx, "okx", "b", now.Add(2*time.Minute), time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("expired: ok=%v err=%v", ok, err)
+	}
+	if b.FencingToken <= a.FencingToken {
+		t.Fatalf("fence %d <= %d", b.FencingToken, a.FencingToken)
+	}
+}
+
+func TestSQLiteOutboxIdempotencyClaimAndRetry(t *testing.T) {
+	db, err := Open(t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC)
+	i := outbox.Item{ID: "event-1", EventType: "decision", Destination: "supabase", Payload: []byte(`{"ok":true}`), IdempotencyKey: "decision-1", CreatedAt: now}
+	if err = db.EnqueueOutbox(ctx, i); err != nil {
+		t.Fatal(err)
+	}
+	i.ID = "event-2"
+	if err = db.EnqueueOutbox(ctx, i); err == nil {
+		t.Fatal("duplicate idempotency key accepted")
+	}
+	items, err := db.ClaimOutbox(ctx, now, 10)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("claim=%d err=%v", len(items), err)
+	}
+	if err = db.RetryOutbox(ctx, items[0].ID, "down", now.Add(time.Minute), false); err != nil {
+		t.Fatal(err)
+	}
+	items, err = db.ClaimOutbox(ctx, now, 10)
+	if err != nil || len(items) != 0 {
+		t.Fatalf("early retry claim=%d err=%v", len(items), err)
+	}
+	items, err = db.ClaimOutbox(ctx, now.Add(time.Minute), 10)
+	if err != nil || len(items) != 1 {
+		t.Fatalf("due retry claim=%d err=%v", len(items), err)
+	}
+	if err = db.MarkOutboxDelivered(ctx, items[0].ID); err != nil {
+		t.Fatal(err)
+	}
+}

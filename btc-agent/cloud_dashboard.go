@@ -89,6 +89,6 @@ func registerCloudDashboardAPI(mux *http.ServeMux) {
 			status = "degraded"
 			msg = err.Error()
 		}
-		writeWebJSON(w, map[string]any{"status": status, "supabase": c.enabled(), "r2": strings.TrimSpace(os.Getenv("R2_BUCKET")) != "", "message": msg, "summary": summary, "generated_at": time.Now().UTC()})
+		writeWebJSON(w, map[string]any{"status": status, "supabase": c.enabled(), "r2": strings.TrimSpace(os.Getenv("R2_BUCKET")) != "" || strings.TrimSpace(os.Getenv("R2_PRESIGNED_PUT_URL")) != "", "message": msg, "summary": summary, "generated_at": time.Now().UTC()})
 	})
 }

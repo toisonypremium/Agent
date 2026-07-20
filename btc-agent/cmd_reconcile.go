@@ -246,10 +246,6 @@ func runCancelAllLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 	if len(open) == 0 {
 		result.Summary = "cancel-all: no open live orders"
 	} else if dryRun {
-		_, guardedCanceler, err := guardedLiveExchange(ctx, cfg, db, client)
-		if err != nil {
-			return err
-		}
 		for _, order := range open {
 			result.Canceled = append(result.Canceled, liveguard.ManagedOrderDecision{Action: "would_cancel", Symbol: live.InternalSymbol(order.InstID), LayerIndex: order.LayerIndex, Order: order, Reason: "emergency cancel all dry-run"})
 		}
@@ -259,6 +255,10 @@ func runCancelAllLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 		client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
 		if err != nil {
 			return fmt.Errorf("create okx client: %w", err)
+		}
+		_, guardedCanceler, err := guardedLiveExchange(ctx, cfg, db, client)
+		if err != nil {
+			return err
 		}
 		for _, order := range open {
 			decision := liveguard.ManagedOrderDecision{Action: "cancel", Symbol: live.InternalSymbol(order.InstID), LayerIndex: order.LayerIndex, Order: order, Reason: "emergency cancel all"}

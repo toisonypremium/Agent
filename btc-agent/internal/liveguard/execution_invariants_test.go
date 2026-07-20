@@ -230,10 +230,11 @@ func TestP0ProductionOrderSubmissionCallerAllowlist(t *testing.T) {
 	}
 
 	want := map[string]int{
-		"internal/liveguard/executor.go":         2,
-		"internal/liveguard/exit_manager.go":     1,
-		"internal/liveguard/hermes_execution.go": 2,
-		"internal/liveguard/order_manager.go":    1,
+		"internal/liveguard/executor.go":           2,
+		"internal/liveguard/exit_manager.go":       1,
+		"internal/liveguard/hermes_execution.go":   2,
+		"internal/liveguard/order_manager.go":      1,
+		"internal/runtime/executionguard/guard.go": 1,
 	}
 	if !equalCallerCounts(got, want) {
 		t.Fatalf("production PlaceSpotLimitOrder caller set changed; review and update only after proving final safety gates\nwant=%v\n got=%v", sortedCallerCounts(want), sortedCallerCounts(got))

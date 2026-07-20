@@ -70,3 +70,64 @@ follow-up query used parameters and passed. No application defect.
 3. Provision/test real cloud endpoints without exposing credentials.
 4. Replace wrapper/timer arrangement with managed V2 systemd service.
 5. Repeat audit and only then consider expanding execution scope.
+
+---
+
+# Re-audit after P0/P1 remediation — 2026-07-20 09:21 UTC
+
+## Remediation deployed
+
+- Commit `ad6e9bb` adds scheduler-scoped ownership and a 30-second renewal loop.
+- Renewal loss cancels the scheduler context and fails closed.
+- Same-instance guard acquisition reuses the active fence instead of advancing it.
+- Durable outbox worker and explicit Supabase conflict mapping are composed into the
+  scheduler runtime.
+- Cloud credentials are read only from environment and missing partial configuration
+  fails startup.
+- Release SHA-256:
+  `75792db28943bfc87e6bfafafdd114f4352581bba4adab4253c2734f0ca43c21`.
+
+## Re-audit evidence
+
+- Full Go tests, vet, Linux build and diff check: pass.
+- Operator halt: active.
+- Doctor blocker is only the intentional operator halt.
+- Reconcile: clean; open/unknown/manual checks 0; four positions retained.
+- One V2 scheduler process.
+- Fence stable at `3`; expiry renewed every 30 seconds:
+  - `09:19:44` expiry `09:21:14`
+  - `09:20:14` expiry `09:21:44`
+  - `09:20:44` expiry `09:22:14`
+- At observation `09:21:00`, lease expiry was 74 seconds in the future.
+- No order was placed.
+
+## Finding status
+
+### P1 lease renewal — CLOSED
+
+Continuous renewal is running and evidenced. Network guards reuse the process-owned
+fence. Renewal loss cancels scheduler execution.
+
+### P0 cloud runtime wiring — CODE CLOSED / PRODUCTION DELIVERY BLOCKED
+
+Outbox worker and adapters are now production-composed, but all required VPS cloud
+environment variables are absent:
+
+- `SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+- `R2_PRESIGNED_PUT_URL` or R2 credential/provider configuration
+
+No production cloud delivery test can run without these values. Runtime correctly
+stays cloud-disabled and does not invent credentials.
+
+### P1 systemd ownership — OPEN
+
+The root-owned healthcheck timer remains active and invokes the V2 wrapper. Disabling
+or replacing the unit requires interactive sudo credentials. V1 is not started, but
+formal service ownership remains operational debt.
+
+## Final verdict
+
+**Execution remains halted. P1 lease defect is fixed. P0 code wiring is fixed, but
+P0 production delivery cannot pass until the operator provisions Supabase/R2
+credentials. Systemd P1 also requires privileged operator action.**

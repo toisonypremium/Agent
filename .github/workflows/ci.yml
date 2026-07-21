@@ -69,7 +69,6 @@ jobs:
           DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
         run: for f in supabase/migrations/verify_v2_read_model.sql supabase/migrations/verify_llm_usage_read_model.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
   frontend:
-    if: ${{ hashFiles('btc-agent/web/package-lock.json') != '' }}
     runs-on: ubuntu-latest
     defaults:
       run:

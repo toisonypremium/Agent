@@ -97,7 +97,9 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		}
 	}
 	if len(audit.Validation.Actions) == 0 {
-		saveBaseProtectionStatus(db, cfg)
+		if err := saveBaseProtectionStatus(db, cfg); err != nil {
+			return blockedHermesCycle(plan, dryRun, "Hermes protection snapshot persistence failed"), true
+		}
 		return noActionHermesCycle(plan, dryRun, "valid Hermes HOLD/WATCH decision; no action requested"), true
 	}
 	halted, haltErr := db.IsHalted()
@@ -315,7 +317,14 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		}
 		filteredSafety = append(filteredSafety, decision)
 	}
-	_ = db.SaveProtectionStatuses(protections, time.Now())
+	if err := persistProtectionStatuses(db, protections, time.Now().UTC()); err != nil {
+		for i := range filteredSafety {
+			if filteredSafety[i].Allowed && filteredSafety[i].Action.Intent.IncreasesExposure() {
+				filteredSafety[i].Allowed = false
+				filteredSafety[i].Reasons = append(filteredSafety[i].Reasons, "Hermes protection snapshot persistence failed")
+			}
+		}
+	}
 	safety = filteredSafety
 	reducing := make([]liveguard.HermesActionDecision, 0)
 	for _, decision := range safety {
@@ -446,16 +455,16 @@ func hermesCorrelationRegimeMultiplier(a agent1.MarketAnalysis) float64 {
 }
 
 // saveBaseProtectionStatus persists a lightweight protection snapshot
-// containing only the portfolio-level locks (loss streak, drawdown, equity, cooldowns).
-// Called on HOLD/WATCH cycles where the full decision loop is skipped.
-func saveBaseProtectionStatus(db *storage.DB, cfg config.Config) {
+// containing portfolio-level locks (loss streak, drawdown, equity, cooldowns).
+// It is used before execution-consumable LLM decisions and on HOLD/WATCH cycles.
+func saveBaseProtectionStatus(db *storage.DB, cfg config.Config) error {
 	lossLookback := time.Duration(cfg.Risk.HermesLossLookbackHours) * time.Hour
 	if lossLookback <= 0 {
 		lossLookback = 7 * 24 * time.Hour
 	}
 	lossProtection, lossProtectionErr := db.HermesLossProtectionSnapshot(time.Now().Add(-lossLookback))
 	if lossProtectionErr != nil {
-		return
+		return fmt.Errorf("load Hermes loss protection: %w", lossProtectionErr)
 	}
 	lossLockUntil := time.Time{}
 	if cfg.Risk.HermesMaxConsecutiveLosses > 0 && lossProtection.ConsecutiveLosses >= cfg.Risk.HermesMaxConsecutiveLosses {
@@ -470,19 +479,43 @@ func saveBaseProtectionStatus(db *storage.DB, cfg config.Config) {
 		{Name: "loss_streak", Active: !lossLockUntil.IsZero() && time.Now().Before(lossLockUntil), UnlockAt: lossLockUntil, Detail: fmt.Sprintf("%d consecutive losses", lossProtection.ConsecutiveLosses)},
 		{Name: "realized_drawdown", Active: !drawdownLockUntil.IsZero() && time.Now().Before(drawdownLockUntil), UnlockAt: drawdownLockUntil, Detail: fmt.Sprintf("%.2f USDT", lossProtection.MaxDrawdown)},
 	}
-	if eq, e := db.EquityRiskState(); e == nil {
+	eq, equityErr := db.EquityRiskState()
+	if equityErr != nil && equityErr != sql.ErrNoRows {
+		return fmt.Errorf("load Hermes equity risk state: %w", equityErr)
+	}
+	if equityErr == nil {
 		protections = append(protections, storage.ProtectionStatus{Name: "unrealized_drawdown", Active: eq.DrawdownPct >= cfg.Risk.MaxTotalEquityDrawdownPct, Detail: fmt.Sprintf("%.2f%%", eq.DrawdownPct*100)})
 	}
 	lastExitAt, err := db.HermesLastExitAtBySymbol()
-	if err == nil {
-		for symbol, exited := range lastExitAt {
-			unlock := exited.Add(time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute)
-			if time.Now().Before(unlock) {
-				protections = append(protections, storage.ProtectionStatus{Name: "reentry_cooldown", Symbol: symbol, Active: true, UnlockAt: unlock})
-			}
+	if err != nil {
+		return fmt.Errorf("load Hermes exit history: %w", err)
+	}
+	for symbol, exited := range lastExitAt {
+		unlock := exited.Add(time.Duration(cfg.Risk.HermesReentryCooldownMinutes) * time.Minute)
+		if time.Now().Before(unlock) {
+			protections = append(protections, storage.ProtectionStatus{Name: "reentry_cooldown", Symbol: symbol, Active: true, UnlockAt: unlock})
 		}
 	}
-	_ = db.SaveProtectionStatuses(protections, time.Now())
+	return persistProtectionStatuses(db, protections, time.Now().UTC())
+}
+
+func persistProtectionStatuses(db *storage.DB, protections []storage.ProtectionStatus, now time.Time) error {
+	if err := db.SaveProtectionStatuses(protections, now); err != nil {
+		payload, _ := json.Marshal(map[string]string{"reason": "protection_snapshot_persistence_failed", "error_class": "storage"})
+		eventErr := db.SaveRuntimeEvent(storage.RuntimeEvent{
+			Timestamp:   now,
+			Source:      "btc-agent-hermes",
+			Type:        "HERMES_PROTECTION_SNAPSHOT_FAILED",
+			Severity:    "critical",
+			Fingerprint: "hermes-protection-snapshot-failed",
+			PayloadJSON: string(payload),
+		})
+		if eventErr != nil {
+			return fmt.Errorf("save Hermes protection snapshot: %v; save critical runtime event: %w", err, eventErr)
+		}
+		return fmt.Errorf("save Hermes protection snapshot: %w", err)
+	}
+	return nil
 }
 func hermesActionsIncreaseExposure(actions []hermesoperator.Action) bool {
 	for _, action := range actions {

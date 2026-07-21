@@ -16,16 +16,17 @@ import (
 )
 
 const (
-	hermesGateHalted             = "HALTED"
-	hermesGateDemoted            = "HERMES_DEMOTED"
-	hermesGateDoctorBlock        = "DOCTOR_BLOCK"
-	hermesGateReconcileBlock     = "RECONCILE_BLOCK"
-	hermesGateUnknownOrder       = "UNKNOWN_ORDER"
-	hermesGateNoActionable       = "NO_ACTIONABLE_CANDIDATE"
-	hermesGateNoCapital          = "NO_CAPITAL"
-	hermesGateNoOwnedPosition    = "NO_OWNED_POSITION"
-	hermesGateStateUnchanged     = "STATE_UNCHANGED"
-	hermesGateDecisionStillFresh = "DECISION_STILL_FRESH"
+	hermesGateHalted                = "HALTED"
+	hermesGateDemoted               = "HERMES_DEMOTED"
+	hermesGateDoctorBlock           = "DOCTOR_BLOCK"
+	hermesGateReconcileBlock        = "RECONCILE_BLOCK"
+	hermesGateUnknownOrder          = "UNKNOWN_ORDER"
+	hermesGateNoActionable          = "NO_ACTIONABLE_CANDIDATE"
+	hermesGateNoCapital             = "NO_CAPITAL"
+	hermesGateNoOwnedPosition       = "NO_OWNED_POSITION"
+	hermesGateProtectionUnavailable = "PROTECTION_STATE_UNAVAILABLE"
+	hermesGateStateUnchanged        = "STATE_UNCHANGED"
+	hermesGateDecisionStillFresh    = "DECISION_STILL_FRESH"
 )
 
 type hermesDecisionEvaluation struct {
@@ -92,7 +93,9 @@ func evaluateHermesDecisionPreCall(cfg config.Config, db *storage.DB, snap herme
 		}
 	}
 	if protectionErr != nil {
+		eval.Reason = hermesGateProtectionUnavailable
 		eval.Reasons = append(eval.Reasons, "protection state unavailable")
+		return eval
 	}
 	if ownedErr != nil {
 		eval.Reason = hermesGateNoOwnedPosition

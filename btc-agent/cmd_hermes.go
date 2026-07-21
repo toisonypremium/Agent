@@ -231,6 +231,15 @@ func runHermesDecisionCycle(ctx context.Context, cfg config.Config, db *storage.
 	if plan, err := db.LatestPlan(); err == nil {
 		enrichHermesAssetsFromPlan(cfg, db, &snap, plan)
 	}
+	if err := saveBaseProtectionStatus(db, cfg); err != nil {
+		evaluation := hermesDecisionEvaluation{
+			Allowed:   false,
+			Reason:    hermesGateProtectionUnavailable,
+			StateHash: hermesDecisionStateHash(cfg, snap),
+			Reasons:   []string{"protection state refresh failed"},
+		}
+		return saveSkippedHermesDecision(db, cfg, trigger, evaluation)
+	}
 	evaluation := evaluateHermesDecisionPreCall(cfg, db, snap)
 	if !evaluation.Allowed {
 		return saveSkippedHermesDecision(db, cfg, trigger, evaluation)

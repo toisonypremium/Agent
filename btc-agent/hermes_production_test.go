@@ -1,13 +1,14 @@
 package main
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 
-	"btc-agent/internal/hermesoperator"
-
 	"btc-agent/internal/agent2"
+	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
+	"btc-agent/internal/storage"
 )
 
 func TestNoActionHermesCycleIsSuccessfulDryRun(t *testing.T) {
@@ -42,5 +43,27 @@ func TestHermesExecutionTimeValidationRejectsExpiredDecision(t *testing.T) {
 	got := hermesoperator.Validate(d, hermesoperator.ValidationPolicy{Now: now, MaxDecisionTTL: 2 * time.Minute, MinConfidence: .6, MaxActions: 1, MaxProbeNotionalUSDT: 2, MaxActionNotionalUSDT: 2, AllowedSymbols: map[string]bool{"BTCUSDT": true}})
 	if len(got.Reasons) == 0 || len(got.Actions) != 0 {
 		t.Fatalf("expired decision executable: %+v", got)
+	}
+}
+
+func TestPersistProtectionStatusesFailureCreatesCriticalEvent(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "agent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`DROP TABLE hermes_runtime_state`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 7, 21, 4, 35, 0, 0, time.UTC)
+	if err := persistProtectionStatuses(db, []storage.ProtectionStatus{{Name: "loss_streak", Active: true}}, now); err == nil {
+		t.Fatal("protection persistence failure must be returned")
+	}
+	events, err := db.PendingRuntimeEvents(10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Type != "HERMES_PROTECTION_SNAPSHOT_FAILED" || events[0].Severity != "critical" {
+		t.Fatalf("missing critical protection persistence event: %+v", events)
 	}
 }

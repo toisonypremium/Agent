@@ -53,6 +53,9 @@ func TestHermesDecisionPreCallBlocksNonActionableState(t *testing.T) {
 	if err := db.SetHaltStatus(false); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SaveProtectionStatuses([]storage.ProtectionStatus{}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
 	var cfg config.Config
 	cfg.HermesOperator.Mode = "canary"
 	snap := hermesagent.HermesSnapshot{GeneratedAt: time.Now(), DoctorStatus: "DOCTOR_OK", AuditVerdict: "APPROVED_REAL_ORDER"}
@@ -84,6 +87,9 @@ func TestHermesDecisionPreCallBlocksUnownedExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := db.SetHaltStatus(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveProtectionStatuses([]storage.ProtectionStatus{}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var cfg config.Config
@@ -124,5 +130,72 @@ func TestHermesDecisionPreCallBlocksRemoteOnlyReconcile(t *testing.T) {
 	got := evaluateHermesDecisionPreCall(cfg, db, snap)
 	if got.Allowed || got.Reason != hermesGateReconcileBlock {
 		t.Fatalf("got=%+v", got)
+	}
+}
+
+func TestHermesDecisionPreCallFailsClosedWhenProtectionStateMissing(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveJSONFile("reports", "live_reconcile_latest.json", liveguard.ReconcileResult{Safety: liveguard.ReconcileSafetyResult{Status: liveguard.ReconcileClean}}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(filepath.Join(dir, "agent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SetHermesDemoted(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetHaltStatus(false); err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	snap := hermesagent.HermesSnapshot{GeneratedAt: time.Now(), DoctorStatus: "DOCTOR_OK", AuditVerdict: "APPROVED_REAL_ORDER", Assets: []hermesagent.HermesAsset{{Symbol: "ETHUSDT", ProbeEligible: true}}}
+	got := evaluateHermesDecisionPreCall(cfg, db, snap)
+	if got.Allowed || got.Reason != hermesGateProtectionUnavailable {
+		t.Fatalf("missing protection state must fail closed before LLM call: %+v", got)
+	}
+}
+
+func TestHermesDecisionPreCallFailsClosedWhenProtectionStateInvalid(t *testing.T) {
+	dir := t.TempDir()
+	old, _ := os.Getwd()
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chdir(old)
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := saveJSONFile("reports", "live_reconcile_latest.json", liveguard.ReconcileResult{Safety: liveguard.ReconcileSafetyResult{Status: liveguard.ReconcileClean}}); err != nil {
+		t.Fatal(err)
+	}
+	db, err := storage.Open(filepath.Join(dir, "agent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if err := db.SetHermesDemoted(false); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SetHaltStatus(false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT OR REPLACE INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('protections',?,?)`, time.Now().Unix(), `{invalid`); err != nil {
+		t.Fatal(err)
+	}
+	var cfg config.Config
+	snap := hermesagent.HermesSnapshot{GeneratedAt: time.Now(), DoctorStatus: "DOCTOR_OK", AuditVerdict: "APPROVED_REAL_ORDER", Assets: []hermesagent.HermesAsset{{Symbol: "ETHUSDT", ProbeEligible: true}}}
+	got := evaluateHermesDecisionPreCall(cfg, db, snap)
+	if got.Allowed || got.Reason != hermesGateProtectionUnavailable {
+		t.Fatalf("invalid protection state must fail closed before LLM call: %+v", got)
 	}
 }

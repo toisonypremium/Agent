@@ -5,7 +5,8 @@
 - Web + local SQLite are the primary operational view.
 - Supabase is a cloud read model. R2 stores immutable audit artifacts.
 - Telegram is an optional fallback channel.
-- LLM output is narrative or a constrained proposal. It does not override operator halt, doctor, reconciliation, ownership/fencing, stale-data, exchange-filter, inventory, or capital locks.
+- LLM output is narrative or a constrained proposal. It does not override operator halt, doctor, reconciliation, ownership/fencing, stale-data, exchange-filter, inventory, capital, or protection locks.
+- Hermes refreshes its protection snapshot before an execution-consumable LLM decision. Missing, malformed, unreadable, or unwritable protection state fails closed before the call; persistence failure emits `HERMES_PROTECTION_SNAPSHOT_FAILED`.
 - Web refresh never calls an LLM and has no direct BUY/SELL/CANCEL route.
 
 ## Scheduling
@@ -76,8 +77,9 @@ Estimated cost remains unknown unless an explicit pricing configuration is added
 1. Group usage by purpose/model and inspect repeated state hashes.
 2. Confirm `hermes_interval_minutes` and Telegram flags.
 3. Check whether state-hash reservation is producing `DECISION_STILL_FRESH`/`STATE_IN_FLIGHT` skips.
-4. Disable periodic narrative with interval `0` through reviewed runtime configuration if needed.
-5. Do not disable deterministic doctor, reconciliation, ownership, or risk gates.
+4. Check pending runtime events for `HERMES_PROTECTION_SNAPSHOT_FAILED`; keep exposure increases blocked until SQLite protection persistence is healthy.
+5. Disable periodic narrative with interval `0` through reviewed runtime configuration if needed.
+6. Do not disable deterministic doctor, reconciliation, ownership, protection, or risk gates.
 
 ### Provider omits usage
 

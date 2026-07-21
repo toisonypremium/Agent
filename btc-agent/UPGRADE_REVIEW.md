@@ -96,19 +96,19 @@ Before autonomous real-order approval, live-auto now has extra production checks
 - Research reports and `real-data-survey` do not edit config or place orders.
 - BTC accumulation detector is an extra deterministic gate; it does not bypass `ACTIVE_LIMIT + ALLOWED`.
 
-## Operator status target
+## Operator status evidence
 
-Current approved operating state:
+The last recorded production re-audit on 2026-07-20 proved one fenced V2 owner,
+clean reconciliation and operator halt active. It did not approve unrestricted live
+trading. Current halt, market authority and execution state are runtime facts and must
+be re-verified after every release using `docs/production-verification-checklist.md`;
+they must not be inferred from this document.
 
 ```text
-scheduler=running in live-auto production mode
-mode=live-auto
-operator_halt=INACTIVE (cleared 2026-07-15)
-dry_run=false; this does not bypass market authority, audit/proof, final assertion, or live guards
-bot_ready_for_monitoring=true
-bot_ready_for_dry_run=true (infrastructure approved)
-bot_ready_for_real_order=false until ACTIVE_LIMIT+ALLOWED+ACCUMULATION_CONFIRMED and all execution guards pass
-current_market_blocker=BTC MARKDOWN/WATCH market authority
+code_ready=true
+monitoring_or_shadow_approval=requires current runtime audit
+real_order_approval=requires explicit operator approval plus every execution gate
+latest_code_baseline=production-v2-cutover
 ```
 
 When market is not ready, expected managed cycle remains:

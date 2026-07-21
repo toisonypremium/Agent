@@ -46,12 +46,26 @@ func RunAccumulationPhaseAudit(symbol string, daily []market.Candle, horizons []
 	if len(daily) < need {
 		return AccumulationPhaseAuditResult{Enabled: false, Symbol: symbol, Summary: fmt.Sprintf("accumulation phase audit skipped: need %d candles, got %d", need, len(daily))}
 	}
+	return runAccumulationPhaseAuditRange(symbol, daily, cfg, cfg.MinWindow1D, len(daily)-maxH)
+}
+
+func runAccumulationPhaseAuditRange(symbol string, daily []market.Candle, cfg Config, start, end int) AccumulationPhaseAuditResult {
+	maxH := maxHorizon(cfg.HorizonDays)
+	if start < cfg.MinWindow1D {
+		start = cfg.MinWindow1D
+	}
+	if limit := len(daily) - maxH; end > limit {
+		end = limit
+	}
+	if start >= end {
+		return AccumulationPhaseAuditResult{Enabled: false, Symbol: symbol, Summary: "accumulation phase audit range has no evaluable candles"}
+	}
 	result := AccumulationPhaseAuditResult{Enabled: true, Symbol: symbol}
 	accs := map[accumulation.Phase]*accumulationPhaseAcc{}
 	for _, phase := range allAccumulationPhases() {
 		accs[phase] = newAccumulationPhaseAcc(cfg.HorizonDays)
 	}
-	for i := cfg.MinWindow1D; i+maxH < len(daily); i++ {
+	for i := start; i < end; i++ {
 		window := daily[:i+1]
 		sig := accumulation.Analyze(symbol, window)
 		bucket := accs[sig.Phase]

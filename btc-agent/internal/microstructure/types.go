@@ -9,14 +9,15 @@ const (
 )
 
 type Snapshot struct {
-	Symbol    string             `json:"symbol"`
-	Timestamp time.Time          `json:"timestamp"`
-	Source    string             `json:"source"`
-	SpotFlow  SpotFlow           `json:"spot_flow"`
-	OrderBook OrderBook          `json:"order_book"`
-	Futures   FuturesObservation `json:"futures"`
-	Health    Health             `json:"health"`
-	Signals   Signals            `json:"signals"`
+	Symbol    string              `json:"symbol"`
+	Timestamp time.Time           `json:"timestamp"`
+	Source    string              `json:"source"`
+	SpotFlow  SpotFlow            `json:"spot_flow"`
+	OrderBook OrderBook           `json:"order_book"`
+	Futures   FuturesObservation  `json:"futures"`
+	Health    Health              `json:"health"`
+	Signals   Signals             `json:"signals"`
+	Research  ResearchDiagnostics `json:"research"`
 }
 
 type SpotFlow struct {

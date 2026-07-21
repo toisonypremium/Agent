@@ -1,6 +1,7 @@
 package microstructure
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -53,5 +54,16 @@ func TestEvaluateHealthAndSummaryBlockStale(t *testing.T) {
 	}
 	if !strings.Contains(summary.Summary, "fresh=1") {
 		t.Fatalf("summary missing fresh count: %s", summary.Summary)
+	}
+}
+
+func TestResearchDiagnosticsDoNotAffectHealthOrSignals(t *testing.T) {
+	now := time.Unix(1000, 0)
+	base := Snapshot{Symbol: "BTCUSDT", Timestamp: now, SpotFlow: SpotFlow{QuoteVolumeUSDT: 100, TakerBuyQuoteUSDT: 60}, OrderBook: OrderBook{BestBid: 99, BestAsk: 100}, Futures: FuturesObservation{OpenInterest: 10}}
+	without := EvaluateHealth(BuildSignals(base), now, time.Minute)
+	base.Research = ResearchDiagnostics{LiquidationProxy: EstimateLiquidationProxy(100, 98, 1000, 990), AnchoredVWAP: 99, VolumeProfile: VolumeProfile{Status: "OK", POC: 98}}
+	with := EvaluateHealth(BuildSignals(base), now, time.Minute)
+	if with.Health.Fresh != without.Health.Fresh || !reflect.DeepEqual(with.Signals, without.Signals) {
+		t.Fatalf("research diagnostics changed authority-bearing health/signals: before=%+v after=%+v", without, with)
 	}
 }

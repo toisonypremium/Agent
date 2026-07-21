@@ -43,6 +43,14 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 	now := time.Now().UTC()
 	maxAge := time.Duration(microstructureMaxAgeMinutes(cfg)) * time.Minute
 	snapshots := []microstructure.Snapshot{}
+	previousSnapshots := map[string]microstructure.Snapshot{}
+	if db != nil {
+		if previous, err := db.LatestMicrostructureSnapshots(microstructureSymbols(cfg)); err == nil {
+			for _, snapshot := range previous {
+				previousSnapshots[strings.ToUpper(snapshot.Symbol)] = snapshot
+			}
+		}
+	}
 	for _, symbol := range microstructureSymbols(cfg) {
 		snapshot := microstructure.Snapshot{Symbol: strings.ToUpper(symbol), Timestamp: now, Source: "binance-public"}
 		if flow, latest, err := spot.KlineFlow(ctx, symbol, microstructureInterval(cfg), microstructureLookbackLimit(cfg)); err != nil {
@@ -65,6 +73,31 @@ func fetchMicrostructureSummary(ctx context.Context, cfg config.Config, db *stor
 		}
 		snapshot = microstructure.BuildSignals(snapshot)
 		snapshot = microstructure.EvaluateHealth(snapshot, now, maxAge)
+		if previous, ok := previousSnapshots[strings.ToUpper(symbol)]; ok && previous.Health.Fresh && now.Sub(previous.Timestamp) <= maxAge {
+			snapshot.Research.LiquidationProxy = microstructure.EstimateLiquidationProxy(previous.OrderBook.BestBid, snapshot.OrderBook.BestBid, previous.Futures.OpenInterest, snapshot.Futures.OpenInterest)
+		} else {
+			snapshot.Research.LiquidationProxy = microstructure.EstimateLiquidationProxy(0, 0, 0, 0)
+		}
+		if db != nil {
+			if candles, err := db.LoadCandles(symbol, "1d", 90); err != nil {
+				snapshot.Research.Warnings = append(snapshot.Research.Warnings, "load candles for AVWAP/profile: "+err.Error())
+			} else if len(candles) > 0 {
+				anchor := 0
+				if len(candles) > 30 {
+					anchor = len(candles) - 30
+				}
+				if vwap, err := microstructure.AnchoredVWAP(candles, anchor); err != nil {
+					snapshot.Research.Warnings = append(snapshot.Research.Warnings, "anchored VWAP: "+err.Error())
+				} else {
+					snapshot.Research.AnchoredVWAP = vwap
+				}
+				if profile, err := microstructure.BuildVolumeProfile(candles[anchor:], 12); err != nil {
+					snapshot.Research.Warnings = append(snapshot.Research.Warnings, "volume profile: "+err.Error())
+				} else {
+					snapshot.Research.VolumeProfile = profile
+				}
+			}
+		}
 		snapshots = append(snapshots, snapshot)
 	}
 	if db != nil {

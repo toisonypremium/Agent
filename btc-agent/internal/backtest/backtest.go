@@ -60,6 +60,9 @@ type Result struct {
 	LayerAudit                    LayerAuditResult              `json:"layer_audit"`
 	ExitAudit                     ExitAuditResult               `json:"exit_audit"`
 	WalkForwardReport             WalkForwardReport             `json:"walk_forward_report"`
+	WalkForwardAnalysisReport     WalkForwardAnalysisReport     `json:"walk_forward_analysis_report"`
+	WalkForwardVerdict            WalkForwardVerdict            `json:"walk_forward_verdict"`
+	AccumulationWalkForward       AccumulationWalkForwardReport `json:"accumulation_walk_forward"`
 	MonteCarloReport              MonteCarloReport              `json:"monte_carlo_report"`
 	Summary                       string                        `json:"summary"`
 }
@@ -672,6 +675,16 @@ func Markdown(r Result) string {
 			b.WriteString(fmt.Sprintf("| %d | %d | %d | %s | %s |\n", split.SplitIndex, split.TrainDays, split.EvalDays, emptyDash(split.Train.Summary), emptyDash(split.Eval.Summary)))
 		}
 		b.WriteString("\n")
+	}
+	if r.WalkForwardVerdict.Status != "" {
+		b.WriteString(fmt.Sprintf("- Core signal walk-forward: %s; eval_samples=%d allowed_rate=%.1f%%; %s\n", r.WalkForwardVerdict.Status, r.WalkForwardVerdict.EvaluationSamples, r.WalkForwardVerdict.AllowedRate*100, r.WalkForwardVerdict.Reason))
+	}
+	if r.AccumulationWalkForward.Status != "" {
+		b.WriteString("- Milestone C verdict: " + r.AccumulationWalkForward.Summary + "\n")
+		b.WriteString("- Sizing expansion allowed: false; baseline comparison and manual review remain mandatory.\n")
+	}
+	if r.WalkForwardVerdict.Status != "" || r.AccumulationWalkForward.Status != "" {
+		b.WriteString("- Evaluation-only evidence; no live sizing or execution authority changed.\n\n")
 	}
 
 	b.WriteString("22. Monte Carlo Robustness Laboratory\n")

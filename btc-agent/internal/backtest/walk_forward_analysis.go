@@ -24,6 +24,40 @@ type CoreSignalStats struct {
 	Biases      map[flow.Bias]int         `json:"biases"`
 }
 
+type WalkForwardVerdict struct {
+	Status            string  `json:"status"`
+	Splits            int     `json:"splits"`
+	EvaluationSamples int     `json:"evaluation_samples"`
+	AllowedRate       float64 `json:"allowed_rate"`
+	Reason            string  `json:"reason"`
+}
+
+// EvaluateWalkForwardVerdict summarizes only evaluation windows. It is
+// research-only and cannot alter production thresholds, sizing, or authority.
+func EvaluateWalkForwardVerdict(report WalkForwardAnalysisReport, minSplits, minSamples int) WalkForwardVerdict {
+	out := WalkForwardVerdict{Status: "INSUFFICIENT_DATA", Splits: len(report.Splits)}
+	if minSplits < 1 {
+		minSplits = 1
+	}
+	if minSamples < 1 {
+		minSamples = 1
+	}
+	for _, split := range report.Splits {
+		out.EvaluationSamples += split.Eval.Samples
+		out.AllowedRate += float64(split.Eval.Permissions[agent1.Allowed])
+	}
+	if out.EvaluationSamples > 0 {
+		out.AllowedRate /= float64(out.EvaluationSamples)
+	}
+	if len(report.Splits) < minSplits || out.EvaluationSamples < minSamples {
+		out.Reason = fmt.Sprintf("need at least %d splits and %d evaluation samples", minSplits, minSamples)
+		return out
+	}
+	out.Status = "RESEARCH_REVIEW_REQUIRED"
+	out.Reason = "evaluation-only permission evidence collected; accumulation false-positive/drawdown evidence and manual review remain required"
+	return out
+}
+
 func RunWalkForwardAnalysis(cfg config.Config, btc map[string][]market.Candle, splitCount int, trainPct float64, embargo int) (WalkForwardAnalysisReport, error) {
 	daily := btc["1d"]
 	if splitCount <= 0 || trainPct <= 0 || trainPct >= 1 {

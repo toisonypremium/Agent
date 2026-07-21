@@ -7,6 +7,17 @@ set -a
 [ -f .env ] && source .env
 set +a
 
+tracked_secret_files="$(git ls-files | grep -E '(^|/)(\.env($|\.)|config\.ya?ml$|config\.local\.ya?ml$|secrets\.env$)|\.(db|sqlite)(-|$)|(^|/)(reports|logs|backups|bin)/' | grep -vE '(^|/)(config\.yaml\.example|btc-agent\.env\.example|deploy/cloudflared/config\.yml)$' || true)"
+if [[ -n "$tracked_secret_files" ]]; then
+  printf 'forbidden tracked runtime/secret files:\n%s\n' "$tracked_secret_files" >&2
+  exit 1
+fi
+
+if git grep -n -I -E '(BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY|sk-[A-Za-z0-9_-]{20,}|xox[baprs]-[A-Za-z0-9-]{20,})' -- . ':!scripts/check-secrets.sh'; then
+  echo 'credential-like material found in tracked files' >&2
+  exit 1
+fi
+
 python3 - <<'PY'
 import os
 import re

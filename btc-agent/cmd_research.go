@@ -98,6 +98,18 @@ func buildBacktestResult(cfg config.Config, db *storage.DB) (backtest.Result, er
 			result.MonteCarloReport = mc
 		}
 	}
+	walkForwardAnalysis, err := backtest.RunWalkForwardAnalysis(cfg, btc, 3, 0.6, 7)
+	if err == nil {
+		result.WalkForwardAnalysisReport = walkForwardAnalysis
+		result.WalkForwardVerdict = backtest.EvaluateWalkForwardVerdict(walkForwardAnalysis, 3, 60)
+	} else {
+		result.WalkForwardVerdict = backtest.WalkForwardVerdict{Status: "INSUFFICIENT_DATA", Reason: err.Error()}
+	}
+	if accumulationWalkForward, err := backtest.RunAccumulationWalkForward(cfg.Data.Symbols.BTC, daily, []int{1, 3, 7, 14, 30}, 3, 0.6, 7); err == nil {
+		result.AccumulationWalkForward = accumulationWalkForward
+	} else {
+		result.AccumulationWalkForward = backtest.AccumulationWalkForwardReport{Status: "INSUFFICIENT_DATA", Summary: err.Error()}
+	}
 	watchAudit, err := backtest.RunWatchlistTriggerAudit(cfg, btc, assets, backtest.WatchlistTriggerAuditConfig{})
 	if err != nil {
 		result.WatchlistTriggerAudit = backtest.WatchlistTriggerAuditResult{Enabled: false, Summary: err.Error()}

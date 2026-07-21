@@ -1,6 +1,7 @@
 package backtest
 
 import (
+	"btc-agent/internal/agent1"
 	"btc-agent/internal/config"
 	"btc-agent/internal/market"
 	"testing"
@@ -28,5 +29,20 @@ func TestRunWalkForwardAnalysisChronologyAndDeterminism(t *testing.T) {
 		if s.Eval.Samples == 0 {
 			t.Fatalf("empty eval %+v", s)
 		}
+	}
+}
+
+func TestEvaluateWalkForwardVerdictUsesEvaluationSamplesOnly(t *testing.T) {
+	report := WalkForwardAnalysisReport{Enabled: true, Splits: []WalkForwardAnalysisSplit{
+		{Train: CoreSignalStats{Samples: 1000, Permissions: map[agent1.Permission]int{agent1.Allowed: 1000}}, Eval: CoreSignalStats{Samples: 20, Permissions: map[agent1.Permission]int{agent1.Allowed: 2}}},
+		{Train: CoreSignalStats{Samples: 1000, Permissions: map[agent1.Permission]int{agent1.Allowed: 1000}}, Eval: CoreSignalStats{Samples: 30, Permissions: map[agent1.Permission]int{agent1.Allowed: 3}}},
+	}}
+	got := EvaluateWalkForwardVerdict(report, 2, 50)
+	if got.Status != "RESEARCH_REVIEW_REQUIRED" || got.EvaluationSamples != 50 || got.AllowedRate != 0.1 {
+		t.Fatalf("verdict must use eval rows only: %+v", got)
+	}
+	low := EvaluateWalkForwardVerdict(report, 3, 100)
+	if low.Status != "INSUFFICIENT_DATA" {
+		t.Fatalf("low samples must not approve sizing: %+v", low)
 	}
 }

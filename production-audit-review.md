@@ -166,3 +166,12 @@ credentials. Systemd P1 also requires privileged operator action.**
 Real Supabase/R2 delivery remains intentionally deferred. This is an external service
 activation gate, not an open code or systemd defect. Unrestricted live trading is not
 approved while operator halt is active and shadow observation is incomplete.
+
+## Release follow-up required after `5276c1c`
+
+This historical audit does not prove the runtime state of later releases. Before
+cutover or any authority change, repeat
+`btc-agent/docs/production-verification-checklist.md` against the reviewed release and
+record a new audit section with the exact SHA, lease, reconciliation, outbox/cloud and
+dry-run evidence. Keep this document historical; do not replace old evidence with
+unverified current claims.

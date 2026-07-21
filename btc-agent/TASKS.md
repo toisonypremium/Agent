@@ -2,10 +2,15 @@
 
 ## Open
 
-- [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` appears (BTC currently in MARKDOWN phase).
+- [ ] Re-run current-release production verification after deploying the reviewed SHA; do not infer runtime state from docs.
+- [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` appears; no sizing or authority change while blocked.
 - [ ] Use full verification gate before reporting implementation work done.
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
-- [ ] Milestone C: prove BTC accumulation false-positive/drawdown improvement in walk-forward before any live sizing change.
+- [ ] Milestone C: collect enough embargoed evaluation samples, compare false-positive/drawdown against the approved baseline, and obtain manual review before any live sizing change. The report path is implemented; sizing expansion remains disabled.
+- [ ] Complete approved shadow/canary observation and retain V1 through rollback window.
+- [ ] Merge cutover branch only after operator approval; run V1 cleanup only after approved rollback window.
+- [x] Add authoritative CI checks for Go race/vet/build, secret scan, migrations, dashboard and R2 tests.
+- [x] Add report-only liquidation proxy and anchored VWAP/volume profile diagnostics.
 - [x] Wire autonomous exits through Hermes-owned, no-short, reconcile-safe limit SELL lifecycle with residual reservation.
 
 ## Done

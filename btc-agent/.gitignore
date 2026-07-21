@@ -19,6 +19,9 @@ secrets.env
 .codebase-memory/
 reports/
 logs/
+web/node_modules/
+web/.next/
+.next/
 
 # Local runtime and audit artifacts
 .audit-quarantine/

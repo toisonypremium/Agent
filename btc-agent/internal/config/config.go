@@ -152,19 +152,20 @@ type Config struct {
 		NtfyTopic      string `yaml:"ntfy_topic"`
 	} `yaml:"notify"`
 	AI struct {
-		Enabled                    bool    `yaml:"enabled"`
-		Provider                   string  `yaml:"provider"`
-		Model                      string  `yaml:"model"`
-		BaseURLEnv                 string  `yaml:"base_url_env"`
-		APIKeyEnv                  string  `yaml:"api_key_env"`
-		MaxTokens                  int     `yaml:"max_tokens"`
-		Temperature                float64 `yaml:"temperature"`
-		TelegramEnabled            bool    `yaml:"telegram_enabled"`
-		HermesIntervalMinutes      int     `yaml:"hermes_interval_minutes"`
-		HermesFreshAuditMaxMinutes int     `yaml:"hermes_fresh_audit_max_minutes"`
-		HermesMinAlertGapMinutes   int     `yaml:"hermes_min_alert_gap_minutes"`
-		HermesEventDrivenEnabled   bool    `yaml:"hermes_event_driven_enabled"`
-		HermesTelegramInteractive  bool    `yaml:"hermes_telegram_interactive"`
+		Enabled                    bool           `yaml:"enabled"`
+		Provider                   string         `yaml:"provider"`
+		Model                      string         `yaml:"model"`
+		BaseURLEnv                 string         `yaml:"base_url_env"`
+		APIKeyEnv                  string         `yaml:"api_key_env"`
+		MaxTokens                  int            `yaml:"max_tokens"`
+		MaxTokensByPurpose         map[string]int `yaml:"max_tokens_by_purpose"`
+		Temperature                float64        `yaml:"temperature"`
+		TelegramEnabled            bool           `yaml:"telegram_enabled"`
+		HermesIntervalMinutes      int            `yaml:"hermes_interval_minutes"`
+		HermesFreshAuditMaxMinutes int            `yaml:"hermes_fresh_audit_max_minutes"`
+		HermesMinAlertGapMinutes   int            `yaml:"hermes_min_alert_gap_minutes"`
+		HermesEventDrivenEnabled   bool           `yaml:"hermes_event_driven_enabled"`
+		HermesTelegramInteractive  bool           `yaml:"hermes_telegram_interactive"`
 	} `yaml:"ai"`
 	FreeAPI struct {
 		Enabled         bool   `yaml:"enabled"`
@@ -349,6 +350,30 @@ func EffectiveLiveNotionalTotal(c Config) float64 {
 	return c.Live.MaxLiveNotionalTotalUSDT
 }
 
+var defaultAIMaxTokens = map[string]int{
+	"ai_watch":                     1200,
+	"hermes_narrative":             1400,
+	"hermes_operator_decision":     900,
+	"research_brief":               2000,
+	"expert_research":              3200,
+	"interactive_question":         1600,
+	"scheduler_telegram_formatter": 2000,
+}
+
+func EffectiveAIMaxTokens(c Config, purpose string) int {
+	purpose = strings.ToLower(strings.TrimSpace(purpose))
+	if value := c.AI.MaxTokensByPurpose[purpose]; value > 0 {
+		return value
+	}
+	if value := defaultAIMaxTokens[purpose]; value > 0 {
+		return value
+	}
+	if c.AI.MaxTokens > 0 && c.AI.MaxTokens <= 6000 {
+		return c.AI.MaxTokens
+	}
+	return 900
+}
+
 func EffectiveHermesProbeNotional(c Config) float64 {
 	if pct := c.HermesOperator.MaxProbeNotionalPct; pct > 0 && pct <= 1 {
 		return c.Portfolio.TotalCapital * pct
@@ -396,6 +421,17 @@ func (c Config) Validate() error {
 	}
 	if c.App.ReconcileIntervalMinutes < 0 {
 		return errors.New("app.reconcile_interval_minutes cannot be negative")
+	}
+	if c.AI.HermesIntervalMinutes < 0 {
+		return errors.New("ai.hermes_interval_minutes cannot be negative")
+	}
+	if c.AI.MaxTokens < 0 || c.AI.MaxTokens > 6000 {
+		return errors.New("ai.max_tokens must be between 0 and 6000")
+	}
+	for purpose, value := range c.AI.MaxTokensByPurpose {
+		if strings.TrimSpace(purpose) == "" || value < 128 || value > 6000 {
+			return fmt.Errorf("ai.max_tokens_by_purpose.%s must be between 128 and 6000", purpose)
+		}
 	}
 	if c.App.DailyRunTime != "" && !validClockTime(c.App.DailyRunTime) {
 		return errors.New("app.daily_run_time must be HH:MM")

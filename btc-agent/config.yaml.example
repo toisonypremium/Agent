@@ -90,14 +90,22 @@ ai:
   model: "Claw"
   base_url_env: "ANTHROPIC_BASE_URL"
   api_key_env: "ANTHROPIC_API_KEY"
-  max_tokens: 6000
+  max_tokens: 900 # legacy fallback only
+  max_tokens_by_purpose:
+    ai_watch: 1200
+    hermes_narrative: 1400
+    hermes_operator_decision: 900
+    research_brief: 2000
+    expert_research: 3200
+    interactive_question: 1600
+    scheduler_telegram_formatter: 2000
   temperature: 0
-  telegram_enabled: true
+  telegram_enabled: false # Web/Supabase/R2 are primary; Telegram is optional fallback
   hermes_interval_minutes: 60   # how often Hermes AI cycle runs; 0 = only on --run-now
   hermes_fresh_audit_max_minutes: 30
   hermes_min_alert_gap_minutes: 30
   hermes_event_driven_enabled: true
-  hermes_telegram_interactive: true
+  hermes_telegram_interactive: false
 
 research:
   enabled: false

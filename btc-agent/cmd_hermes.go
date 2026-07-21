@@ -18,7 +18,6 @@ import (
 	"btc-agent/internal/hermesmemory"
 	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
-	"btc-agent/internal/llm"
 	"btc-agent/internal/microstructure"
 	"btc-agent/internal/reportio"
 	"btc-agent/internal/storage"
@@ -59,7 +58,7 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 			snap.ResearchSummary += " | cognitive_memory=" + string(b)
 		}
 	}
-	caller := hermesCallerFromConfig(cfg)
+	caller := hermesCallerFromConfig(cfg, db, "hermes_narrative", trigger)
 	narrativeStarted := time.Now()
 	report, err := hermesagent.Generate(ctx, caller, snap)
 	logHermesLLMCall("narrative", trigger, narrativeStarted, err)
@@ -191,8 +190,12 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 			}
 		}
 	}
-	if err := runHermesShadowDecision(ctx, cfg, snap, caller, trigger); err != nil {
-		log.Printf("[Hermes] shadow decision warning: %v", err)
+	// Scheduled/interactive narratives are report-only. Execution-consumable
+	// decisions are generated only by the supervisor pre-execution path.
+	if !cfg.HermesOperator.CanExecute() && trigger.Source != "scheduled" {
+		if err := runHermesShadowDecision(ctx, cfg, snap, caller, trigger, ""); err != nil {
+			log.Printf("[Hermes] observational decision warning: %v", err)
+		}
 	}
 	md := buildHermesMarkdown(snap, report, trigger)
 	if err := os.MkdirAll(hermesReportDir, 0700); err != nil {
@@ -228,7 +231,54 @@ func runHermesDecisionCycle(ctx context.Context, cfg config.Config, db *storage.
 	if plan, err := db.LatestPlan(); err == nil {
 		enrichHermesAssetsFromPlan(cfg, db, &snap, plan)
 	}
-	return runHermesShadowDecision(ctx, cfg, snap, hermesCallerFromConfig(cfg), trigger)
+	evaluation := evaluateHermesDecisionPreCall(cfg, db, snap)
+	if !evaluation.Allowed {
+		return saveSkippedHermesDecision(db, cfg, trigger, evaluation)
+	}
+	now := time.Now().UTC()
+	_, reserved, reason, err := db.ReserveLLMCall(ctx, "hermes_operator_decision", evaluation.StateHash, now, schedulerHermesTimeout)
+	if err != nil {
+		return fmt.Errorf("reserve Hermes LLM call: %w", err)
+	}
+	if !reserved {
+		log.Printf("[LLM_USAGE] purpose=hermes_operator_decision status=skipped reason=%s state_hash=%s", reason, evaluation.StateHash)
+		recordSkippedLLMUsage(db, cfg, trigger, evaluation.StateHash, reason)
+		return nil
+	}
+	caller := hermesCallerFromConfig(cfg, db, "hermes_operator_decision", trigger, evaluation.StateHash)
+	err = runHermesShadowDecision(ctx, cfg, snap, caller, trigger, evaluation.StateHash)
+	if err != nil {
+		_ = db.CompleteLLMCall(ctx, "hermes_operator_decision", evaluation.StateHash, storage.LLMReservationError, "request", time.Now().UTC(), time.Now().UTC().Add(time.Minute), time.Time{})
+		return err
+	}
+	validFor := time.Duration(cfg.HermesOperator.DecisionTTLSeconds) * time.Second
+	if validFor <= 0 {
+		validFor = 2 * time.Minute
+	}
+	return db.CompleteLLMCall(ctx, "hermes_operator_decision", evaluation.StateHash, storage.LLMReservationSuccess, "", time.Now().UTC(), time.Time{}, time.Now().UTC().Add(validFor))
+}
+
+func saveSkippedHermesDecision(db *storage.DB, cfg config.Config, trigger hermesagent.HermesTrigger, evaluation hermesDecisionEvaluation) error {
+	now := time.Now().UTC()
+	artifact := hermesShadowDecision{GeneratedAt: now, Mode: cfg.HermesOperator.NormalizedMode(), Source: trigger.Source, TriggerReason: trigger.Reason, StateHash: evaluation.StateHash, Validation: hermesoperator.ValidationResult{Reasons: []string{"deterministic pre-call gate: " + evaluation.Reason}}}
+	if err := saveJSONFile(hermesReportDir, "hermes_shadow_decision_latest.json", artifact); err != nil {
+		return err
+	}
+	recordSkippedLLMUsage(db, cfg, trigger, evaluation.StateHash, evaluation.Reason)
+	return nil
+}
+
+func recordSkippedLLMUsage(db *storage.DB, cfg config.Config, trigger hermesagent.HermesTrigger, stateHash, reason string) {
+	if db == nil {
+		return
+	}
+	now := time.Now().UTC()
+	event := storage.LLMUsageEvent{RequestID: "skip-" + stateHash + "-" + fmt.Sprint(now.UnixNano()), Timestamp: now, Purpose: "hermes_operator_decision", TriggerSource: trigger.Source, TriggerReason: trigger.Reason, Model: cfg.AI.Model, UsageAvailable: false, Status: "skipped", ErrorClass: reason, StateHash: stateHash}
+	if err := db.SaveLLMUsageEvent(event); err != nil {
+		log.Printf("[LLM_USAGE] skipped event persist failed reason=%s", reason)
+		return
+	}
+	enqueueLLMUsageCloud(context.Background(), db, event)
 }
 
 func logHermesLLMCall(purpose string, trigger hermesagent.HermesTrigger, started time.Time, err error) {
@@ -292,13 +342,16 @@ func enrichHermesAssetsFromPlan(cfg config.Config, db *storage.DB, snap *hermesa
 // hermesShadowDecision is the persisted validated decision audit. In autonomous mode its
 // validated actions are re-evaluated by production safety immediately before execution.
 type hermesShadowDecision struct {
-	GeneratedAt time.Time                        `json:"generated_at"`
-	Mode        string                           `json:"mode"`
-	Validation  hermesoperator.ValidationResult  `json:"validation"`
-	Safety      []liveguard.HermesActionDecision `json:"safety"`
+	GeneratedAt   time.Time                        `json:"generated_at"`
+	Mode          string                           `json:"mode"`
+	Source        string                           `json:"source"`
+	TriggerReason string                           `json:"trigger_reason,omitempty"`
+	StateHash     string                           `json:"state_hash,omitempty"`
+	Validation    hermesoperator.ValidationResult  `json:"validation"`
+	Safety        []liveguard.HermesActionDecision `json:"safety"`
 }
 
-func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermesagent.HermesSnapshot, caller hermesagent.JSONCaller, trigger hermesagent.HermesTrigger) error {
+func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermesagent.HermesSnapshot, caller hermesagent.JSONCaller, trigger hermesagent.HermesTrigger, stateHash string) error {
 	if caller == nil || !cfg.HermesOperator.Enabled {
 		return nil
 	}
@@ -352,7 +405,12 @@ func runHermesShadowDecision(ctx context.Context, cfg config.Config, snap hermes
 		AccumulationPhase: snap.BTCPhase, MarketRegime: snap.BTCRegime, TrendScore: snap.BTCTrend,
 		MMConfidence: snap.BTCMMConfidence, DataQuality: snap.BTCMMDataQuality, PerOrderCap: config.EffectiveLiveNotionalPerOrder(cfg),
 	})
-	return saveJSONFile(hermesReportDir, "hermes_shadow_decision_latest.json", hermesShadowDecision{GeneratedAt: time.Now().UTC(), Mode: cfg.HermesOperator.NormalizedMode(), Validation: validation, Safety: safety})
+	artifact := hermesShadowDecision{GeneratedAt: time.Now().UTC(), Mode: cfg.HermesOperator.NormalizedMode(), Source: trigger.Source, TriggerReason: trigger.Reason, StateHash: stateHash, Validation: validation, Safety: safety}
+	path := "hermes_observational_decision_latest.json"
+	if trigger.Source == "supervisor" && trigger.Reason == "pre_execution" {
+		path = "hermes_shadow_decision_latest.json"
+	}
+	return saveJSONFile(hermesReportDir, path, artifact)
 }
 
 func deterministicHermesProbeFallback(snap hermesagent.HermesSnapshot, decision hermesoperator.Decision, policy hermesoperator.ValidationPolicy) (hermesoperator.Decision, bool) {
@@ -392,11 +450,15 @@ func deterministicHermesProbeFallback(snap hermesagent.HermesSnapshot, decision 
 	return decision, false
 }
 
-func hermesCallerFromConfig(cfg config.Config) hermesagent.JSONCaller {
+func hermesCallerFromConfig(cfg config.Config, db *storage.DB, purpose string, trigger hermesagent.HermesTrigger, stateHash ...string) hermesagent.JSONCaller {
 	if !cfg.AI.Enabled {
 		return nil
 	}
-	client, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
+	hash := ""
+	if len(stateHash) > 0 {
+		hash = stateHash[0]
+	}
+	client, err := newObservedLLMClient(cfg, db, purpose, trigger.Source, trigger.Reason, hash, 0)
 	if err != nil {
 		log.Printf("[Hermes] LLM client warning: %v", err)
 		return nil

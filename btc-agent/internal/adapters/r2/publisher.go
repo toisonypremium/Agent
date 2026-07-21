@@ -28,6 +28,16 @@ func (p Publisher) Publish(ctx context.Context, item outbox.Item) error {
 	}
 	key := base.Query().Get("key")
 	signed := p.AccessKeyID != "" || p.SecretAccessKey != "" || p.Bucket != ""
+	if !signed && (item.EventType == "llm_usage" || item.EventType == "llm_usage_daily" || item.EventType == "heartbeat_artifact") {
+		if item.EventType == "heartbeat_artifact" {
+			key = "heartbeat/latest.json"
+		} else {
+			key = objectKey(item)
+		}
+		query := base.Query()
+		query.Set("key", key)
+		base.RawQuery = query.Encode()
+	}
 	if signed {
 		if p.AccessKeyID == "" || p.SecretAccessKey == "" || p.Bucket == "" {
 			return fmt.Errorf("R2 bucket, access key ID and secret access key required")
@@ -73,6 +83,12 @@ func objectKey(i outbox.Item) string {
 	id := i.IdempotencyKey
 	if id == "" {
 		id = i.ID
+	}
+	if i.EventType == "llm_usage" {
+		return LLMUsageKey(at, id)
+	}
+	if i.EventType == "llm_usage_daily" {
+		return LLMUsageDailyKey(at, id)
 	}
 	return ReportKey(at, id, "json")
 }

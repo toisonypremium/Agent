@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-func TestManagedHoldingBecomesHermesOwnedWithoutFillHistory(t *testing.T) {
+func TestManagedHoldingDoesNotGrantHermesExecutionOwnership(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -18,8 +18,12 @@ func TestManagedHoldingBecomesHermesOwnedWithoutFillHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := db.HermesOwnedPositions()
-	if err != nil || len(got) != 1 || got[0].Symbol != "NEARUSDT" || got[0].Quantity != 38.5 || got[0].AvgEntryPrice != 2.1 {
-		t.Fatalf("bad adopted ownership %+v err=%v", got, err)
+	if err != nil || len(got) != 0 {
+		t.Fatalf("legacy managed holding granted execution ownership: %+v err=%v", got, err)
+	}
+	reported, err := db.LivePositions()
+	if err != nil || len(reported) != 1 || reported[0].Symbol != "NEARUSDT" {
+		t.Fatalf("legacy managed holding should remain report-visible: %+v err=%v", reported, err)
 	}
 	if err = db.DeleteHermesManagedHolding("NEARUSDT"); err != nil {
 		t.Fatal(err)
@@ -30,7 +34,7 @@ func TestManagedHoldingBecomesHermesOwnedWithoutFillHistory(t *testing.T) {
 	}
 }
 
-func TestManagedHoldingDoesNotShrinkImmutableOwnedFill(t *testing.T) {
+func TestManagedHoldingDoesNotOverrideImmutableOwnedFill(t *testing.T) {
 	db, err := Open(filepath.Join(t.TempDir(), "test.sqlite"))
 	if err != nil {
 		t.Fatal(err)
@@ -44,11 +48,11 @@ func TestManagedHoldingDoesNotShrinkImmutableOwnedFill(t *testing.T) {
 	if err = db.SaveLivePositionEvent(e); err != nil {
 		t.Fatal(err)
 	}
-	if err = db.SaveHermesManagedHolding(HermesManagedHolding{Symbol: "RENDERUSDT", InstID: "RENDER-USDT", Quantity: 3, AvgEntryPrice: 1.4, Source: "OKX_ACCOUNT_ADOPTION"}); err != nil {
+	if err = db.SaveHermesManagedHolding(HermesManagedHolding{Symbol: "RENDERUSDT", InstID: "RENDER-USDT", Quantity: 5, AvgEntryPrice: 1.4, Source: "OKX_ACCOUNT_ADOPTION"}); err != nil {
 		t.Fatal(err)
 	}
 	got, err := db.HermesOwnedPositions()
 	if err != nil || len(got) != 1 || got[0].Quantity != 4 {
-		t.Fatalf("immutable ownership shrunk %+v err=%v", got, err)
+		t.Fatalf("legacy holding overrode immutable execution ownership %+v err=%v", got, err)
 	}
 }

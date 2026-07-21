@@ -4,7 +4,6 @@ import (
 	"btc-agent/internal/aiagent"
 	"btc-agent/internal/aieval"
 	"btc-agent/internal/config"
-	"btc-agent/internal/llm"
 	"btc-agent/internal/notify"
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
@@ -45,7 +44,7 @@ func runAIWatch(ctx context.Context, cfg config.Config, db *storage.DB) error {
 	snap := aiagent.Snapshot{Analysis: analysis, Plan: p, Status: status}
 	var caller aiagent.JSONCaller
 	if cfg.AI.Enabled {
-		client, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
+		client, err := newObservedLLMClient(cfg, db, "ai_watch", "command", "ai_watch", "", 0)
 		if err != nil {
 			log.Printf("ai warning: %v", err)
 		} else {
@@ -89,6 +88,10 @@ func runResearchDoctor(ctx context.Context, cfg config.Config) (research.DoctorR
 }
 
 func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram bool) (research.BriefResult, error) {
+	return runResearchBriefWithDB(ctx, cfg, nil, notifyTelegram)
+}
+
+func runResearchBriefWithDB(ctx context.Context, cfg config.Config, db *storage.DB, notifyTelegram bool) (research.BriefResult, error) {
 	result := research.BuildBrief(ctx, cfg)
 	if err := saveJSONFile("reports", "research_brief_latest.json", result); err != nil {
 		return result, err
@@ -100,9 +103,10 @@ func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram boo
 	if err := os.WriteFile(filepath.Join("reports", "research_brief_latest.md"), []byte(md), 0600); err != nil {
 		return result, err
 	}
-	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
-		telegramText := buildResearchTelegramText(ctx, cfg, result)
-		sendScheduledTelegram(ctx, cfg, "research-brief", telegramText)
+	const label = "research-brief"
+	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && cfg.AI.TelegramEnabled && notifyTelegram && shouldAutoSendTelegram(label) {
+		telegramText := buildResearchTelegramText(ctx, cfg, db, result)
+		sendScheduledTelegram(ctx, cfg, label, telegramText)
 	}
 	fmt.Println(md)
 	return result, nil
@@ -110,15 +114,9 @@ func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram boo
 
 // buildResearchTelegramText tries AI analysis first; falls back to deterministic formatter.
 
-func buildResearchTelegramText(ctx context.Context, cfg config.Config, result research.BriefResult) string {
+func buildResearchTelegramText(ctx context.Context, cfg config.Config, db *storage.DB, result research.BriefResult) string {
 	if cfg.AI.Enabled && len(result.Items) > 0 {
-		// Research brief needs enough room for JSON wrapper + expert Telegram text.
-		// Use full 2000-token cap to avoid truncated JSON from 9router Agent.
-		maxTokens := cfg.AI.MaxTokens
-		if maxTokens < 2000 {
-			maxTokens = 2000
-		}
-		llmClient, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, maxTokens, cfg.AI.Temperature)
+		llmClient, err := newObservedLLMClient(cfg, db, "research_brief", "research", "telegram_format", "", 0)
 		if err != nil {
 			log.Printf("research ai client: %v — using deterministic formatter", err)
 		} else {

@@ -235,23 +235,6 @@ func (d *DB) HermesOwnedPositions() ([]live.LivePosition, error) {
 	if err := rows.Err(); err != nil {
 		return nil, err
 	}
-	managed, err := d.HermesManagedHoldings()
-	if err != nil {
-		return nil, err
-	}
-	bySymbol := map[string]int{}
-	for i := range out {
-		bySymbol[strings.ToUpper(out[i].Symbol)] = i
-	}
-	for _, h := range managed {
-		if i, ok := bySymbol[h.Symbol]; ok {
-			if h.Quantity > out[i].Quantity {
-				out[i] = managedPosition(h)
-			}
-			continue
-		}
-		out = append(out, managedPosition(h))
-	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Symbol < out[j].Symbol })
 	return out, nil
 }

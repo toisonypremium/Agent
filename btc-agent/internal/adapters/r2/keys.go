@@ -27,3 +27,11 @@ func ChartKey(asset string, at time.Time, chartID string) string {
 func BacktestKey(strategy, runID string) string {
 	return path.Join("backtests", sanitize(strategy), sanitize(runID), "result.json")
 }
+
+func LLMUsageKey(at time.Time, requestID string) string {
+	return path.Join("llm-usage", fmt.Sprintf("%04d", at.UTC().Year()), fmt.Sprintf("%02d", at.UTC().Month()), fmt.Sprintf("%02d", at.UTC().Day()), "events", sanitize(requestID)+".json")
+}
+
+func LLMUsageDailyKey(at time.Time, aggregateID string) string {
+	return path.Join("llm-usage", fmt.Sprintf("%04d", at.UTC().Year()), fmt.Sprintf("%02d", at.UTC().Month()), fmt.Sprintf("%02d", at.UTC().Day()), "summary-"+sanitize(aggregateID)+".json")
+}

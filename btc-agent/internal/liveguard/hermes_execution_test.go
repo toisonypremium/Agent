@@ -38,7 +38,10 @@ func (p *hermesTestPlacer) PlaceSpotLimitOrder(_ context.Context, req live.Limit
 type hermesTestRecorder struct {
 	reserved   []string
 	submitted  []string
+	rejected   []string
+	unknown    []string
 	reserveErr error
+	outcomeErr error
 }
 
 func (r *hermesTestRecorder) ReserveManagedLiveOrder(id string, _ ManagedDesiredOrder, _ string) error {
@@ -52,8 +55,14 @@ func (r *hermesTestRecorder) MarkManagedLiveOrderSubmitted(id string, _ live.Ord
 	r.submitted = append(r.submitted, id)
 	return nil
 }
-func (r *hermesTestRecorder) MarkManagedLiveOrderRejected(string, string) error { return nil }
-func (r *hermesTestRecorder) MarkManagedLiveOrderUnknown(string, string) error  { return nil }
+func (r *hermesTestRecorder) MarkManagedLiveOrderRejected(id, _ string) error {
+	r.rejected = append(r.rejected, id)
+	return r.outcomeErr
+}
+func (r *hermesTestRecorder) MarkManagedLiveOrderUnknown(id, _ string) error {
+	r.unknown = append(r.unknown, id)
+	return r.outcomeErr
+}
 
 func hermesExecutablePlan() agent2.Plan {
 	return agent2.Plan{State: agent2.StateActiveLimit, ActionPermission: "ALLOWED"}
@@ -238,15 +247,44 @@ func TestExecuteHermesReduceDryRunDoesNotPlace(t *testing.T) {
 	}
 }
 
-type reduceErrorPlacer struct{}
+type hermesErrorPlacer struct{ err error }
 
-func (*reduceErrorPlacer) PlaceSpotLimitOrder(context.Context, live.LimitOrderRequest) (live.OrderResult, error) {
-	return live.OrderResult{}, fmt.Errorf("timeout")
+func (p *hermesErrorPlacer) PlaceSpotLimitOrder(context.Context, live.LimitOrderRequest) (live.OrderResult, error) {
+	return live.OrderResult{}, p.err
+}
+
+func TestExecuteHermesBuyPersistsUnknownAndKnownOutcomesSeparately(t *testing.T) {
+	for _, tt := range []struct {
+		name         string
+		err          error
+		wantUnknown  int
+		wantRejected int
+	}{
+		{name: "timeout is unknown", err: context.DeadlineExceeded, wantUnknown: 1},
+		{name: "exchange rejection is terminal", err: fmt.Errorf("okx code 51008: insufficient balance"), wantRejected: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fixture := newHermesInvariantFixture()
+			result := ExecuteHermesDesiredOrders(context.Background(), fixture.cfg, fixture.plan, []ManagedDesiredOrder{fixture.desired}, nil, &hermesErrorPlacer{err: tt.err}, fixture.recorder, fixture.exec, false)
+			if len(result.Blocked) != 1 || len(fixture.recorder.unknown) != tt.wantUnknown || len(fixture.recorder.rejected) != tt.wantRejected {
+				t.Fatalf("outcome classification wrong: result=%+v unknown=%v rejected=%v", result, fixture.recorder.unknown, fixture.recorder.rejected)
+			}
+		})
+	}
+}
+
+func TestExecuteHermesBuyReportsOutcomePersistenceFailure(t *testing.T) {
+	fixture := newHermesInvariantFixture()
+	fixture.recorder.outcomeErr = fmt.Errorf("database unavailable")
+	result := ExecuteHermesDesiredOrders(context.Background(), fixture.cfg, fixture.plan, []ManagedDesiredOrder{fixture.desired}, nil, &hermesErrorPlacer{err: context.DeadlineExceeded}, fixture.recorder, fixture.exec, false)
+	if len(result.Blocked) != 1 || !strings.Contains(result.Blocked[0].Reason, "manual check required") || !strings.Contains(result.Blocked[0].Error, "persist outcome failed") {
+		t.Fatalf("persistence failure not surfaced: %+v", result)
+	}
 }
 func TestExecuteHermesReduceUnknownPlacementKeepsReservationUnrejected(t *testing.T) {
 	r := &hermesTestRecorder{}
 	owned := []live.LivePosition{{Symbol: "BTCUSDT", InstID: "BTC-USDT", Quantity: 0.01, CostBasis: 500}}
-	got := ExecuteHermesReduceActions(context.Background(), cancelCfg(), "d1", []HermesActionDecision{reduceDecision("BTCUSDT", 100, 50000)}, owned, reduceFilter(), &reduceErrorPlacer{}, r, false)
+	got := ExecuteHermesReduceActions(context.Background(), cancelCfg(), "d1", []HermesActionDecision{reduceDecision("BTCUSDT", 100, 50000)}, owned, reduceFilter(), &hermesErrorPlacer{err: fmt.Errorf("timeout")}, r, false)
 	if len(got.Blocked) != 1 || len(r.reserved) != 1 || len(r.submitted) != 0 {
 		t.Fatalf("unknown REDUCE outcome lifecycle wrong: %+v", got)
 	}

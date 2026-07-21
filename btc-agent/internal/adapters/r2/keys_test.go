@@ -15,4 +15,10 @@ func TestDeterministicSafeKeys(t *testing.T) {
 	if got != ReportKey(at, "daily/../../secret", "json") {
 		t.Fatal("key not deterministic")
 	}
+	if got := LLMUsageKey(at, "request/../1"); got != "llm-usage/2026/07/20/events/request-..-1.json" {
+		t.Fatalf("usage key=%q", got)
+	}
+	if got := LLMUsageDailyKey(at, "hash/1"); got != "llm-usage/2026/07/20/summary-hash-1.json" {
+		t.Fatalf("daily usage key=%q", got)
+	}
 }

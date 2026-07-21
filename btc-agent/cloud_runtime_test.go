@@ -1,8 +1,11 @@
 package main
 
 import (
-	"btc-agent/internal/storage"
+	"context"
 	"testing"
+	"time"
+
+	"btc-agent/internal/storage"
 )
 
 func TestCloudRuntimeConfiguration(t *testing.T) {
@@ -35,5 +38,27 @@ func TestCloudRuntimeConfiguration(t *testing.T) {
 	t.Setenv("R2_SECRET_ACCESS_KEY", "secret")
 	if _, err = newCloudRuntime(db); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCloudRuntimeEnqueuesIdempotentLLMUsageDailyArtifact(t *testing.T) {
+	db, err := storage.Open(t.TempDir() + "/agent.db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Date(2026, 7, 21, 10, 0, 0, 0, time.UTC)
+	if err := db.SaveLLMUsageEvent(storage.LLMUsageEvent{RequestID: "r1", Timestamp: now, Purpose: "test", Model: "m", PromptTokens: 2, CompletionTokens: 1, TotalTokens: 3, UsageAvailable: true, Status: "ok"}); err != nil {
+		t.Fatal(err)
+	}
+	cloud := &cloudRuntime{destinations: []string{"r2"}, db: db}
+	cloud.enqueueLLMUsageDaily(context.Background(), now)
+	cloud.enqueueLLMUsageDaily(context.Background(), now)
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM outbox_events WHERE event_type='llm_usage_daily'`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("daily artifacts=%d", count)
 	}
 }

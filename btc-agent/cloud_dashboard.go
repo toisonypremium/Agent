@@ -61,6 +61,7 @@ func registerCloudDashboardAPI(mux *http.ServeMux) {
 		"/api/cloud/v1/decisions": {"dashboard_recent_decisions", "decided_at.desc", "200"},
 		"/api/cloud/v1/orders":    {"dashboard_recent_orders", "created_at.desc", "200"},
 		"/api/cloud/v1/artifacts": {"dashboard_artifacts", "created_at.desc", "200"},
+		"/api/cloud/v1/llm-usage": {"dashboard_llm_usage_daily", "usage_day.desc", "200"},
 	}
 	for path, spec := range routes {
 		path, spec := path, spec

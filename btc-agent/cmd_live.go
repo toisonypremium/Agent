@@ -972,7 +972,10 @@ func persistManagedCycleResult(db *storage.DB, result liveguard.ManagedCycleResu
 	now := time.Now().Unix()
 	for _, decision := range result.Canceled {
 		status := decision.Order
-		status.Status = live.StatusCanceled
+		if live.NormalizeOrderStatus(status.Status) != live.StatusCancelled {
+			return fmt.Errorf("refuse unconfirmed canceled live order status: %s", status.Status)
+		}
+		status.Status = live.StatusCancelled
 		status.UpdatedAt = now
 		status.LastManagementAction = "canceled: " + decision.Reason
 		if err := db.SaveLiveOrderStatus(status); err != nil {

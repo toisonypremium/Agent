@@ -26,18 +26,11 @@ func runReconcileLiveOrdersWithNotify(ctx context.Context, cfg config.Config, db
 		return fmt.Errorf("load open live orders: %w", err)
 	}
 
-	var result liveguard.ReconcileResult
-	if len(open) == 0 {
-		// #11: no open orders — skip OKX client creation entirely; ReconcileOrders with
-		// nil reader is safe but pointless. Build empty clean result directly.
-		result = liveguard.ReconcileOrders(ctx, nil, open)
-	} else {
-		client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
-		if err != nil {
-			return fmt.Errorf("create okx client: %w", err)
-		}
-		result = liveguard.ReconcileOrders(ctx, client, open)
+	client, err := live.NewOKXFromEnv("", cfg.Live.APIKeyEnv, cfg.Live.APISecretEnv, cfg.Live.APIPassphraseEnv)
+	if err != nil {
+		return fmt.Errorf("create okx client: %w", err)
 	}
+	result := liveguard.ReconcileOrders(ctx, client, open)
 
 	ledgerReport := liveguard.LiveLedgerReport{GeneratedAt: time.Now(), ManualCheckRequired: []string{}, Events: []live.LivePositionEvent{}}
 	for _, o := range result.Orders {
@@ -72,12 +65,12 @@ func runReconcileLiveOrdersWithNotify(ctx context.Context, cfg config.Config, db
 		return fmt.Errorf("read operator halt for reconcile invariant: %w", err)
 	}
 	result = liveguard.ApplyHaltedReconcileInvariant(result, positions, halted)
-	if result.Safety.Unknown > 0 {
-		payload, marshalErr := json.Marshal(map[string]any{"status": result.Safety.Status, "unknown_orders": result.Safety.Unknown, "blockers": result.Safety.Blockers})
+	if result.Safety.Unknown > 0 || result.Safety.RemoteOnly > 0 || result.Safety.IdentityConflicts > 0 || result.Safety.DiscoveryFailed {
+		payload, marshalErr := json.Marshal(map[string]any{"status": result.Safety.Status, "unknown_orders": result.Safety.Unknown, "remote_only": result.Safety.RemoteOnly, "identity_conflicts": result.Safety.IdentityConflicts, "discovery_failed": result.Safety.DiscoveryFailed, "blockers": result.Safety.Blockers})
 		if marshalErr != nil {
 			return fmt.Errorf("marshal reconcile unknown incident: %w", marshalErr)
 		}
-		fingerprint := fmt.Sprintf("reconcile-unknown:%d:%s", result.Safety.Unknown, result.Safety.Status)
+		fingerprint := fmt.Sprintf("reconcile-unsafe:%d:%d:%d:%t:%s", result.Safety.Unknown, result.Safety.RemoteOnly, result.Safety.IdentityConflicts, result.Safety.DiscoveryFailed, result.Safety.Status)
 		if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Timestamp: time.Now().UTC(), Source: "btc-agent-reconcile", Type: "RECONCILE_UNKNOWN_OUTCOME", Severity: "critical", Fingerprint: fingerprint, PayloadJSON: string(payload)}); err != nil {
 			return fmt.Errorf("save reconcile unknown incident: %w", err)
 		}
@@ -208,6 +201,12 @@ func reconcileMarkdown(result liveguard.ReconcileResult) string {
 				o.InstID, o.ClientOrderID, o.OrderID, o.Status, o.Price, o.Quantity, o.AvgPrice)
 		}
 	}
+	if len(result.RemoteOnlyOrders) > 0 {
+		md += "\nRemote-only pending orders (not adopted; manual reconciliation required):\n"
+		for _, o := range result.RemoteOnlyOrders {
+			md += fmt.Sprintf("- %s: clOrdId=%s ordId=%s status=%s\n", o.InstID, o.ClientOrderID, o.OrderID, o.Status)
+		}
+	}
 	return md
 }
 
@@ -260,27 +259,46 @@ func runCancelAllLiveOrders(ctx context.Context, cfg config.Config, db *storage.
 		if err != nil {
 			return err
 		}
+		statusReader, ok := guardedCanceler.(liveguard.OrderStatusReader)
+		if !ok {
+			return fmt.Errorf("guarded post-cancel status reader unavailable")
+		}
 		for _, order := range open {
 			decision := liveguard.ManagedOrderDecision{Action: "cancel", Symbol: live.InternalSymbol(order.InstID), LayerIndex: order.LayerIndex, Order: order, Reason: "emergency cancel all"}
-			cancel, err := guardedCanceler.CancelOrder(ctx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+			cancel, status, err := liveguard.CancelOrderAndConfirm(ctx, order, guardedCanceler, statusReader)
 			decision.CancelResult = cancel
+			decision.Order = status
 			if err != nil {
+				decision.Action = "block"
+				decision.Reason = "cancel outcome unknown; reconcile required"
 				decision.Error = err.Error()
 				result.Blocked = append(result.Blocked, decision)
 				result.Status = liveguard.ManagedCyclePartial
 				continue
 			}
-			result.Canceled = append(result.Canceled, decision)
-			status := order
-			status.Status = live.StatusCanceled
 			status.UpdatedAt = time.Now().Unix()
-			status.LastManagementAction = "emergency cancel all"
+			if live.NormalizeOrderStatus(status.Status) == live.StatusPartialFill {
+				status.LastManagementAction = "emergency cancel all confirmed with fill; reconcile required"
+				if err := db.SaveLiveOrderStatus(status); err != nil {
+					return fmt.Errorf("save partial-fill canceled order: %w", err)
+				}
+				if err := db.SaveLiveOrderEvent(status); err != nil {
+					return fmt.Errorf("save partial-fill canceled order event: %w", err)
+				}
+				decision.Action = "block"
+				decision.Reason = "cancel confirmed with fill; ledger reconcile required"
+				result.Blocked = append(result.Blocked, decision)
+				result.Status = liveguard.ManagedCyclePartial
+				continue
+			}
+			status.LastManagementAction = "emergency cancel all confirmed terminal"
 			if err := db.SaveLiveOrderStatus(status); err != nil {
 				return fmt.Errorf("save canceled order: %w", err)
 			}
 			if err := db.SaveLiveOrderEvent(status); err != nil {
 				return fmt.Errorf("save canceled order event: %w", err)
 			}
+			result.Canceled = append(result.Canceled, decision)
 		}
 		if result.Status == "" || result.Status == liveguard.ManagedCycleCompleted {
 			result.Status = liveguard.ManagedCycleCompleted

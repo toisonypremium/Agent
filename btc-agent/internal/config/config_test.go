@@ -127,6 +127,38 @@ func TestValidateReconcileIntervalMinutes(t *testing.T) {
 	}
 }
 
+func TestValidateHermesIntervalMinutes(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.AI.HermesIntervalMinutes = -1
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for negative Hermes interval")
+	}
+	cfg.AI.HermesIntervalMinutes = 0
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("zero Hermes interval should disable scheduled repeats: %v", err)
+	}
+	cfg.AI.HermesIntervalMinutes = 60
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("positive Hermes interval should be valid: %v", err)
+	}
+}
+
+func TestEffectiveAIMaxTokensByPurpose(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.AI.MaxTokens = 6000
+	if got := EffectiveAIMaxTokens(cfg, "hermes_operator_decision"); got != 900 {
+		t.Fatalf("operator cap=%d", got)
+	}
+	cfg.AI.MaxTokensByPurpose = map[string]int{"hermes_operator_decision": 750}
+	if got := EffectiveAIMaxTokens(cfg, "hermes_operator_decision"); got != 750 {
+		t.Fatalf("override cap=%d", got)
+	}
+	cfg.AI.MaxTokensByPurpose["bad"] = 127
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected invalid purpose cap rejected")
+	}
+}
+
 func TestValidateDailyRunTime(t *testing.T) {
 	cfg := validTestConfig()
 	cfg.App.DailyRunTime = "08:00"

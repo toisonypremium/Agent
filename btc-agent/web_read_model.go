@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+
 	"btc-agent/internal/circuitresearch"
 	"btc-agent/internal/config"
 	"btc-agent/internal/operatorcapability"
@@ -109,8 +111,15 @@ func buildDashboardV3(cfg config.Config, db *storage.DB) dashboardV3 {
 	scenario := loadWebReport("scenario_latest.json", 35*time.Minute)
 	maintenance := loadWebReport("maintenance_latest.json", 26*time.Hour)
 	positions, posErr := db.LivePositions()
+	ownedPositions, ownedErr := db.HermesOwnedPositions()
+	legacyHoldings, legacyErr := db.HermesManagedHoldings()
 	orders, ordErr := db.OpenLiveOrdersDetailed()
 	capital, capErr := db.BuildCapitalAuthoritySnapshot(cfg, now)
+	lease, leaseErr := db.ExecutionLeaseForDashboard(context.Background(), "okx-live")
+	outboxHealth, outboxErr := db.OutboxHealth()
+	protections, protectionErr := db.ProtectionStatuses()
+	llmUsage, llmUsageErr := db.LLMUsageSummaryBetween(now.Truncate(24*time.Hour), now.Truncate(24*time.Hour).Add(24*time.Hour))
+	demoted, demotedErr := db.IsHermesDemoted()
 	op := object(operations.DuLieu)
 	hb := object(heartbeat.DuLieu)
 	hermesSource := "hermes_shadow_decision_latest.json"
@@ -122,9 +131,20 @@ func buildDashboardV3(cfg config.Config, db *storage.DB) dashboardV3 {
 	domains := map[string]dashboardDomain{}
 	domains["tong_quan"] = compositeDomain(now, "operations_plan + canonical snapshot", map[string]webReport{"operations": operations, "heartbeat": heartbeat, "doctor": doctor, "reconcile": reconcile}, map[string]any{"system": s, "operations": operations.DuLieu})
 	domains["thi_truong"] = compositeDomain(now, "operations_plan + microstructure + scenario + scorecard", map[string]webReport{"operations": operations, "microstructure": micro, "scenario": scenario, "technical": technical}, map[string]any{"market": op["market"], "microstructure": micro.DuLieu, "scenario": scenario.DuLieu, "technical_scorecard": technical.DuLieu})
-	domains["danh_muc"] = compositeDomain(now, "SQLite live ledger + capital authority + reconcile", map[string]webReport{"reconcile": reconcile}, map[string]any{"positions": positions, "orders": orders, "capital_authority": capital, "position_error": webErrorText(posErr), "order_error": webErrorText(ordErr), "capital_error": webErrorText(capErr), "operations_capital": op["capital"], "reconcile": reconcile.DuLieu})
+	domains["danh_muc"] = compositeDomain(now, "SQLite live ledger + capital authority + reconcile", map[string]webReport{"reconcile": reconcile}, map[string]any{"positions": positions, "position_provenance": map[string]any{"hermes_execution_owned": ownedPositions, "legacy_account_observed": legacyHoldings, "general_live": positions}, "orders": orders, "capital_authority": capital, "position_error": webErrorText(posErr), "owned_position_error": webErrorText(ownedErr), "legacy_holding_error": webErrorText(legacyErr), "order_error": webErrorText(ordErr), "capital_error": webErrorText(capErr), "operations_capital": op["capital"], "reconcile": reconcile.DuLieu})
 	domains["hermes"] = compositeDomain(now, hermesSource, map[string]webReport{"management": hermesReport, "supervisor": supervisor, "bot": bot, "decision": decision}, hermesData)
-	domains["rui_ro"] = compositeDomain(now, "doctor + readiness + audit + reconcile + canary", map[string]webReport{"doctor": doctor, "readiness": readiness, "audit": audit, "reconcile": reconcile, "canary": canary}, map[string]any{"doctor": doctor.DuLieu, "readiness": readiness.DuLieu, "audit": audit.DuLieu, "reconcile": reconcile.DuLieu, "canary": canary.DuLieu})
+	domains["rui_ro"] = compositeDomain(now, "doctor + readiness + audit + reconcile + canary", map[string]webReport{"doctor": doctor, "readiness": readiness, "audit": audit, "reconcile": reconcile, "canary": canary}, map[string]any{"doctor": doctor.DuLieu, "readiness": readiness.DuLieu, "audit": audit.DuLieu, "reconcile": reconcile.DuLieu, "canary": canary.DuLieu, "operator_halted": s.Halted, "hermes_demoted": demoted, "hermes_mode": cfg.HermesOperator.NormalizedMode(), "execution_lease": lease, "outbox": outboxHealth, "protections": protections, "lease_error": webErrorText(leaseErr), "outbox_error": webErrorText(outboxErr), "protection_error": webErrorText(protectionErr), "demotion_error": webErrorText(demotedErr)})
+	domains["llm_usage"] = dashboardDomain{Status: func() string {
+		if llmUsageErr != nil {
+			return "ERROR"
+		}
+		return "FRESH"
+	}(), GeneratedAt: now, ObservedAt: now, AgeSeconds: 0, MaxAgeSeconds: 300, Source: "SQLite llm_usage_events (metadata only)", Warnings: func() []string {
+		if llmUsageErr != nil {
+			return []string{"Không đọc được thống kê LLM"}
+		}
+		return []string{}
+	}(), ReasonCodes: []string{}, Data: map[string]any{"today_utc": llmUsage, "usage_error": webErrorText(llmUsageErr), "estimated_cost": nil, "cost_reason": "pricing configuration unavailable"}}
 	domains["circuit"] = loadCircuitDashboardDomain(now)
 	domains["van_hanh"] = compositeDomain(now, "heartbeat + scheduler check + maintenance", map[string]webReport{"heartbeat": heartbeat, "maintenance": maintenance}, map[string]any{"heartbeat": heartbeat.DuLieu, "maintenance": maintenance.DuLieu, "release": map[string]string{"version": version, "commit": commit, "build_time": buildTime}})
 	scheduleDomain := reportDomain(heartbeat, 10*time.Minute, now)

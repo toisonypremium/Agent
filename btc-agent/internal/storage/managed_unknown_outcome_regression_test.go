@@ -52,6 +52,46 @@ func TestManagedBuyAcceptedTimeoutDoesNotSubmitAgain(t *testing.T) {
 	}
 }
 
+func TestHermesBuyAcceptedTimeoutDoesNotSubmitAgain(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "hermes-unknown-outcome.sqlite")
+	db, err := Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exchange := &acceptedThenTimeoutExchange{}
+	cfg := unknownOutcomeConfig()
+	cfg.HermesOperator.Enabled = true
+	cfg.HermesOperator.Mode = "canary"
+	cfg.Live.FirstOrderRequireDryRun = false
+	plan := agent2.Plan{State: agent2.StateActiveLimit, ActionPermission: agent1.Allowed}
+	desired := liveguard.ManagedDesiredOrder{Symbol: "ETHUSDT", InstID: "ETH-USDT", LayerIndex: 1, Side: "BUY", Type: "limit", Price: 100, Quantity: 0.02, Notional: 2, PostOnly: true, Source: "HERMES_OPERATOR", DecisionID: "accepted-timeout", Intent: "PROBE_LIMIT", AllocationTier: string(liveguard.OpportunityProbe)}
+	execCtx := liveguard.ManagedExecutionContext{BTCAccumulationPhase: "ACCUMULATION_CONFIRMED", FirstOrderDryRunApproved: true, HermesMode: "canary"}
+
+	first := liveguard.ExecuteHermesDesiredOrders(context.Background(), cfg, plan, []liveguard.ManagedDesiredOrder{desired}, nil, exchange, db, execCtx, false)
+	if len(exchange.accepted) != 1 || len(first.Blocked) != 1 {
+		t.Fatalf("first Hermes cycle must reach exchange once and block unknown: calls=%d result=%+v", len(exchange.accepted), first)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || open[0].Status != live.StatusUnknownNeedsManualCheck {
+		t.Fatalf("Hermes timeout must remain active unknown after restart: %+v", open)
+	}
+	second := liveguard.ExecuteHermesDesiredOrders(context.Background(), cfg, plan, []liveguard.ManagedDesiredOrder{desired}, open, exchange, db, execCtx, false)
+	if len(exchange.accepted) != 1 || len(second.Blocked) != 1 {
+		t.Fatalf("ambiguous Hermes BUY was submitted again: calls=%d open=%+v second=%+v", len(exchange.accepted), open, second)
+	}
+}
+
 func writeUnknownOutcomeQualityReport(t *testing.T) {
 	t.Helper()
 	if err := os.MkdirAll("reports", 0700); err != nil {

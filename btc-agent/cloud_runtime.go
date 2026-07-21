@@ -7,6 +7,7 @@ import (
 	"btc-agent/internal/storage"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -30,7 +31,7 @@ func newCloudRuntime(db *storage.DB) (*cloudRuntime, error) {
 		if u == "" || k == "" {
 			return nil, fmt.Errorf("both SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY required")
 		}
-		pubs["supabase"] = supabase.Publisher{BaseURL: u, ServiceKey: k, TableForEvent: map[string]string{"runtime_alert": "runtime_alerts"}, ConflictForEvent: map[string]string{"runtime_alert": "id"}}
+		pubs["supabase"] = supabase.Publisher{BaseURL: u, ServiceKey: k, TableForEvent: map[string]string{"runtime_alert": "runtime_alerts", "llm_usage": "llm_usage_events"}, ConflictForEvent: map[string]string{"runtime_alert": "id", "llm_usage": "request_id"}}
 		dest = append(dest, "supabase")
 	}
 	if u := strings.TrimSpace(os.Getenv("R2_PRESIGNED_PUT_URL")); u != "" {
@@ -62,7 +63,10 @@ func (c *cloudRuntime) run(ctx context.Context) {
 	defer ticker.Stop()
 	emit := time.NewTicker(time.Minute)
 	defer emit.Stop()
+	usageSummary := time.NewTicker(15 * time.Minute)
+	defer usageSummary.Stop()
 	c.enqueue(ctx)
+	c.enqueueLLMUsageDaily(ctx, time.Now().UTC())
 	for {
 		select {
 		case <-ctx.Done():
@@ -73,6 +77,8 @@ func (c *cloudRuntime) run(ctx context.Context) {
 			}
 		case <-emit.C:
 			c.enqueue(ctx)
+		case now := <-usageSummary.C:
+			c.enqueueLLMUsageDaily(ctx, now.UTC())
 		}
 	}
 }
@@ -92,6 +98,37 @@ func (c *cloudRuntime) enqueue(ctx context.Context) {
 		}
 	}
 }
+func (c *cloudRuntime) enqueueLLMUsageDaily(ctx context.Context, now time.Time) {
+	if !containsString(c.destinations, "r2") {
+		return
+	}
+	day := time.Date(now.UTC().Year(), now.UTC().Month(), now.UTC().Day(), 0, 0, 0, 0, time.UTC)
+	summary, err := c.db.LLMUsageSummaryBetween(day, day.Add(24*time.Hour))
+	if err != nil {
+		log.Printf("[CloudRuntime] LLM usage summary query error: %v", err)
+		return
+	}
+	body, err := json.Marshal(map[string]any{"schema_version": "llm-usage-v1", "summary": summary})
+	if err != nil {
+		return
+	}
+	sum := sha256.Sum256(body)
+	hash := hex.EncodeToString(sum[:])
+	item := outbox.Item{ID: "llm-usage-daily-r2-" + day.Format("20060102") + "-" + hash[:16], EventType: "llm_usage_daily", Destination: "r2", Payload: body, IdempotencyKey: "llm_usage_daily:" + day.Format("2006-01-02") + ":" + hash, CreatedAt: day}
+	if err := c.db.EnqueueOutbox(ctx, item); err != nil && !strings.Contains(strings.ToLower(err.Error()), "unique") {
+		log.Printf("[CloudRuntime] enqueue LLM usage summary error: %v", err)
+	}
+}
+
+func containsString(items []string, wanted string) bool {
+	for _, item := range items {
+		if item == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 func uuidV4() string {
 	b := make([]byte, 16)
 	if _, e := rand.Read(b); e != nil {

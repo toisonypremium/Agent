@@ -8,7 +8,9 @@
 - [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
 - [ ] Milestone C: collect enough embargoed evaluation samples, compare false-positive/drawdown against the approved baseline, and obtain manual review before any live sizing change. The report path is implemented; sizing expansion remains disabled.
 - [ ] Complete approved shadow/canary observation and retain V1 through rollback window.
-- [ ] Merge cutover branch only after operator approval; run V1 cleanup only after approved rollback window.
+- [x] Merge cutover branch after CI and halted shadow verification; main is at `fc6e4c7`.
+- [ ] Run V1 cleanup only after approved rollback window and explicit `AGENT_CLEANUP_APPROVED`.
+- [ ] Keep production operator halt active; no real-order approval from this release.
 - [x] Add authoritative CI checks for Go race/vet/build, secret scan, migrations, dashboard and R2 tests.
 - [x] Add report-only liquidation proxy and anchored VWAP/volume profile diagnostics.
 - [x] Wire autonomous exits through Hermes-owned, no-short, reconcile-safe limit SELL lifecycle with residual reservation.

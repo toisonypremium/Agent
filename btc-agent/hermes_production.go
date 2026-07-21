@@ -81,12 +81,11 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		if len(open) != 0 {
 			return blockedHermesCycle(plan, dryRun, fmt.Sprintf("Hermes canary requires zero current open orders; found %d", len(open))), true
 		}
-		owned, ownedErr := db.HermesOwnedPositions()
-		if ownedErr != nil {
+		// Existing reconciled inventory is permitted and is accounted for by the
+		// lifecycle, asset, portfolio, correlation, and final execution guards.
+		// An unreadable ownership projection remains an execution blocker.
+		if _, ownedErr := db.HermesOwnedPositions(); ownedErr != nil {
 			return blockedHermesCycle(plan, dryRun, "Hermes canary owned-position state unavailable"), true
-		}
-		if len(owned) != 0 {
-			return blockedHermesCycle(plan, dryRun, fmt.Sprintf("Hermes canary requires zero current owned positions; found %d", len(owned))), true
 		}
 		readiness, readinessErr := loadHermesCanaryReadiness(filepath.Join("reports", "hermes_canary_readiness_latest.json"))
 		if readinessErr != nil {

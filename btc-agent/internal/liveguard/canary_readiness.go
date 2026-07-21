@@ -80,9 +80,6 @@ func EvaluateCanaryReadiness(in CanaryReadinessInput) CanaryReadinessResult {
 	if in.OpenLiveOrders != 0 {
 		r.Blockers = append(r.Blockers, fmt.Sprintf("%d open live orders present", in.OpenLiveOrders))
 	}
-	if in.HermesOwnedPositions != 0 {
-		r.Blockers = append(r.Blockers, fmt.Sprintf("%d Hermes-owned positions present", in.HermesOwnedPositions))
-	}
 	if len(r.Blockers) > 0 {
 		r.Verdict = CanaryBlocked
 	}
@@ -137,8 +134,8 @@ func ValidateCanaryReadinessReport(report CanaryReadinessResult, now time.Time) 
 	if !report.ExecutionAuthority {
 		reasons = append(reasons, "Hermes canary execution authority disabled")
 	}
-	if report.OpenLiveOrders != 0 || report.HermesOwnedPositions != 0 {
-		reasons = append(reasons, fmt.Sprintf("Hermes canary requires zero initial orders and positions; orders=%d positions=%d", report.OpenLiveOrders, report.HermesOwnedPositions))
+	if report.OpenLiveOrders != 0 {
+		reasons = append(reasons, fmt.Sprintf("Hermes canary requires zero initial open orders; orders=%d", report.OpenLiveOrders))
 	}
 	return uniqueCanaryStrings(reasons)
 }

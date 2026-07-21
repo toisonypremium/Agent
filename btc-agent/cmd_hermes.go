@@ -42,7 +42,7 @@ func runHermesCycleWithTrigger(ctx context.Context, cfg config.Config, db *stora
 		if err := freeapi.Save(report, "reports"); err != nil {
 			log.Printf("[Hermes] free API report save warning: %v", err)
 		}
-		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f fear_greed=%d/%s eurusd=%.5f funding=%.8f open_interest_usd=%.0f defi_tvl_usd=%.0f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, report.FundingRate, report.OpenInterestUSD, report.DeFiTVLUSD, len(report.News), strings.Join(report.Missing, ","))
+		snap.ResearchSummary += fmt.Sprintf(" | freeapi global_cap=%.0f btc_dom=%.2f usdt_dom=%.2f cap_change=%.2f%% volume_change=%.2f%% macro_regime=%s macro_action=%s macro_confidence=%.2f macro_eth_leading=%t macro_breadth=%.0f%% fear_greed=%d/%s eurusd=%.5f funding=%.8f open_interest_usd=%.0f defi_tvl_usd=%.0f news=%d missing=%s", report.GlobalMarketCapUSD, report.BTCDominancePct, report.USDTDominancePct, report.GlobalCapChange24h, report.GlobalVolChange24h, report.MacroFlow.Regime, report.MacroFlow.Action, report.MacroFlow.Confidence, report.MacroFlow.ETHLeading, report.MacroFlow.BreadthRatio*100, report.FearGreedValue, report.FearGreedLabel, report.EURUSD, report.FundingRate, report.OpenInterestUSD, report.DeFiTVLUSD, len(report.News), strings.Join(report.Missing, ","))
 	}
 	if plan, err := db.LatestPlan(); err == nil {
 		enrichHermesAssetsFromPlan(cfg, db, &snap, plan)

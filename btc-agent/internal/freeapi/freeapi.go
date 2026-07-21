@@ -2,6 +2,7 @@ package freeapi
 
 import (
 	"btc-agent/internal/config"
+	"btc-agent/internal/macroflow"
 	"context"
 	"encoding/json"
 	"encoding/xml"
@@ -74,16 +75,59 @@ func (c *Client) Run(ctx context.Context) Report {
 	if c.cfg.FreeAPI.CoinGecko.Enabled {
 		var x struct {
 			Data struct {
-				TotalMarketCap      map[string]float64 `json:"total_market_cap"`
-				TotalVolume         map[string]float64 `json:"total_volume"`
-				MarketCapPercentage map[string]float64 `json:"market_cap_percentage"`
+				TotalMarketCap        map[string]float64 `json:"total_market_cap"`
+				TotalVolume           map[string]float64 `json:"total_volume"`
+				MarketCapPercentage   map[string]float64 `json:"market_cap_percentage"`
+				MarketCapChange24hUSD float64            `json:"market_cap_change_percentage_24h_usd"`
+				VolumeChange24hUSD    float64            `json:"volume_change_percentage_24h_usd"`
 			} `json:"data"`
 		}
 		e := c.get(ctx, "https://api.coingecko.com/api/v3/global", &x)
 		r.GlobalMarketCapUSD = x.Data.TotalMarketCap["usd"]
 		r.GlobalVolumeUSD = x.Data.TotalVolume["usd"]
 		r.BTCDominancePct = x.Data.MarketCapPercentage["btc"]
+		r.GlobalCapChange24h = x.Data.MarketCapChange24hUSD
+		r.GlobalVolChange24h = x.Data.VolumeChange24hUSD
 		add("coingecko", "https://api.coingecko.com/api/v3/global", true, e)
+		if e == nil {
+			var markets []struct {
+				Symbol             string  `json:"symbol"`
+				MarketCap          float64 `json:"market_cap"`
+				MarketCapChange24h float64 `json:"market_cap_change_percentage_24h"`
+				Change24h          float64 `json:"price_change_percentage_24h_in_currency"`
+				Change7d           float64 `json:"price_change_percentage_7d_in_currency"`
+			}
+			marketsURL := "https://api.coingecko.com/api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&sparkline=false&price_change_percentage=24h%2C7d"
+			me := c.get(ctx, marketsURL, &markets)
+			assets := make([]macroflow.AssetSnapshot, 0, len(markets))
+			for _, m := range markets {
+				s := strings.ToLower(strings.TrimSpace(m.Symbol))
+				assets = append(assets, macroflow.AssetSnapshot{Symbol: s, MarketCapUSD: m.MarketCap, MarketCapChange24hPct: m.MarketCapChange24h, Change24hPct: m.Change24h, Change7dPct: m.Change7d, Stable: isStableSymbol(s)})
+			}
+			var supplyRows []struct {
+				Date                string             `json:"date"`
+				TotalCirculatingUSD map[string]float64 `json:"totalCirculatingUSD"`
+			}
+			const supplyURL = "https://stablecoins.llama.fi/stablecoincharts/all?stablecoin=1"
+			se := c.get(ctx, supplyURL, &supplyRows)
+			supply := make([]macroflow.SupplyPoint, 0, len(supplyRows))
+			if se == nil {
+				for _, row := range supplyRows {
+					unix, parseErr := strconv.ParseInt(row.Date, 10, 64)
+					usd := row.TotalCirculatingUSD["peggedUSD"]
+					if parseErr == nil && unix > 0 && usd > 0 {
+						supply = append(supply, macroflow.SupplyPoint{Unix: unix, USD: usd})
+					}
+				}
+			}
+			in, be := macroflow.BuildInput(macroflow.GlobalSnapshot{MarketCapUSD: r.GlobalMarketCapUSD, MarketCapChange24hPct: r.GlobalCapChange24h, VolumeChange24hPct: r.GlobalVolChange24h, UpdatedAtUnix: r.GeneratedAt.Unix()}, assets, supply, time.Now().Unix(), int64(max)*60)
+			if be == nil {
+				r.MacroFlow = macroflow.Evaluate(in)
+				r.USDTDominancePct = in.USDTDominancePct
+			}
+			add("coingecko_markets", marketsURL, true, me)
+			add("defillama_usdt_supply", supplyURL, true, se)
+		}
 	}
 	if c.cfg.FreeAPI.FearGreed.Enabled {
 		var x struct {
@@ -193,6 +237,15 @@ func (c *Client) Run(ctx context.Context) Report {
 	}
 	return r
 }
+func isStableSymbol(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "usdt", "usdc", "dai", "usde", "usds", "usd1", "usdg", "pyusd", "usdy", "usyc", "busd", "tusd":
+		return true
+	default:
+		return false
+	}
+}
+
 func errString(e error) string {
 	if e == nil {
 		return ""

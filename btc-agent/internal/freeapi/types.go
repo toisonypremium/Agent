@@ -1,6 +1,10 @@
 package freeapi
 
-import "time"
+import (
+	"time"
+
+	"btc-agent/internal/macroflow"
+)
 
 type SourceStatus struct {
 	Name       string `json:"name"`
@@ -11,21 +15,25 @@ type SourceStatus struct {
 	Error      string `json:"error,omitempty"`
 }
 type Report struct {
-	GeneratedAt        time.Time      `json:"generated_at"`
-	GlobalMarketCapUSD float64        `json:"global_market_cap_usd,omitempty"`
-	GlobalVolumeUSD    float64        `json:"global_volume_usd,omitempty"`
-	BTCDominancePct    float64        `json:"btc_dominance_pct,omitempty"`
-	FearGreedValue     int            `json:"fear_greed_value,omitempty"`
-	FearGreedLabel     string         `json:"fear_greed_label,omitempty"`
-	EURUSD             float64        `json:"eurusd,omitempty"`
-	DerivativesSymbol  string         `json:"derivatives_symbol,omitempty"`
-	FundingRate        float64        `json:"funding_rate,omitempty"`
-	OpenInterest       float64        `json:"open_interest,omitempty"`
-	OpenInterestUSD    float64        `json:"open_interest_usd,omitempty"`
-	DeFiTVLUSD         float64        `json:"defi_tvl_usd,omitempty"`
-	News               []NewsItem     `json:"news,omitempty"`
-	Sources            []SourceStatus `json:"sources"`
-	Missing            []string       `json:"missing,omitempty"`
+	GeneratedAt        time.Time        `json:"generated_at"`
+	GlobalMarketCapUSD float64          `json:"global_market_cap_usd,omitempty"`
+	GlobalVolumeUSD    float64          `json:"global_volume_usd,omitempty"`
+	BTCDominancePct    float64          `json:"btc_dominance_pct,omitempty"`
+	USDTDominancePct   float64          `json:"usdt_dominance_pct,omitempty"`
+	GlobalCapChange24h float64          `json:"global_market_cap_change_24h_pct,omitempty"`
+	GlobalVolChange24h float64          `json:"global_volume_change_24h_pct,omitempty"`
+	MacroFlow          macroflow.Result `json:"macro_flow"`
+	FearGreedValue     int              `json:"fear_greed_value,omitempty"`
+	FearGreedLabel     string           `json:"fear_greed_label,omitempty"`
+	EURUSD             float64          `json:"eurusd,omitempty"`
+	DerivativesSymbol  string           `json:"derivatives_symbol,omitempty"`
+	FundingRate        float64          `json:"funding_rate,omitempty"`
+	OpenInterest       float64          `json:"open_interest,omitempty"`
+	OpenInterestUSD    float64          `json:"open_interest_usd,omitempty"`
+	DeFiTVLUSD         float64          `json:"defi_tvl_usd,omitempty"`
+	News               []NewsItem       `json:"news,omitempty"`
+	Sources            []SourceStatus   `json:"sources"`
+	Missing            []string         `json:"missing,omitempty"`
 }
 type NewsItem struct {
 	Source      string    `json:"source"`

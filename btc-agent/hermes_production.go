@@ -15,6 +15,7 @@ import (
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
 	"btc-agent/internal/exchange/live"
+	"btc-agent/internal/freeapi"
 	"btc-agent/internal/hermesoperator"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
@@ -77,6 +78,17 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 		return blockedHermesCycle(plan, dryRun, "Hermes validated actions differ from signed decision payload"), true
 	}
 	audit.Validation = executionValidation
+	if hermesActionsIncreaseExposure(audit.Validation.Actions) {
+		if macroReport, macroErr := freeapi.Load("reports"); macroErr == nil {
+			maxAge := time.Duration(cfg.FreeAPI.MaxStaleMinutes) * time.Minute
+			if maxAge <= 0 {
+				maxAge = 6 * time.Hour
+			}
+			if reason := macroExposureBlockReason(macroReport, time.Now().UTC(), maxAge); reason != "" {
+				return blockedHermesCycle(plan, dryRun, reason), true
+			}
+		}
+	}
 	if !dryRun && cfg.HermesOperator.NormalizedMode() == "canary" && hermesActionsIncreaseExposure(audit.Validation.Actions) {
 		if len(open) != 0 {
 			return blockedHermesCycle(plan, dryRun, fmt.Sprintf("Hermes canary requires zero current open orders; found %d", len(open))), true

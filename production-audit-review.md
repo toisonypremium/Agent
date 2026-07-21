@@ -175,3 +175,38 @@ cutover or any authority change, repeat
 record a new audit section with the exact SHA, lease, reconciliation, outbox/cloud and
 dry-run evidence. Keep this document historical; do not replace old evidence with
 unverified current claims.
+
+---
+
+# Halted shadow release verification — 2026-07-21
+
+## Release evidence
+
+- Source commit: `84cd6a92422033e08745ff0e659c36f693ad6da7`.
+- Deployed binary was built from the equivalent pre-push tree and has SHA-256
+  `62032762505edf9e49b0ea0a49457737437f00b37f62618f9239740076ff5107`.
+- CI run `29825446359` passed format, full Go tests, vet and build.
+- Pre-release binary, config and consistent SQLite backup were retained under
+  `backups/pre-887ac69-20260721T105039Z`; checksums were recorded on the VPS.
+
+## Observation evidence
+
+Observation from 2026-07-21 10:52 UTC through at least 11:16 UTC proved:
+
+- `btc-agent-v2.service` active with one scheduler process and zero restarts;
+- operator halt active throughout;
+- owner `v2-prod-01`, fencing token `23`, lease continuously fresh;
+- doctor blocked only on the intentional operator halt;
+- reconciliation clean with local open, unknown, remote pending, remote-only,
+  identity conflicts and manual checks all `0`;
+- order submissions, order events and position events after deploy all `0`;
+- outbox dead-letter `0`, critical runtime events `0`, critical log hits `0`;
+- forced synthetic simulation passed with `exchange_calls=0`;
+- current market authority remained `SCOUT/WATCH/MARKDOWN`, desired orders `0`.
+
+## Verdict
+
+**APPROVED_MONITORING / APPROVED_HALTED_SHADOW.** The release is approved for the
+current halted monitoring state. It is not approval to clear halt, run a real-order
+canary, increase sizing or enable unrestricted live trading. No real order was placed.
+V1 rollback artifacts must remain until a separately approved rollback window closes.

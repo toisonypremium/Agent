@@ -41,6 +41,12 @@ func executeLatestHermesDecision(ctx context.Context, cfg config.Config, db *sto
 	if audit.Mode != cfg.HermesOperator.NormalizedMode() {
 		return blockedHermesCycle(plan, dryRun, "Hermes decision mode mismatch"), true
 	}
+	if audit.Source != "supervisor" || audit.TriggerReason != "pre_execution" {
+		return blockedHermesCycle(plan, dryRun, "Hermes execution decision source mismatch"), true
+	}
+	if strings.TrimSpace(audit.StateHash) == "" {
+		return blockedHermesCycle(plan, dryRun, "Hermes execution decision state hash missing"), true
+	}
 	if time.Since(audit.GeneratedAt) > time.Duration(cfg.HermesOperator.DecisionTTLSeconds)*time.Second || time.Now().Before(audit.GeneratedAt) {
 		return blockedHermesCycle(plan, dryRun, "Hermes decision audit stale"), true
 	}

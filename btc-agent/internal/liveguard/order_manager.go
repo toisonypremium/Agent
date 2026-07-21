@@ -235,12 +235,39 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 				}
 				continue
 			}
+			statusReader, ok := canceler.(OrderStatusReader)
+			if !ok {
+				decision.Action = "block"
+				decision.Reason = "post-cancel status reader unavailable; reconcile required"
+				result.Blocked = append(result.Blocked, decision)
+				result.Status = ManagedCyclePartial
+				continue
+			}
 			cancelCtx, cancelDone := context.WithTimeout(ctx, managedExchangeTimeout)
-			cancel, err := canceler.CancelOrder(cancelCtx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+			cancel, remote, err := CancelOrderAndConfirm(cancelCtx, order, canceler, statusReader)
 			cancelDone()
 			decision.CancelResult = cancel
+			decision.Order = remote
 			if err != nil {
+				decision.Action = "block"
+				decision.Reason = "cancel outcome unknown; reconcile required"
 				decision.Error = err.Error()
+				result.Blocked = append(result.Blocked, decision)
+				result.Status = ManagedCyclePartial
+				continue
+			}
+			if live.NormalizeOrderStatus(remote.Status) == live.StatusPartialFill {
+				decision.Action = "block"
+				decision.Reason = "cancel confirmed with fill; ledger reconcile required before replacement"
+				remote.LastManagementAction = decision.Reason
+				decision.Order = remote
+				if cancelRecorder, ok := recorder.(HermesCancelRecorder); ok {
+					if persistErr := cancelRecorder.SaveLiveOrderStatus(remote); persistErr != nil {
+						decision.Error = "persist cancel/fill status failed: " + persistErr.Error()
+					} else if persistErr := cancelRecorder.SaveLiveOrderEvent(remote); persistErr != nil {
+						decision.Error = "persist cancel/fill event failed: " + persistErr.Error()
+					}
+				}
 				result.Blocked = append(result.Blocked, decision)
 				result.Status = ManagedCyclePartial
 				continue

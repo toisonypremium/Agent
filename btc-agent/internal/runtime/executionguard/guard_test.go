@@ -49,6 +49,21 @@ func TestGuardBlocksStaleFenceBeforeNetwork(t *testing.T) {
 		t.Fatal("network exchange called under stale fence")
 	}
 }
+func TestGuardBlocksExpiredLeaseBeforeSellNetwork(t *testing.T) {
+	now := time.Now().UTC()
+	l := ownership.Lease{Name: "okx", InstanceID: "a", FencingToken: 2, ExpiresAt: now.Add(-time.Second)}
+	s := &store{lease: l}
+	m, _ := ownership.NewManager(s, "okx", "a", time.Minute)
+	e := &exchange{}
+	g := GuardedExchange{Exchange: e, Manager: m, Lease: l}
+	if _, err := g.PlaceSpotLimitOrder(context.Background(), live.LimitOrderRequest{Side: "sell"}); !errors.Is(err, ownership.ErrNotOwner) {
+		t.Fatalf("sell err=%v", err)
+	}
+	if e.placed != 0 {
+		t.Fatal("network exchange called for SELL under expired lease")
+	}
+}
+
 func TestGuardAllowsCurrentOwner(t *testing.T) {
 	now := time.Now().UTC()
 	l := ownership.Lease{Name: "okx", InstanceID: "a", FencingToken: 2, ExpiresAt: now.Add(time.Minute)}

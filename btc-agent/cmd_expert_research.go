@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"btc-agent/internal/config"
-	"btc-agent/internal/llm"
 	"btc-agent/internal/research"
 	"btc-agent/internal/storage"
 )
@@ -35,7 +34,7 @@ func runExpertResearch(ctx context.Context, cfg config.Config, db *storage.DB, d
 	output := expertResearchOutput{Report: report}
 	telegramText := deterministicExpertTelegram(report)
 	if cfg.AI.Enabled {
-		client, clientErr := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, cfg.AI.MaxTokens, cfg.AI.Temperature)
+		client, clientErr := newObservedLLMClient(cfg, db, "expert_research", "research", "expert_report", "", 0)
 		if clientErr != nil {
 			log.Printf("expert research AI client: %v; using deterministic analysis", clientErr)
 		} else if ai, aiErr := research.AnalyzeExpertReportWithAI(ctx, client, report); aiErr != nil {

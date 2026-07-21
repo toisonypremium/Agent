@@ -3,7 +3,6 @@ package main
 import (
 	"btc-agent/internal/config"
 	"btc-agent/internal/liveguard"
-	"btc-agent/internal/llm"
 	"btc-agent/internal/schedulerreport"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/textsafe"
@@ -106,11 +105,7 @@ func schedulerRunNowTelegramAI(ctx context.Context, cfg config.Config, db *stora
 		return "", fmt.Errorf("latest plan: %w", err)
 	}
 	shadow, _ := liveguard.LoadShadowProbeLatest("reports/shadow_probe_latest.json")
-	maxTokens := cfg.AI.MaxTokens
-	if maxTokens < 2000 {
-		maxTokens = 2000
-	}
-	client, err := llm.NewFromEnv(cfg.AI.BaseURLEnv, cfg.AI.APIKeyEnv, cfg.AI.Model, maxTokens, cfg.AI.Temperature)
+	client, err := newObservedLLMClient(cfg, db, "scheduler_telegram_formatter", "scheduler", "run_now", "", 0)
 	if err != nil {
 		return "", err
 	}

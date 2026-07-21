@@ -78,6 +78,50 @@ func TestPersistManagedCycleResultKeepsDesiredExpiry(t *testing.T) {
 	}
 }
 
+func TestPersistManagedCycleResultRejectsUnconfirmedCancellation(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	result := liveguard.ManagedCycleResult{Canceled: []liveguard.ManagedOrderDecision{{
+		Reason: "cancel acknowledgement only",
+		Order:  live.OrderStatus{ClientOrderID: "cancel-pending", OrderID: "order-1", Status: live.StatusSubmitted},
+	}}}
+	if err := persistManagedCycleResult(db, result); err == nil || !strings.Contains(err.Error(), "refuse unconfirmed canceled") {
+		t.Fatalf("unconfirmed cancellation must fail closed: %v", err)
+	}
+}
+
+func TestPersistManagedCycleResultLeavesPartialFillOpen(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "test.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	meta := live.OrderStatus{Source: "HERMES_OPERATOR"}
+	if err := db.SaveManagedLiveOrder("partial-cancel", "order-1", "ETH-USDT", "ETHUSDT", "SELL", "limit", 100, 0.02, 2, live.StatusPartialFill, meta); err != nil {
+		t.Fatal(err)
+	}
+	result := liveguard.ManagedCycleResult{Blocked: []liveguard.ManagedOrderDecision{{
+		Action: "block",
+		Reason: "cancel confirmed with fill; ledger reconcile required",
+		Order:  live.OrderStatus{ClientOrderID: "partial-cancel", OrderID: "order-1", InstID: "ETH-USDT", Symbol: "ETHUSDT", Status: live.StatusPartialFill, AccumulatedFillSz: 0.01, AvgPrice: 100},
+	}}}
+	if err := persistManagedCycleResult(db, result); err != nil {
+		t.Fatal(err)
+	}
+	open, err := db.OpenLiveOrdersDetailed()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(open) != 1 || live.NormalizeOrderStatus(open[0].Status) != live.StatusPartialFill {
+		t.Fatalf("partial fill must remain open for reconciliation: %+v", open)
+	}
+}
+
 func TestRunPaperManagerUpdatesOrderAndWritesReports(t *testing.T) {
 	dir := t.TempDir()
 	oldWD, err := os.Getwd()
@@ -144,6 +188,38 @@ IV. Bot & Safety: Không ACTIVE_LIMIT: không đặt lệnh, không chase. WATCH
 	}
 	if err := validateSchedulerTelegramAI(strings.ReplaceAll(long, "không market", "")); err == nil {
 		t.Fatal("expected missing safety rejected")
+	}
+}
+
+func TestHermesSchedulePolicyHonorsZeroInterval(t *testing.T) {
+	var cfg config.Config
+	cfg.AI.Enabled = true
+	cfg.Live.SupervisorEnabled = true
+
+	available, scheduled, interval := hermesSchedulePolicy(cfg)
+	if !available || scheduled || interval != 0 {
+		t.Fatalf("zero interval must allow explicit calls without scheduled repeats: available=%v scheduled=%v interval=%v", available, scheduled, interval)
+	}
+	cfg.AI.HermesIntervalMinutes = 45
+	available, scheduled, interval = hermesSchedulePolicy(cfg)
+	if !available || !scheduled || interval != 45*time.Minute {
+		t.Fatalf("positive interval must schedule Hermes: available=%v scheduled=%v interval=%v", available, scheduled, interval)
+	}
+}
+
+func TestTelegramBriefScheduleRequiresEnabledTelegram(t *testing.T) {
+	var cfg config.Config
+	cfg.Notify.Provider = "telegram"
+	if telegramBriefScheduleEnabled(cfg) {
+		t.Fatal("disabled notifications must not schedule Telegram briefs")
+	}
+	cfg.Notify.Enabled = true
+	if !telegramBriefScheduleEnabled(cfg) {
+		t.Fatal("enabled Telegram provider must schedule briefs")
+	}
+	cfg.Notify.Provider = "ntfy"
+	if telegramBriefScheduleEnabled(cfg) {
+		t.Fatal("non-Telegram provider must not schedule Telegram briefs")
 	}
 }
 

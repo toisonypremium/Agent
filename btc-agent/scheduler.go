@@ -87,12 +87,8 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	auditEnabled := cfg.Live.SupervisorEnabled
 	log.Printf("[Scheduler] Live auto-audit interval: %v (enabled: %v)", auditInterval, auditEnabled)
 
-	hermesInterval := 60 * time.Minute
-	if cfg.AI.HermesIntervalMinutes > 0 {
-		hermesInterval = time.Duration(cfg.AI.HermesIntervalMinutes) * time.Minute
-	}
-	hermesEnabled := cfg.AI.Enabled && cfg.Live.SupervisorEnabled
-	log.Printf("[Scheduler] Hermes cycle interval: %v (enabled: %v)", hermesInterval, hermesEnabled)
+	hermesAvailable, hermesScheduled, hermesInterval := hermesSchedulePolicy(cfg)
+	log.Printf("[Scheduler] Hermes cycle interval: %v (available: %v scheduled: %v)", hermesInterval, hermesAvailable, hermesScheduled)
 
 	maintenanceEnabled := cfg.Maintenance.Enabled && cfg.Maintenance.SchedulerEnabled
 	maintenanceTime := cfg.Maintenance.SchedulerTime
@@ -135,7 +131,8 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var lastMarketErrorAlert time.Time
 
 	telegramCommandsInterval := 30 * time.Second
-	telegramCommandsEnabled := cfg.Notify.Enabled && cfg.Notify.Provider == "telegram"
+	telegramBriefsEnabled := telegramBriefScheduleEnabled(cfg)
+	telegramCommandsEnabled := telegramBriefsEnabled
 	if telegramCommandsEnabled {
 		nextTelegramCommands = time.Now().Add(telegramCommandsInterval)
 		log.Printf("[Scheduler] Telegram command polling interval: %v next=%s", telegramCommandsInterval, nextTelegramCommands.Format("2006-01-02 15:04:05 MST"))
@@ -208,11 +205,13 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	if err != nil {
 		return err
 	}
-	nextHermesOpening, _ = getNextRunTime("07:00", loc, time.Now().In(loc))
-	nextHermesMidday, _ = getNextRunTime("13:00", loc, time.Now().In(loc))
-	nextHermesClosing, _ = getNextRunTime("23:00", loc, time.Now().In(loc))
-	nextHermesDigest = time.Now().Add(4 * time.Hour)
-	log.Printf("[Scheduler] Hermes Telegram brief schedule: opening=%s midday=%s closing=%s digest=%s", nextHermesOpening.Format(time.RFC3339), nextHermesMidday.Format(time.RFC3339), nextHermesClosing.Format(time.RFC3339), nextHermesDigest.Format(time.RFC3339))
+	if telegramBriefsEnabled {
+		nextHermesOpening, _ = getNextRunTime("07:00", loc, time.Now().In(loc))
+		nextHermesMidday, _ = getNextRunTime("13:00", loc, time.Now().In(loc))
+		nextHermesClosing, _ = getNextRunTime("23:00", loc, time.Now().In(loc))
+		nextHermesDigest = time.Now().Add(4 * time.Hour)
+		log.Printf("[Scheduler] Hermes Telegram brief schedule: opening=%s midday=%s closing=%s digest=%s", nextHermesOpening.Format(time.RFC3339), nextHermesMidday.Format(time.RFC3339), nextHermesClosing.Format(time.RFC3339), nextHermesDigest.Format(time.RFC3339))
+	}
 	log.Printf("[Scheduler] Next scheduled daily run: %s", nextDaily.Format("2006-01-02 15:04:05 MST"))
 
 	if maintenanceEnabled {
@@ -256,7 +255,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			log.Printf("[Scheduler] Initial research doctor error: %v", err)
 			runNowNotes = append(runNowNotes, "research doctor: "+err.Error())
 		}
-		if brief, err := runResearchBrief(researchCtx, cfg, false); err != nil {
+		if brief, err := runResearchBriefWithDB(researchCtx, cfg, db, false); err != nil {
 			log.Printf("[Scheduler] Initial research brief error: %v", err)
 			runNowNotes = append(runNowNotes, "research brief: "+err.Error())
 		} else {
@@ -392,25 +391,31 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		log.Printf("[Scheduler] Next live-auto-audit: %s", nextAudit.Format("2006-01-02 15:04:05 MST"))
 	}
 
-	if hermesEnabled {
-		nextHermes = time.Now().Add(hermesInterval)
-		if runNow {
-			writeStartupPhase("hermes")
-			log.Println("[Scheduler] Executing initial Hermes cycle (--run-now)...")
-			hermesCtx, cancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
-			if err := runHermesCycle(hermesCtx, cfg, db); err != nil {
-				log.Printf("[Scheduler] Initial Hermes cycle error: %v", err)
-				runNowNotes = append(runNowNotes, "hermes: "+err.Error())
-			}
-			cancel()
+	if runNow && hermesAvailable {
+		writeStartupPhase("hermes")
+		log.Println("[Scheduler] Executing initial Hermes cycle (--run-now)...")
+		hermesCtx, cancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+		if err := runHermesCycle(hermesCtx, cfg, db); err != nil {
+			log.Printf("[Scheduler] Initial Hermes cycle error: %v", err)
+			runNowNotes = append(runNowNotes, "hermes: "+err.Error())
 		}
+		cancel()
+	}
+	if hermesScheduled {
+		nextHermes = time.Now().Add(hermesInterval)
 		log.Printf("[Scheduler] Next Hermes cycle: %s", nextHermes.Format("2006-01-02 15:04:05 MST"))
 	}
 
 	if runNow && cfg.Live.SupervisorEnabled {
 		writeStartupPhase("live_supervisor")
-		if hermesEnabled && cfg.HermesOperator.CanExecute() {
-			log.Println("[Scheduler] Fresh Hermes decision generated before initial supervisor execution.")
+		if hermesAvailable && cfg.HermesOperator.CanExecute() {
+			hermesPreCtx, hermesPreCancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
+			if err := runHermesDecisionCycle(hermesPreCtx, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "pre_execution", AllowNotify: false}); err != nil {
+				log.Printf("[Scheduler] Initial Hermes pre-execution decision error: %v", err)
+				runNowNotes = append(runNowNotes, "Hermes pre-execution: "+err.Error())
+			}
+			hermesPreCancel()
+			log.Println("[Scheduler] Hermes pre-execution decision gate completed before initial supervisor execution.")
 		}
 		log.Println("[Scheduler] Executing initial live supervisor cycle (--run-now) after audit/Hermes decision...")
 		if supervisor, err := runLiveSupervisorCycleWithDoctorNotify(shutdownCtx, cfg, db, &liveSupervisor, dryRun, latestDoctor, false); err != nil {
@@ -452,23 +457,25 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if auditEnabled && nextAudit.Before(waitUntil) {
 			waitUntil = nextAudit
 		}
-		if hermesEnabled && nextHermes.Before(waitUntil) {
+		if hermesScheduled && nextHermes.Before(waitUntil) {
 			waitUntil = nextHermes
 		}
 		if alivePingEnabled && nextAlivePing.Before(waitUntil) {
 			waitUntil = nextAlivePing
 		}
-		if nextHermesOpening.Before(waitUntil) {
-			waitUntil = nextHermesOpening
-		}
-		if nextHermesMidday.Before(waitUntil) {
-			waitUntil = nextHermesMidday
-		}
-		if nextHermesClosing.Before(waitUntil) {
-			waitUntil = nextHermesClosing
-		}
-		if nextHermesDigest.Before(waitUntil) {
-			waitUntil = nextHermesDigest
+		if telegramBriefsEnabled {
+			if nextHermesOpening.Before(waitUntil) {
+				waitUntil = nextHermesOpening
+			}
+			if nextHermesMidday.Before(waitUntil) {
+				waitUntil = nextHermesMidday
+			}
+			if nextHermesClosing.Before(waitUntil) {
+				waitUntil = nextHermesClosing
+			}
+			if nextHermesDigest.Before(waitUntil) {
+				waitUntil = nextHermesDigest
+			}
 		}
 		if telegramCommandsEnabled && nextTelegramCommands.Before(waitUntil) {
 			waitUntil = nextTelegramCommands
@@ -523,7 +530,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			writeHeartbeat("daily run completed")
 		}
 
-		if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
+		if telegramBriefsEnabled {
 			nowUTC := time.Now().UTC()
 			if !nowUTC.Before(nextHermesOpening) {
 				sendScheduledTelegram(shutdownCtx, cfg, "hermes-opening", renderHermesExecutive(buildHermesOperationsBrief(cfg, "opening brief")))
@@ -555,7 +562,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if researchScheduled && !time.Now().Before(nextResearch) {
 			log.Println("[Scheduler] Triggering scheduled research brief...")
 			researchCtx, cancel := context.WithTimeout(shutdownCtx, schedulerResearchTimeout)
-			if _, err := runResearchBrief(researchCtx, cfg, true); err != nil {
+			if _, err := runResearchBriefWithDB(researchCtx, cfg, db, true); err != nil {
 				log.Printf("[Scheduler] Research brief error: %v", err)
 			}
 			cancel()
@@ -627,7 +634,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			if latestDoctor != nil {
 				consecutiveDoctorBlocks = updateDoctorBlockWatchdog(shutdownCtx, cfg, db, *latestDoctor, consecutiveDoctorBlocks)
 			}
-			if hermesEnabled && cfg.HermesOperator.CanExecute() {
+			if hermesAvailable && cfg.HermesOperator.CanExecute() {
 				hermesPreCtx, hermesPreCancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
 				if err := runHermesDecisionCycle(hermesPreCtx, cfg, db, hermesagent.HermesTrigger{Source: "supervisor", Reason: "pre_execution", AllowNotify: false}); err != nil {
 					log.Printf("[Scheduler] Hermes pre-execution decision error: %v", err)
@@ -654,7 +661,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			writeHeartbeat("live-auto-audit completed")
 		}
 
-		if hermesEnabled && !time.Now().Before(nextHermes) {
+		if hermesScheduled && !time.Now().Before(nextHermes) {
 			log.Println("[Scheduler] Triggering scheduled Hermes cycle...")
 			hermesCtx, cancel := context.WithTimeout(shutdownCtx, schedulerHermesTimeout)
 			if err := runHermesCycle(hermesCtx, cfg, db); err != nil {
@@ -733,10 +740,13 @@ func enforceStartupReconcileRecovery(db *storage.DB, result liveguard.ReconcileR
 		"reason":               reason,
 		"reconcile_status":     result.Safety.Status,
 		"unknown_orders":       result.Safety.Unknown,
+		"remote_only":          result.Safety.RemoteOnly,
+		"identity_conflicts":   result.Safety.IdentityConflicts,
+		"discovery_failed":     result.Safety.DiscoveryFailed,
 		"open_after_reconcile": result.Safety.OpenAfterReconcile,
 		"unknown_positions":    result.Safety.UnknownPositions,
 	})
-	fingerprint := fmt.Sprintf("startup-recovery:%s:%s:%d:%d:%d", reason, result.Safety.Status, result.Safety.Unknown, result.Safety.OpenAfterReconcile, result.Safety.UnknownPositions)
+	fingerprint := fmt.Sprintf("startup-recovery:%s:%s:%d:%d:%d:%t:%d:%d", reason, result.Safety.Status, result.Safety.Unknown, result.Safety.RemoteOnly, result.Safety.IdentityConflicts, result.Safety.DiscoveryFailed, result.Safety.OpenAfterReconcile, result.Safety.UnknownPositions)
 	if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Timestamp: time.Now().UTC(), Source: "btc-agent-scheduler", Type: "STARTUP_RECONCILE_RECOVERY_FAILED", Severity: "critical", Fingerprint: fingerprint, PayloadJSON: string(payload)}); err != nil {
 		return fmt.Errorf("startup recovery save runtime event: %w", err)
 	}

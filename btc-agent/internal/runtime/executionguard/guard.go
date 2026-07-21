@@ -39,3 +39,23 @@ func (g GuardedExchange) CancelOrder(ctx context.Context, req live.CancelOrderRe
 	}
 	return g.Exchange.CancelOrder(ctx, req)
 }
+
+func (g GuardedExchange) OrderStatus(ctx context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error) {
+	reader, ok := g.Exchange.(interface {
+		OrderStatus(context.Context, string, string, string) (live.OrderStatus, error)
+	})
+	if !ok {
+		return live.OrderStatus{}, fmt.Errorf("order status reader unavailable")
+	}
+	return reader.OrderStatus(ctx, instID, orderID, clientOrderID)
+}
+
+func (g GuardedExchange) PendingOrders(ctx context.Context, instID string) ([]live.OrderStatus, error) {
+	reader, ok := g.Exchange.(interface {
+		PendingOrders(context.Context, string) ([]live.OrderStatus, error)
+	})
+	if !ok {
+		return nil, fmt.Errorf("pending order reader unavailable")
+	}
+	return reader.PendingOrders(ctx, instID)
+}

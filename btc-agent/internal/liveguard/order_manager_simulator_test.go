@@ -9,11 +9,23 @@ import (
 	"btc-agent/internal/exchange/simulator"
 )
 
+type managedFakeOKX struct {
+	*simulator.FakeOKX
+}
+
+func (f managedFakeOKX) OrderStatus(ctx context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error) {
+	return f.GetOrder(ctx, instID, orderID, clientOrderID)
+}
+
+func (managedFakeOKX) PendingOrders(context.Context, string) ([]live.OrderStatus, error) {
+	return nil, nil
+}
+
 func TestManageLiveOrdersWithFakeOKXSubmitAndFill(t *testing.T) {
 	cfg := managedConfig()
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
-	fake := simulator.NewFakeOKX()
+	fake := managedFakeOKX{FakeOKX: simulator.NewFakeOKX()}
 	fake.SetBalance("USDT", 1000)
 	fake.SetFilter("ETH-USDT", live.InstrumentFilter{InstID: "ETH-USDT", MinNotional: 1, MinSize: 0.0001})
 	fake.SetFilter("SOL-USDT", live.InstrumentFilter{InstID: "SOL-USDT", MinNotional: 1, MinSize: 0.0001})
@@ -49,7 +61,7 @@ func TestManageLiveOrdersWithFakeOKXRejectsByFilter(t *testing.T) {
 	cfg := managedConfig()
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
-	fake := simulator.NewFakeOKX()
+	fake := managedFakeOKX{FakeOKX: simulator.NewFakeOKX()}
 	fake.SetBalance("USDT", 1000)
 	fake.SetFilter("ETH-USDT", live.InstrumentFilter{InstID: "ETH-USDT", MinNotional: 100, MinSize: 0.0001})
 	fake.SetFilter("SOL-USDT", live.InstrumentFilter{InstID: "SOL-USDT", MinNotional: 1, MinSize: 0.0001})
@@ -73,7 +85,7 @@ func TestManageLiveOrdersWithFakeOKXCancelsInactivePlan(t *testing.T) {
 	cfg := managedConfig()
 	plan := managedPlan()
 	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
-	fake := simulator.NewFakeOKX()
+	fake := managedFakeOKX{FakeOKX: simulator.NewFakeOKX()}
 	fake.SetBalance("USDT", 1000)
 	fake.SetFilter("ETH-USDT", live.InstrumentFilter{InstID: "ETH-USDT", MinNotional: 1, MinSize: 0.0001})
 	fake.SetFilter("SOL-USDT", live.InstrumentFilter{InstID: "SOL-USDT", MinNotional: 1, MinSize: 0.0001})

@@ -23,6 +23,8 @@ type fakeManagedExchange struct {
 	canceled  []live.CancelOrderRequest
 	placeErr  error
 	cancelErr error
+	status    live.OrderStatus
+	statusErr error
 	book      liquidity.OrderBookSnapshot
 	bookErr   error
 }
@@ -41,6 +43,20 @@ func (f *fakeManagedExchange) CancelOrder(ctx context.Context, req live.CancelOr
 		return live.CancelOrderResult{InstID: req.InstID, OrderID: req.OrderID, ClientOrderID: req.ClientOrderID}, f.cancelErr
 	}
 	return live.CancelOrderResult{InstID: req.InstID, OrderID: req.OrderID, ClientOrderID: req.ClientOrderID, Canceled: true, Code: "0"}, nil
+}
+
+func (f *fakeManagedExchange) OrderStatus(_ context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error) {
+	if f.statusErr != nil {
+		return live.OrderStatus{}, f.statusErr
+	}
+	if f.status.Status == "" {
+		return live.OrderStatus{InstID: instID, OrderID: orderID, ClientOrderID: clientOrderID, Status: live.StatusCancelled}, nil
+	}
+	return f.status, nil
+}
+
+func (f *fakeManagedExchange) PendingOrders(context.Context, string) ([]live.OrderStatus, error) {
+	return nil, nil
 }
 
 func (f *fakeManagedExchange) OrderBook(ctx context.Context, instID string) (liquidity.OrderBookSnapshot, error) {
@@ -244,6 +260,42 @@ func TestManageLiveOrdersBlocksNilExchangeDependencies(t *testing.T) {
 	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, nil, nil, fakeHaltReader{halted: false})
 	if got.Status != ManagedCycleBlocked || !strings.Contains(strings.Join(got.Reasons, " "), "order placer/canceler unavailable") {
 		t.Fatalf("nil exchange dependencies must fail closed: %+v", got)
+	}
+}
+
+func TestManageLiveOrdersPostCancelStatusErrorBlocksReplacement(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{statusErr: context.DeadlineExceeded}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusSubmitted, Price: 80, Quantity: 0.025, Notional: 2, LayerIndex: 1}}
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if len(ex.canceled) != 1 || len(got.Canceled) != 0 || len(got.Replaced) != 0 || len(ex.placed) != 3 || len(got.Blocked) == 0 {
+		t.Fatalf("unknown post-cancel status must keep original slot and block replacement: %+v placed=%d", got, len(ex.placed))
+	}
+}
+
+func TestManageLiveOrdersCancelFillRaceBlocksReplacement(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{status: live.OrderStatus{Status: live.StatusCancelled, AccumulatedFillSz: 0.01, AvgPrice: 80}}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusSubmitted, Price: 80, Quantity: 0.025, Notional: 2, LayerIndex: 1}}
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if len(got.Canceled) != 0 || len(got.Replaced) != 0 || len(ex.placed) != 3 || len(got.Blocked) == 0 || live.NormalizeOrderStatus(got.Blocked[0].Order.Status) != live.StatusPartialFill {
+		t.Fatalf("cancel/fill race must remain partial and block replacement: %+v placed=%d", got, len(ex.placed))
+	}
+}
+
+func TestManageLiveOrdersTerminalCancelAllowsReplacement(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{status: live.OrderStatus{Status: live.StatusCancelled}}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusSubmitted, Price: 80, Quantity: 0.025, Notional: 2, LayerIndex: 1}}
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if len(got.Canceled) != 1 || len(got.Replaced) != 1 || len(ex.placed) != 4 || live.NormalizeOrderStatus(got.Canceled[0].Order.Status) != live.StatusCancelled {
+		t.Fatalf("confirmed zero-fill cancellation should permit replacement: %+v placed=%d", got, len(ex.placed))
 	}
 }
 

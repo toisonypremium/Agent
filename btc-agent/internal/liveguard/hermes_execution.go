@@ -67,9 +67,20 @@ func ExecuteHermesDesiredOrders(ctx context.Context, cfg config.Config, plan age
 		decision.PlaceResult = placed
 		if err != nil {
 			safeErr := sanitizeExchangeError(cfg, err)
-			_ = recorder.MarkManagedLiveOrderRejected(clientID, safeErr)
+			unknown := managedSubmissionOutcomeUnknown(err)
+			var persistErr error
+			if unknown {
+				persistErr = recorder.MarkManagedLiveOrderUnknown(clientID, safeErr)
+				decision.Reason = "order placement outcome unknown; reconcile required"
+			} else {
+				persistErr = recorder.MarkManagedLiveOrderRejected(clientID, safeErr)
+			}
 			decision.Action = "block"
 			decision.Error = safeErr
+			if persistErr != nil {
+				decision.Error = safeErr + "; persist outcome failed: " + persistErr.Error()
+				decision.Reason = "order outcome persistence failed; manual check required"
+			}
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
@@ -158,45 +169,20 @@ func ExecuteHermesCancelActions(ctx context.Context, cfg config.Config, decision
 			continue
 		}
 		cancelCtx, cancelDone := context.WithTimeout(ctx, managedExchangeTimeout)
-		cancel, err := canceler.CancelOrder(cancelCtx, live.CancelOrderRequest{InstID: order.InstID, OrderID: order.OrderID, ClientOrderID: order.ClientOrderID})
+		cancel, remote, err := CancelOrderAndConfirm(cancelCtx, order, canceler, statusReader)
 		cancelDone()
 		decision.CancelResult = cancel
-		if err != nil || !cancel.Canceled {
-			decision.Action = "block"
-			decision.Reason = "cancel outcome unknown; reconcile required"
-			if err != nil {
-				decision.Error = sanitizeExchangeError(cfg, err)
-			}
-			result.Blocked = append(result.Blocked, decision)
-			continue
-		}
-		statusCtx, statusDone := context.WithTimeout(ctx, managedExchangeTimeout)
-		remote, err := statusReader.OrderStatus(statusCtx, order.InstID, order.OrderID, order.ClientOrderID)
-		statusDone()
 		if err != nil {
 			decision.Action = "block"
-			decision.Reason = "post-cancel status unknown; reconcile required"
+			decision.Reason = "cancel or post-cancel status unknown; reconcile required"
 			decision.Error = sanitizeExchangeError(cfg, err)
 			result.Blocked = append(result.Blocked, decision)
 			continue
 		}
-		remote = withLocalOrderIdentity(remote, order)
-		remote.Symbol = firstNonEmptyString(remote.Symbol, order.Symbol)
-		remote.Source = order.Source
 		remote.LastManagementAction = "Hermes CANCEL decision=" + decisionID
-		filled := remote.AccumulatedFillSz
-		if filled <= 0 {
-			filled = remote.FilledQuantity
-		}
-		if filled > 0 {
-			remote.Status = live.StatusPartialFill
+		if live.NormalizeOrderStatus(remote.Status) == live.StatusPartialFill {
 			decision.Reason = "cancel confirmed with fill; ledger reconcile required"
 			decision.AuditTrail = append(decision.AuditTrail, "post_cancel_fill=true", "local_status=PARTIAL_FILL")
-		} else if live.NormalizeOrderStatus(remote.Status) != live.StatusCancelled {
-			decision.Action = "block"
-			decision.Reason = "post-cancel status not terminal; reconcile required"
-			result.Blocked = append(result.Blocked, decision)
-			continue
 		}
 		remote.UpdatedAt = time.Now().Unix()
 		if err := recorder.SaveLiveOrderStatus(remote); err != nil {

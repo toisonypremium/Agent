@@ -9,15 +9,20 @@ import (
 )
 
 type mockReader struct {
-	status func(ctx context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error)
+	status     func(ctx context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error)
+	pending    []live.OrderStatus
+	pendingErr error
 }
 
 func (m *mockReader) OrderStatus(ctx context.Context, instID, orderID, clientOrderID string) (live.OrderStatus, error) {
+	if m.status == nil {
+		return live.OrderStatus{}, errors.New("status reader unavailable")
+	}
 	return m.status(ctx, instID, orderID, clientOrderID)
 }
 
-func (m *mockReader) PendingOrders(ctx context.Context, instID string) ([]live.OrderStatus, error) {
-	return nil, nil
+func (m *mockReader) PendingOrders(context.Context, string) ([]live.OrderStatus, error) {
+	return m.pending, m.pendingErr
 }
 
 func TestReconcileOrders(t *testing.T) {
@@ -103,6 +108,67 @@ func TestReconcileOrders(t *testing.T) {
 			t.Errorf("expected status UNKNOWN, got %s", res.Orders[0].Status)
 		}
 	})
+}
+
+func TestReconcileBlocksRemoteOnlyPendingOrder(t *testing.T) {
+	reader := &mockReader{pending: []live.OrderStatus{{InstID: "ETH-USDT", OrderID: "remote-1", ClientOrderID: "external-1", Status: live.StatusSubmitted}}}
+	res := ReconcileOrders(context.Background(), reader, nil)
+	if res.Safety.Status != ReconcileBlock || res.Safety.RemoteOnly != 1 || len(res.RemoteOnlyOrders) != 1 {
+		t.Fatalf("remote-only pending order must block: %+v", res)
+	}
+}
+
+func TestReconcileBlocksPendingDiscoveryFailure(t *testing.T) {
+	reader := &mockReader{pendingErr: context.DeadlineExceeded}
+	res := ReconcileOrders(context.Background(), reader, nil)
+	if res.Safety.Status != ReconcileBlock || !res.Safety.DiscoveryFailed {
+		t.Fatalf("pending discovery failure must block: %+v", res)
+	}
+}
+
+func TestReconcileMatchesRemotePendingByEitherIdentity(t *testing.T) {
+	open := []live.OrderStatus{{InstID: "ETH-USDT", OrderID: "order-1", ClientOrderID: "client-1", Status: live.StatusSubmitted}}
+	reader := &mockReader{
+		pending: []live.OrderStatus{{InstID: "ETH-USDT", OrderID: "order-1", ClientOrderID: "client-1", Status: live.StatusSubmitted}},
+		status: func(context.Context, string, string, string) (live.OrderStatus, error) {
+			return live.OrderStatus{Status: live.StatusSubmitted}, nil
+		},
+	}
+	res := ReconcileOrders(context.Background(), reader, open)
+	if res.Safety.Status != ReconcileClean || res.Safety.RemoteOnly != 0 || res.IdentityConflicts != 0 {
+		t.Fatalf("matching remote pending order should reconcile clean: %+v", res)
+	}
+}
+
+func TestReconcileBlocksSingleIdentityMismatch(t *testing.T) {
+	open := []live.OrderStatus{{InstID: "ETH-USDT", OrderID: "order-1", ClientOrderID: "client-1", Status: live.StatusSubmitted}}
+	reader := &mockReader{
+		pending: []live.OrderStatus{{InstID: "ETH-USDT", OrderID: "different-order", ClientOrderID: "client-1", Status: live.StatusSubmitted}},
+		status: func(_ context.Context, _, orderID, clientOrderID string) (live.OrderStatus, error) {
+			return live.OrderStatus{OrderID: orderID, ClientOrderID: clientOrderID, Status: live.StatusSubmitted}, nil
+		},
+	}
+	res := ReconcileOrders(context.Background(), reader, open)
+	if res.Safety.Status != ReconcileBlock || res.IdentityConflicts != 1 {
+		t.Fatalf("single matched identity with conflicting peer ID must block: %+v", res)
+	}
+}
+
+func TestReconcileBlocksCrossedIdentityConflict(t *testing.T) {
+	open := []live.OrderStatus{
+		{InstID: "ETH-USDT", OrderID: "order-1", ClientOrderID: "client-1", Status: live.StatusSubmitted},
+		{InstID: "ETH-USDT", OrderID: "order-2", ClientOrderID: "client-2", Status: live.StatusSubmitted},
+	}
+	reader := &mockReader{
+		pending: []live.OrderStatus{{InstID: "ETH-USDT", OrderID: "order-2", ClientOrderID: "client-1", Status: live.StatusSubmitted}},
+		status: func(_ context.Context, _, orderID, clientOrderID string) (live.OrderStatus, error) {
+			return live.OrderStatus{OrderID: orderID, ClientOrderID: clientOrderID, Status: live.StatusSubmitted}, nil
+		},
+	}
+	res := ReconcileOrders(context.Background(), reader, open)
+	if res.Safety.Status != ReconcileBlock || res.IdentityConflicts != 1 {
+		t.Fatalf("crossed remote identity must block: %+v", res)
+	}
 }
 
 func TestReconcileSafetyBlocksUnknownAndBadFill(t *testing.T) {

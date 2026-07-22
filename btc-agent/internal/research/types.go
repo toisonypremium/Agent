@@ -48,6 +48,8 @@ type ResearchItem struct {
 	Tags        []string  `json:"tags,omitempty"`
 	Risk        string    `json:"risk"`
 	Summary     string    `json:"summary,omitempty"`
+	Category    string    `json:"category,omitempty"`
+	Confidence  float64   `json:"confidence,omitempty"`
 }
 
 func (r *DoctorResult) RefreshSummary() {

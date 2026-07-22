@@ -92,6 +92,11 @@ ai:
   max_tokens: 6000
   temperature: 0
   telegram_enabled: true
+  hermes_interval_minutes: 60   # how often Hermes AI cycle runs; 0 = only on --run-now
+  hermes_fresh_audit_max_minutes: 30
+  hermes_min_alert_gap_minutes: 30
+  hermes_event_driven_enabled: true
+  hermes_telegram_interactive: true
 
 research:
   enabled: false
@@ -155,6 +160,7 @@ live:
   cancel_on_btc_permission_not_allowed: true
   supervisor_enabled: false
   management_interval_minutes: 15
+  audit_interval_minutes: 60      # how often live-auto-audit runs; 0 = only on --run-now
   heartbeat_interval_minutes: 360
   auto_halt_after_errors: 3
   notify_on_no_action: false
@@ -176,3 +182,23 @@ execution:
     - 0.25
     - 0.35
     - 0.40
+
+exit:
+  enabled: false
+  take_profit_pct: 0.30
+  partial_exit_pct: 0.50
+  trailing_activate_pct: 0.20
+  trailing_distance_pct: 0.08
+  time_stop_days: 90
+  min_pnl_for_time_stop: 0.0
+
+# Hermes strategy authority. Keep observe/shadow until audited.
+hermes_operator:
+  enabled: false
+  mode: "observe" # observe | shadow | canary | autonomous
+  decision_ttl_seconds: 120
+  min_confidence: 0.60
+  max_actions_per_cycle: 3
+  max_probe_notional_usdt: 5
+  max_action_notional_usdt: 10
+  max_portfolio_exposure_usdt: 20

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="description" content="HERMES Command Center — dashboard chỉ đọc cho BTC Agent">
+  <meta name="theme-color" content="#0a0d17">
+  <title>BTC Agent · Command Center</title>
+  <link rel="stylesheet" href="/web/index.css">
+</head>
+<body>
+  <a class="skip-link" href="#dashboard">Bỏ qua điều hướng</a>
+
+  <aside class="sidebar" aria-label="Điều hướng chính">
+    <a class="brand" href="#dashboard" aria-label="BTC Agent Command Center">
+      <div class="brand-mark">H</div>
+      <div>
+        <div class="brand-name">HERMES</div>
+        <div class="brand-sub">COMMAND CENTER</div>
+      </div>
+    </a>
+
+    <div class="env-pill">
+      <span class="dot"></span>
+      <span id="environment-label">READ ONLY</span>
+    </div>
+
+    <nav class="nav" aria-label="Điều hướng dashboard">
+      <a href="#dashboard" class="active"><span class="icon">◈</span><span>Tổng quan</span></a>
+      <a href="#market"><span class="icon">⌁</span><span>Thị trường</span></a>
+      <a href="#portfolio"><span class="icon">▤</span><span>Danh mục</span></a>
+      <a href="#activity"><span class="icon">◌</span><span>Hoạt động</span></a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="safe-label">◆ SAFE BY DEFAULT</div>
+      <small>Không có điều khiển giao dịch</small>
+    </div>
+  </aside>
+
+  <div class="workspace">
+    <header class="topbar">
+      <div class="topbar-left">
+        <span class="eyebrow">BTC AGENT / OBSERVABILITY</span>
+        <h1>Command Center</h1>
+      </div>
+      <div class="topbar-right">
+        <span class="connection" id="connection"><span class="dot"></span> Đang kết nối</span>
+        <time id="updated">—</time>
+        <button id="refresh" type="button" aria-label="Làm mới dữ liệu">↻</button>
+      </div>
+    </header>
+
+    <main id="dashboard">
+
+      <!-- AUTHORITY HERO -->
+      <section class="hero" aria-labelledby="authority-title">
+        <div class="hero-copy">
+          <span class="eyebrow hero-eyebrow">EXECUTION AUTHORITY</span>
+          <h2 id="authority-title">ĐANG XÁC MINH</h2>
+          <p class="hero-reason" id="authority-reason">Đang đọc safety state chính thức.</p>
+          <div class="hero-tags">
+            <span class="badge readonly">READ ONLY</span>
+            <span class="badge" id="authority-badge">UNKNOWN</span>
+          </div>
+        </div>
+        <div class="authority-ring" aria-hidden="true">
+          <strong id="authority-orbit">—</strong>
+          <small>MARKET AUTHORITY</small>
+        </div>
+      </section>
+
+      <!-- STATUS STRIP -->
+      <section class="status-strip" aria-label="Trạng thái tóm tắt">
+        <div><span class="strip-label">Chế độ</span><span class="strip-value" id="mode">—</span></div>
+        <div><span class="strip-label">Live execution</span><span class="strip-value" id="live-enabled">—</span></div>
+        <div><span class="strip-label">Safety lock</span><span class="strip-value" id="safety-lock">—</span></div>
+        <div><span class="strip-label">Data source</span><span class="strip-value">SQLITE LEDGER</span></div>
+      </section>
+
+      <!-- LIVE OVERVIEW -->
+      <div class="section-head" id="overview-head">
+        <div>
+          <span class="eyebrow">01 / LIVE OVERVIEW</span>
+          <h2>Trạng thái cần biết ngay</h2>
+          <p>Thông tin từ database runtime, hiển thị thuần đọc.</p>
+        </div>
+        <span class="live-dot"><span class="dot"></span> AUTO REFRESH 30s</span>
+      </div>
+      <section class="metric-grid" aria-label="Số liệu chính">
+        <article class="metric accent">
+          <div class="metric-label">BTC / USDT</div>
+          <strong class="metric-value" id="btc-price">—</strong>
+          <div class="metric-sub" id="market-regime">Chưa có market analysis</div>
+        </article>
+        <article class="metric">
+          <div class="metric-label">Trạng thái kế hoạch</div>
+          <strong class="metric-value" id="plan-state">—</strong>
+          <div class="metric-sub" id="plan-permission">Đang chờ plan</div>
+        </article>
+        <article class="metric">
+          <div class="metric-label">Vị thế hiện tại</div>
+          <strong class="metric-value" id="position-count">—</strong>
+          <div class="metric-sub">ledger positions</div>
+        </article>
+        <article class="metric">
+          <div class="metric-label">Lệnh đang mở</div>
+          <strong class="metric-value" id="order-count">—</strong>
+          <div class="metric-sub">managed live orders</div>
+        </article>
+      </section>
+
+      <!-- MARKET + PLAN -->
+      <section class="content-grid" id="market">
+        <article class="panel">
+          <div class="panel-header">
+            <div><span class="eyebrow" style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px;">MARKET GATE</span><h3>Bối cảnh BTC</h3></div>
+            <span class="badge" id="market-permission">—</span>
+          </div>
+          <div class="panel-body"><div class="kv-grid" id="market-details"></div></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header">
+            <div><span class="eyebrow" style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px;">ACCUMULATION PLAN</span><h3>Quyết định hiện tại</h3></div>
+            <span class="badge" id="plan-badge">—</span>
+          </div>
+          <div class="panel-body"><div class="kv-grid" id="plan-details"></div></div>
+        </article>
+      </section>
+
+      <!-- PORTFOLIO -->
+      <div class="section-head" id="portfolio">
+        <div>
+          <span class="eyebrow">02 / PORTFOLIO LEDGER</span>
+          <h2>Vị thế &amp; lệnh</h2>
+          <p>Đối chiếu trực tiếp từ SQLite, không có quyền thao tác.</p>
+        </div>
+      </div>
+      <section class="content-grid">
+        <article class="panel">
+          <div class="panel-header">
+            <div><span class="eyebrow" style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px;">POSITIONS</span><h3>Tài sản đang nắm giữ</h3></div>
+            <span class="count" id="position-chip">0</span>
+          </div>
+          <div class="ledger-list" id="positions"></div>
+        </article>
+        <article class="panel">
+          <div class="panel-header">
+            <div><span class="eyebrow" style="display:block;font-size:10px;color:var(--muted);margin-bottom:3px;">OPEN ORDERS</span><h3>Lệnh đang quản lý</h3></div>
+            <span class="count" id="order-chip">0</span>
+          </div>
+          <div class="ledger-list" id="orders"></div>
+        </article>
+      </section>
+
+      <!-- EVENTS -->
+      <div class="section-head" id="activity">
+        <div>
+          <span class="eyebrow">03 / RUNTIME EVENTS</span>
+          <h2>Nhật ký hệ thống</h2>
+          <p>Sự kiện gần nhất từ runtime, mức độ nghiêm trọng có màu đánh dấu.</p>
+        </div>
+      </div>
+      <section class="panel">
+        <div class="event-panel" id="events"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="alert" aria-live="polite"></div>
+  <script src="/web/app.js" defer></script>
+</body>
+</html>

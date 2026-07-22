@@ -167,6 +167,19 @@ func applyBTCGateToAsset(cfg config.Config, a agent1.MarketAnalysis, ap AssetPla
 	ap.HardBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonHardBlock))
 	ap.SoftBlockers = ReasonMessages(ReasonsBySeverity(ap.Reasons, ReasonSoftWait))
 	if HasHardBlock(gateReasons) {
+		// Exceptional RR Bypass: neu chi falling knife (khong phai PANIC_SELLING/FOMO)
+		// va asset co RR cuc cao, ha xuong SCOUT thay vi NO_TRADE.
+		if cfg.Risk.ExceptionalRRBypassFallingKnife > 0 &&
+			a.FallingKnifeRisk == agent1.High &&
+			a.MarketRegime != "PANIC_SELLING" &&
+			a.FomoRisk != agent1.High &&
+			ap.RewardRisk >= cfg.Risk.ExceptionalRRBypassFallingKnife {
+			ap.State = StateScout
+			ap.Layers = nil
+			ap.Reason = fmt.Sprintf("exceptional RR %.2f >= %.1f: falling knife SCOUT, khong tao lenh", ap.RewardRisk, cfg.Risk.ExceptionalRRBypassFallingKnife)
+			ap.NextTrigger = "Exceptional RR bypass: theo doi entry tot hon; khong tao lenh den khi BTC het falling knife."
+			return ap
+		}
 		ap.State = StateNoTrade
 		ap.Layers = nil
 		ap.Reason = firstNonEmptyMM(PrimaryReason(gateReasons), ap.Reason, "BTC hard blocker")
@@ -342,7 +355,27 @@ func zoneQualityReason(quality string, width float64) string {
 }
 
 func buildEntryLayers(cfg config.Config, support, resistance market.Zone, invalidation, budget float64) []Layer {
-	prices := []float64{support.High, support.Mid(), support.Low}
+	// Adaptive layer spacing based on support zone width.
+	// Narrow zone (<2%): create artificial spacing to avoid clustering orders.
+	// Wide zone (>8%): compress layers to top 60% to avoid over-discounted entries.
+	// Normal zone: use High/Mid/Low as-is.
+	var prices []float64
+	if support.Valid() && support.Mid() > 0 {
+		zoneW := (support.High - support.Low) / support.Mid()
+		switch {
+		case zoneW < 0.02:
+			// Zone too narrow — spread layers artificially at ±0.5%, ±1.5%
+			mid := support.Mid()
+			prices = []float64{mid * 1.005, mid, mid * 0.985}
+		case zoneW > 0.08:
+			// Zone too wide — compress to upper 60% to avoid chasing deep discounts
+			prices = []float64{support.High, support.High * 0.97, support.Mid()}
+		default:
+			prices = []float64{support.High, support.Mid(), support.Low}
+		}
+	} else {
+		prices = []float64{support.High, support.Mid(), support.Low}
+	}
 	expires := time.Time{}
 	if cfg.Execution.OrderExpiryHours > 0 {
 		expires = time.Now().Add(time.Duration(cfg.Execution.OrderExpiryHours) * time.Hour)

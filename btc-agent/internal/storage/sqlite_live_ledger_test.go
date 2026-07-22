@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"math"
 	"path/filepath"
 	"testing"
 
@@ -134,5 +135,35 @@ func TestSaveManagedCycleReport(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("managed cycle reports=%d want 1", count)
+	}
+}
+
+func TestHermesOwnedPositionsExcludesOtherSourcesAndNetsSells(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "owned.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hermesMeta := live.OrderStatus{Source: "HERMES_OPERATOR"}
+	if err := db.SaveManagedLiveOrder("hbuy", "o1", "BTC-USDT", "BTCUSDT", "BUY", "limit", 50000, 0.01, 500, live.StatusFilled, hermesMeta); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveManagedLiveOrder("hsell", "o2", "BTC-USDT", "BTCUSDT", "SELL", "limit", 55000, 0.004, 220, live.StatusFilled, hermesMeta); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.SaveManagedLiveOrder("agent2", "o3", "BTC-USDT", "BTCUSDT", "BUY", "limit", 50000, 1, 50000, live.StatusFilled, live.OrderStatus{Source: "deterministic_agent2_layer_1"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range []live.LivePositionEvent{{Timestamp: 1, ClientOrderID: "hbuy", InstID: "BTC-USDT", Symbol: "BTCUSDT", Side: "BUY", DeltaQuantity: 0.01, NotionalDelta: 500}, {Timestamp: 2, ClientOrderID: "hsell", InstID: "BTC-USDT", Symbol: "BTCUSDT", Side: "SELL", DeltaQuantity: 0.004, NotionalDelta: 220}, {Timestamp: 3, ClientOrderID: "agent2", InstID: "BTC-USDT", Symbol: "BTCUSDT", Side: "BUY", DeltaQuantity: 1, NotionalDelta: 50000}} {
+		if err := db.SaveLivePositionEvent(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	owned, err := db.HermesOwnedPositions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(owned) != 1 || math.Abs(owned[0].Quantity-0.006) > 1e-12 {
+		t.Fatalf("wrong Hermes ownership: %+v", owned)
 	}
 }

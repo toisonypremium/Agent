@@ -298,7 +298,7 @@ func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, 
 	if notifyTelegram && cfg.Notify.Enabled {
 		switch cfg.Notify.Provider {
 		case "telegram":
-			sendTelegram(ctx, cfg, "run-daily", telegramreport.DailyHumanText(analysis, p))
+			sendScheduledTelegram(ctx, cfg, "run-daily", telegramreport.DailyHumanText(analysis, p))
 		case "ntfy":
 			if err := notify.Ntfy(ctx, cfg.Notify.NtfyTopic, report); err != nil {
 				log.Printf("ntfy warning: %v", err)

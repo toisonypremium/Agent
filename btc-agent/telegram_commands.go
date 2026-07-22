@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"btc-agent/internal/agent2"
@@ -20,8 +22,68 @@ import (
 )
 
 type telegramCommandState struct {
-	LastUpdateID int       `json:"last_update_id"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	LastUpdateID int                    `json:"last_update_id"`
+	UpdatedAt    time.Time              `json:"updated_at"`
+	RateLimits   map[string][]time.Time `json:"rate_limits,omitempty"`
+}
+
+const telegramMaxRequestsPerMinute = 5
+
+var telegramRateMu sync.Mutex
+var telegramRateWindow = map[int64][]time.Time{}
+
+func telegramRateAllow(chatID int64) bool {
+	telegramRateMu.Lock()
+	defer telegramRateMu.Unlock()
+	now := time.Now()
+	window := telegramRateWindow[chatID]
+	valid := make([]time.Time, 0, len(window))
+	for _, t := range window {
+		if now.Sub(t) < time.Minute {
+			valid = append(valid, t)
+		}
+	}
+	if len(valid) >= telegramMaxRequestsPerMinute {
+		telegramRateWindow[chatID] = valid
+		return false
+	}
+	telegramRateWindow[chatID] = append(valid, now)
+	return true
+}
+
+func loadTelegramRateLimits(state telegramCommandState) {
+	telegramRateMu.Lock()
+	defer telegramRateMu.Unlock()
+	telegramRateWindow = map[int64][]time.Time{}
+	for chatID, timestamps := range state.RateLimits {
+		id, err := strconv.ParseInt(chatID, 10, 64)
+		if err != nil {
+			continue
+		}
+		for _, timestamp := range timestamps {
+			if time.Since(timestamp) < time.Minute {
+				telegramRateWindow[id] = append(telegramRateWindow[id], timestamp)
+			}
+		}
+	}
+}
+
+func saveTelegramRateLimits(state *telegramCommandState) {
+	telegramRateMu.Lock()
+	defer telegramRateMu.Unlock()
+	state.RateLimits = map[string][]time.Time{}
+	now := time.Now()
+	for chatID, timestamps := range telegramRateWindow {
+		valid := make([]time.Time, 0, len(timestamps))
+		for _, timestamp := range timestamps {
+			if now.Sub(timestamp) < time.Minute {
+				valid = append(valid, timestamp)
+			}
+		}
+		if len(valid) > 0 {
+			state.RateLimits[strconv.FormatInt(chatID, 10)] = valid
+		}
+	}
 }
 
 func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB) error {
@@ -31,6 +93,7 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 		return fmt.Errorf("telegram command config missing token/chat_id")
 	}
 	state := loadTelegramCommandState()
+	loadTelegramRateLimits(state)
 	updates, err := notify.TelegramGetUpdates(ctx, token, state.LastUpdateID+1)
 	if err != nil {
 		return err
@@ -41,20 +104,42 @@ func runTelegramCommands(ctx context.Context, cfg config.Config, db *storage.DB)
 		}
 		advance := true
 		if telegramChatAllowed(chatID, update.Message.Chat.ID) {
+			if !telegramRateAllow(update.Message.Chat.ID) {
+				log.Printf("[TelegramCommands] rate limit exceeded for chat %d", update.Message.Chat.ID)
+				continue
+			}
 			cmd := normalizeTelegramCommand(update.Message.Text)
+			// Free-text Hermes question routing (before command check)
+			if cmd == "" {
+				if trigger, ok := parseTelegramHermesRequest(update.Message.Text); ok {
+					result := runHermesTelegramReply(context.Background(), cfg, db, trigger)
+					telegramToken := firstNonEmpty(cfg.Notify.TelegramToken, os.Getenv("TELEGRAM_TOKEN"))
+					telegramChatID := firstNonEmpty(cfg.Notify.TelegramChatID, os.Getenv("TELEGRAM_CHAT_ID"))
+					if err := notify.Telegram(ctx, telegramToken, telegramChatID, usertext.TelegramVietnamese(result)); err != nil {
+						log.Printf("[TelegramCommands] hermes free-text reply error: %v", err)
+					} else {
+						log.Printf("[TelegramCommands] hermes free-text reply sent ok")
+					}
+				}
+			}
 			if cmd != "" {
 				text, ok := buildReadOnlyTelegramCommandReply(cmd)
 				if ok {
 					if err := notify.Telegram(ctx, token, chatID, usertext.TelegramVietnamese(text)); err != nil {
+						log.Printf("[TelegramCommands] reply error [%s]: %v", cmd, err)
 						advance = false
 						return err
 					}
+					log.Printf("[TelegramCommands] reply sent ok [%s]", cmd)
+				} else {
+					log.Printf("[TelegramCommands] command ignored [%s]", cmd)
 				}
 			}
 		}
 		if advance {
 			state.LastUpdateID = update.UpdateID
 			state.UpdatedAt = time.Now()
+			saveTelegramRateLimits(&state)
 			if err := saveTelegramCommandState(state); err != nil {
 				return err
 			}
@@ -85,7 +170,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = cmd[:at]
 	}
 	switch cmd {
-	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/help":
+	case "/status", "/why", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -181,6 +266,15 @@ func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
 			return "Chưa có bot_state/scenario report. Chờ live supervisor chạy một chu kỳ.", true
 		}
 		return telegramCommandRisk(snapshot, scenario), true
+	case "/hermes", "/h":
+		return telegramCommandHermesFromLatest(), true
+	case "/ask":
+		return "Dung: /ask <cau hoi cua ban>, vi du: /ask tai sao bot chua vao lenh?", true
+	case "/exits":
+		snap := buildHermesSnapshotFromReports()
+		return telegramCommandExits(snap), true
+	case "/audit":
+		return telegramCommandAudit(), true
 	default:
 		return "", false
 	}
@@ -204,6 +298,11 @@ func telegramCommandsHelp() string {
 /supervisor — live supervisor
 /next — điều kiện kích hoạt tiếp theo
 /risk — risk governor và caps
+/hermes — Hermes AI analysis tổng hợp
+/h — tắt tắt /hermes
+/ask <câu hỏi> — Hermes trả lời câu hỏi trực tiếp
+/exits — exit signals hiện tại
+/audit — live-auto-audit verdict
 
 Không có lệnh đặt mua/bán qua Telegram. Không bypass ACTIVE_LIMIT.`) + "\n"
 }

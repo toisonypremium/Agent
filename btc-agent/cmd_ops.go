@@ -158,14 +158,14 @@ func runMarketWatch(ctx context.Context, cfg config.Config, db *storage.DB, noti
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" {
 		switch {
 		case criticalDue:
-			sendTelegram(ctx, cfg, "market-critical", opsplan.CriticalTelegram(report))
+			sendScheduledTelegram(ctx, cfg, "market-critical", opsplan.CriticalTelegram(report))
 			previous.LastCriticalAt = now
 			previous.CriticalNotifiedFingerprint = "critical:" + report.Fingerprint
 		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && liveAutoNearUnlockTelegram(report) != "" && previous.NearUnlockNotifiedFingerprint != liveAutoNearUnlockFingerprint(report):
-			sendTelegram(ctx, cfg, "live-auto-near-unlock", liveAutoNearUnlockTelegram(report))
+			sendScheduledTelegram(ctx, cfg, "live-auto-near-unlock", liveAutoNearUnlockTelegram(report))
 			previous.NearUnlockNotifiedFingerprint = liveAutoNearUnlockFingerprint(report)
 		case notifyStateChange && cfg.Monitoring.NotifyOnStateChange && notificationDue:
-			sendTelegram(ctx, cfg, "market-state", opsplan.TelegramDigest(report))
+			sendScheduledTelegram(ctx, cfg, "market-state", opsplan.TelegramDigest(report))
 			previous.MarketNotifiedFingerprint = report.Fingerprint
 			previous.NotifiedFingerprint = report.Fingerprint
 		}

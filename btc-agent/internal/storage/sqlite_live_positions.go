@@ -1,0 +1,166 @@
+package storage
+
+import (
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"btc-agent/internal/exchange/live"
+)
+
+func (d *DB) ApplyLivePositionEvent(event live.LivePositionEvent) (live.LivePosition, error) {
+	if event.Symbol == "" {
+		event.Symbol = live.InternalSymbol(event.InstID)
+	}
+	event.Side = strings.ToUpper(event.Side)
+	event.FeeCurrency = strings.ToUpper(event.FeeCurrency)
+	if event.Symbol == "" {
+		return live.LivePosition{}, fmt.Errorf("live position event symbol required")
+	}
+	if event.DeltaQuantity <= 0 {
+		return live.LivePosition{}, fmt.Errorf("live position event delta quantity must be positive")
+	}
+	if event.FillPrice <= 0 {
+		return live.LivePosition{}, fmt.Errorf("live position event fill price must be positive")
+	}
+
+	tx, err := d.Begin()
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	defer tx.Rollback()
+
+	pos, found, err := livePositionBySymbol(tx, event.Symbol)
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	if !found {
+		pos = live.LivePosition{Symbol: event.Symbol, InstID: event.InstID}
+		if event.Timestamp > 0 {
+			pos.OpenedAt = event.Timestamp
+		} else {
+			pos.OpenedAt = time.Now().Unix()
+		}
+	}
+	if pos.InstID == "" {
+		pos.InstID = event.InstID
+	}
+
+	switch event.Side {
+	case "BUY":
+		pos.Quantity += event.DeltaQuantity
+		pos.CostBasis += event.NotionalDelta
+	case "SELL":
+		if pos.Quantity+1e-12 < event.DeltaQuantity {
+			return live.LivePosition{}, fmt.Errorf("sell delta %.12f exceeds live position %.12f for %s", event.DeltaQuantity, pos.Quantity, event.Symbol)
+		}
+		avgCost := 0.0
+		if pos.Quantity > 0 {
+			avgCost = pos.CostBasis / pos.Quantity
+		}
+		pos.Quantity -= event.DeltaQuantity
+		pos.CostBasis -= avgCost * event.DeltaQuantity
+		if pos.Quantity < 1e-12 {
+			pos.Quantity = 0
+			pos.CostBasis = 0
+		}
+	default:
+		return live.LivePosition{}, fmt.Errorf("unsupported live position side %q", event.Side)
+	}
+	if pos.Quantity > 0 {
+		pos.AvgEntryPrice = pos.CostBasis / pos.Quantity
+	} else {
+		pos.AvgEntryPrice = 0
+	}
+	pos.FeeTotal += event.FeeDelta
+	pos.FeeCurrency = mergeFeeCurrency(pos.FeeCurrency, event.FeeCurrency)
+	if event.Timestamp > 0 {
+		pos.UpdatedAt = event.Timestamp
+	} else {
+		pos.UpdatedAt = time.Now().Unix()
+	}
+
+	b, _ := json.Marshal(pos)
+	_, err = tx.Exec(`INSERT OR REPLACE INTO live_positions(symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?)`, pos.Symbol, pos.InstID, pos.Quantity, pos.AvgEntryPrice, pos.CostBasis, pos.FeeTotal, pos.FeeCurrency, pos.UpdatedAt, pos.OpenedAt, string(b))
+	if err != nil {
+		return live.LivePosition{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return live.LivePosition{}, err
+	}
+	event.PositionQty = pos.Quantity
+	event.AvgEntryPrice = pos.AvgEntryPrice
+	return pos, nil
+}
+
+func livePositionBySymbol(q interface {
+	QueryRow(string, ...any) *sql.Row
+}, symbol string) (live.LivePosition, bool, error) {
+	var pos live.LivePosition
+	err := q.QueryRow(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at FROM live_positions WHERE symbol=?`, symbol).Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt)
+	if err == sql.ErrNoRows {
+		return live.LivePosition{}, false, nil
+	}
+	if err != nil {
+		return live.LivePosition{}, false, err
+	}
+	return pos, true, nil
+}
+
+func (d *DB) SaveLivePositionEvent(event live.LivePositionEvent) error {
+	b, _ := json.Marshal(event)
+	_, err := d.Exec(`INSERT INTO live_position_events(timestamp, client_order_id, order_id, inst_id, symbol, side, delta_quantity, fill_price, notional_delta, fee_delta, fee_currency, position_qty, avg_entry_price, status, payload_json) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, event.Timestamp, event.ClientOrderID, event.OrderID, event.InstID, event.Symbol, strings.ToUpper(event.Side), event.DeltaQuantity, event.FillPrice, event.NotionalDelta, event.FeeDelta, strings.ToUpper(event.FeeCurrency), event.PositionQty, event.AvgEntryPrice, event.Status, string(b))
+	return err
+}
+
+func (d *DB) LivePositions() ([]live.LivePosition, error) {
+	rows, err := d.Query(`SELECT symbol, inst_id, quantity, avg_entry_price, cost_basis, fee_total, fee_currency, updated_at, opened_at FROM live_positions ORDER BY symbol`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []live.LivePosition{}
+	for rows.Next() {
+		var pos live.LivePosition
+		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.AvgEntryPrice, &pos.CostBasis, &pos.FeeTotal, &pos.FeeCurrency, &pos.UpdatedAt, &pos.OpenedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, pos)
+	}
+	return out, rows.Err()
+}
+
+// HermesOwnedPositions derives net quantity from immutable position events
+// whose originating order is explicitly owned by HERMES_OPERATOR.
+func (d *DB) HermesOwnedPositions() ([]live.LivePosition, error) {
+	rows, err := d.Query(`
+		SELECT e.symbol,
+		       MAX(e.inst_id),
+		       SUM(CASE WHEN UPPER(e.side)='BUY' THEN e.delta_quantity ELSE -e.delta_quantity END),
+		       SUM(CASE WHEN UPPER(e.side)='BUY' THEN e.notional_delta ELSE 0 END),
+		       MAX(e.timestamp)
+		FROM live_position_events e
+		JOIN live_orders o ON o.client_order_id=e.client_order_id
+		WHERE o.source='HERMES_OPERATOR'
+		GROUP BY e.symbol
+		HAVING SUM(CASE WHEN UPPER(e.side)='BUY' THEN e.delta_quantity ELSE -e.delta_quantity END) > 0
+		ORDER BY e.symbol`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []live.LivePosition{}
+	for rows.Next() {
+		var pos live.LivePosition
+		if err := rows.Scan(&pos.Symbol, &pos.InstID, &pos.Quantity, &pos.CostBasis, &pos.UpdatedAt); err != nil {
+			return nil, err
+		}
+		if pos.Quantity > 0 {
+			pos.AvgEntryPrice = pos.CostBasis / pos.Quantity
+		}
+		out = append(out, pos)
+	}
+	return out, rows.Err()
+}

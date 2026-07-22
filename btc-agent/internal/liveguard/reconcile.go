@@ -30,12 +30,15 @@ type ReconcileResult struct {
 }
 
 type ReconcileSafetyResult struct {
-	Status    string   `json:"status"`
-	LocalOpen int      `json:"local_open"`
-	Unknown   int      `json:"unknown"`
-	Blockers  []string `json:"blockers,omitempty"`
-	Warnings  []string `json:"warnings,omitempty"`
-	Summary   string   `json:"summary"`
+	Status             string   `json:"status"`
+	LocalOpen          int      `json:"local_open"`
+	Unknown            int      `json:"unknown"`
+	OperatorHalted     bool     `json:"operator_halted,omitempty"`
+	OpenAfterReconcile int      `json:"open_after_reconcile,omitempty"`
+	UnknownPositions   int      `json:"unknown_positions,omitempty"`
+	Blockers           []string `json:"blockers,omitempty"`
+	Warnings           []string `json:"warnings,omitempty"`
+	Summary            string   `json:"summary"`
 }
 
 func ReconcileOrders(ctx context.Context, reader OrderStatusReader, open []live.OrderStatus) ReconcileResult {
@@ -114,13 +117,50 @@ func ReconcileSafety(result ReconcileResult) ReconcileSafetyResult {
 			}
 		}
 	}
+	return finalizeReconcileSafety(safety)
+}
+
+// ApplyHaltedReconcileInvariant fails closed when a halted bot still has an
+// exchange-open order or a positive local position whose identity/valuation is
+// incomplete. Zero-quantity ledger rows are closed history and are ignored.
+func ApplyHaltedReconcileInvariant(result ReconcileResult, positions []live.LivePosition, halted bool) ReconcileResult {
+	if !halted {
+		return result
+	}
+	result.Safety.OperatorHalted = true
+	for _, order := range result.Orders {
+		if live.IsOpenStatus(order.Status) {
+			result.Safety.OpenAfterReconcile++
+		}
+	}
+	for _, position := range positions {
+		if position.Quantity <= 0 {
+			continue
+		}
+		if position.Symbol == "" || position.InstID == "" || position.AvgEntryPrice <= 0 || position.CostBasis <= 0 {
+			result.Safety.UnknownPositions++
+		}
+	}
+	if result.Safety.OpenAfterReconcile > 0 {
+		result.Safety.Blockers = append(result.Safety.Blockers, fmt.Sprintf("halted invariant: %d exchange-open live order", result.Safety.OpenAfterReconcile))
+	}
+	if result.Safety.UnknownPositions > 0 {
+		result.Safety.Blockers = append(result.Safety.Blockers, fmt.Sprintf("halted invariant: %d live position needs manual check", result.Safety.UnknownPositions))
+	}
+	result.Safety = finalizeReconcileSafety(result.Safety)
+	return result
+}
+
+func finalizeReconcileSafety(safety ReconcileSafetyResult) ReconcileSafetyResult {
 	safety.Blockers = uniqueHealthStrings(safety.Blockers)
 	safety.Warnings = uniqueHealthStrings(safety.Warnings)
 	if len(safety.Blockers) > 0 {
 		safety.Status = ReconcileBlock
 	} else if len(safety.Warnings) > 0 {
 		safety.Status = ReconcileWarn
+	} else {
+		safety.Status = ReconcileClean
 	}
-	safety.Summary = fmt.Sprintf("%s: local_open=%d unknown=%d blockers=%d warnings=%d", safety.Status, safety.LocalOpen, safety.Unknown, len(safety.Blockers), len(safety.Warnings))
+	safety.Summary = fmt.Sprintf("%s: local_open=%d unknown=%d open_after_reconcile=%d unknown_positions=%d blockers=%d warnings=%d", safety.Status, safety.LocalOpen, safety.Unknown, safety.OpenAfterReconcile, safety.UnknownPositions, len(safety.Blockers), len(safety.Warnings))
 	return safety
 }

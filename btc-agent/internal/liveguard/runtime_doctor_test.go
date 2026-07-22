@@ -47,3 +47,22 @@ func TestRuntimeDoctorSummaryDoesNotIncludeSecretValues(t *testing.T) {
 		}
 	}
 }
+
+func TestRuntimeDoctorPreservesDataSanity(t *testing.T) {
+	result := RuntimeDoctorResult{
+		DataSanity: DataSanityResult{
+			Status: DataSanityOK,
+			BTC: map[string]CandleFreshness{
+				"1d": {Interval: "1d", Count: 60, Pass: true},
+			},
+			Summary: "DATA_SANITY_OK: btc_frames=1 assets=0 blockers=0 warnings=0",
+		},
+	}
+	result.RefreshSummary()
+	if result.DataSanity.Status != DataSanityOK {
+		t.Fatalf("data sanity status=%s", result.DataSanity.Status)
+	}
+	if result.DataSanity.BTC["1d"].Count != 60 {
+		t.Fatalf("unexpected data sanity: %#v", result.DataSanity)
+	}
+}

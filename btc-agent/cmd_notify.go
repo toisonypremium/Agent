@@ -66,7 +66,7 @@ func runAIWatch(ctx context.Context, cfg config.Config, db *storage.DB) error {
 		return err
 	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && (!cfg.AI.Enabled || cfg.AI.TelegramEnabled) {
-		sendTelegram(ctx, cfg, "run-ai-watch", report.TelegramText)
+		sendScheduledTelegram(ctx, cfg, "run-ai-watch", report.TelegramText)
 	}
 	fmt.Println(report.TelegramText)
 	return nil
@@ -102,7 +102,7 @@ func runResearchBrief(ctx context.Context, cfg config.Config, notifyTelegram boo
 	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
 		telegramText := buildResearchTelegramText(ctx, cfg, result)
-		sendTelegram(ctx, cfg, "research-brief", telegramText)
+		sendScheduledTelegram(ctx, cfg, "research-brief", telegramText)
 	}
 	fmt.Println(md)
 	return result, nil
@@ -132,6 +132,23 @@ func buildResearchTelegramText(ctx context.Context, cfg config.Config, result re
 		}
 	}
 	return telegramreport.ResearchBriefHumanText(result)
+}
+
+func shouldAutoSendTelegram(label string) bool {
+	switch label {
+	case "expert-report", "market-critical", "market-watch-error", "scheduler-heartbeat-stale", "operator-halt", "operator-resume", "reconcile-live-orders", "auto-live-management", "manual-live-order", "cancel-all-live-orders":
+		return true
+	default:
+		return false
+	}
+}
+
+func sendScheduledTelegram(ctx context.Context, cfg config.Config, label, text string) {
+	if !shouldAutoSendTelegram(label) {
+		log.Printf("telegram scheduled notification suppressed [%s]", label)
+		return
+	}
+	sendTelegram(ctx, cfg, label, text)
 }
 
 func sendTelegram(ctx context.Context, cfg config.Config, label, text string) {

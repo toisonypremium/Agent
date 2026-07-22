@@ -1,0 +1,31 @@
+project: btc-agent
+method: BMAD-adapted
+phase: implementation-and-operations
+current_sprint: safety-and-observability
+updated_at: 2026-07-18
+items:
+  - id: E1-S1
+    status: done
+    evidence: internal/liveguard, reports/live_auto_audit_latest.json
+  - id: E1-S2
+    status: done
+    evidence: internal/liveguard/reconcile.go
+  - id: E2-S1
+    status: done
+    evidence: internal/freeapi, reports/freeapi_latest.json
+  - id: E3-S1
+    status: done
+    evidence: go test ./..., go vet ./...
+  - id: E3-S2
+    status: done
+    evidence: VPS binary-pre-web backup
+  - id: E4-S1
+    status: done
+    evidence: web/index.html, web/app.js, web_data_api.go
+  - id: E4-S2
+    status: done
+    evidence: Chromium headless DOM smoke test
+  - id: E4-S3
+    status: done
+    evidence: Vietnamese operational labels
+next: walk-forward evidence and 24-hour operations monitoring

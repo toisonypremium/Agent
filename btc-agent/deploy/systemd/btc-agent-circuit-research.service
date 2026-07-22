@@ -1,0 +1,21 @@
+[Unit]
+Description=BTC Agent Circuit deterministic research sidecar
+After=btc-agent-scheduler.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/admin/btc-agent/btc-agent
+ExecStart=/bin/bash /home/admin/btc-agent/btc-agent/scripts/run-circuit-research.sh
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/admin/btc-agent/btc-agent/reports/circuit
+UMask=0077
+MemoryMax=256M
+CPUQuota=50%
+TimeoutStartSec=120
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=default.target

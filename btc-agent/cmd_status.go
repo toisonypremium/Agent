@@ -6,54 +6,12 @@ import (
 	"btc-agent/internal/opsplan"
 	"btc-agent/internal/paper"
 	"btc-agent/internal/storage"
+	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 )
-
-func firstStrings(items []string, limit int) []string {
-	if limit <= 0 || len(items) <= limit {
-		return items
-	}
-	return items[:limit]
-}
-
-func emptyDefault(value, fallback string) string {
-	if value == "" {
-		return fallback
-	}
-	return value
-}
-
-func uniqueStringsMain(in []string) []string {
-	seen := map[string]bool{}
-	out := []string{}
-	for _, s := range in {
-		if s == "" || seen[s] {
-			continue
-		}
-		seen[s] = true
-		out = append(out, s)
-	}
-	return out
-}
-
-func firstNonZero(values ...int) int {
-	for _, v := range values {
-		if v != 0 {
-			return v
-		}
-	}
-	return 0
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, v := range values {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
-}
 
 func formatStatus(cfg config.Config, db *storage.DB) (string, error) {
 	analysis, err := db.LatestAnalysis()
@@ -118,6 +76,10 @@ Agent 2
 		}
 	}
 	out += fmt.Sprintf("- Open paper orders: %d", len(orders))
+	out += fmt.Sprintf("\n\nHermes Operator\n- Enabled: %v | mode: %s | execution authority: %v\n- TTL: %ds | confidence: %.2f | actions/cycle: %d\n- Caps: probe %.2f | action %.2f | portfolio %.2f USDT", cfg.HermesOperator.Enabled, cfg.HermesOperator.NormalizedMode(), cfg.HermesOperator.CanExecute(), cfg.HermesOperator.DecisionTTLSeconds, cfg.HermesOperator.MinConfidence, cfg.HermesOperator.MaxActionsPerCycle, cfg.HermesOperator.MaxProbeNotionalUSDT, cfg.HermesOperator.MaxActionNotionalUSDT, cfg.HermesOperator.MaxPortfolioExposureUSDT)
+	if shadow, ok := loadHermesShadowStatus(); ok {
+		out += fmt.Sprintf("\n- Last shadow: %s | validated=%d | safety=%d | rejected=%d", shadow.GeneratedAt, shadow.Validated, shadow.Safety, shadow.Rejected)
+	}
 	if counts, err := db.PaperOrderStatusCounts(); err == nil && len(counts) > 0 {
 		out += fmt.Sprintf("\n- Paper orders: OPEN=%d FILLED=%d EXPIRED=%d CANCELLED=%d INVALIDATED=%d", counts[paper.StatusOpen], counts[paper.StatusFilled], counts[paper.StatusExpired], counts[paper.StatusCancelled], counts[paper.StatusInvalidated])
 	}
@@ -159,4 +121,38 @@ func assetUnlockPath(asset agent2.AssetPlan) string {
 		missing = missing[:4]
 	}
 	return strings.Join(missing, "; ")
+}
+
+type hermesShadowStatus struct {
+	GeneratedAt string
+	Validated   int
+	Safety      int
+	Rejected    int
+}
+
+func loadHermesShadowStatus() (hermesShadowStatus, bool) {
+	b, err := os.ReadFile(filepath.Join(hermesReportDir, "hermes_shadow_decision_latest.json"))
+	if err != nil {
+		return hermesShadowStatus{}, false
+	}
+	var raw struct {
+		GeneratedAt string `json:"generated_at"`
+		Validation  struct {
+			Actions []json.RawMessage `json:"Actions"`
+			Reasons []string          `json:"Reasons"`
+		} `json:"validation"`
+		Safety []struct {
+			Allowed bool `json:"allowed"`
+		} `json:"safety"`
+	}
+	if json.Unmarshal(b, &raw) != nil {
+		return hermesShadowStatus{}, false
+	}
+	status := hermesShadowStatus{GeneratedAt: raw.GeneratedAt, Validated: len(raw.Validation.Actions), Safety: len(raw.Safety), Rejected: len(raw.Validation.Reasons)}
+	for _, d := range raw.Safety {
+		if !d.Allowed {
+			status.Rejected++
+		}
+	}
+	return status, true
 }

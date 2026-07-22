@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"btc-agent/internal/config"
-	"btc-agent/internal/reportio"
 	"btc-agent/internal/storage"
 )
 
@@ -122,8 +121,4 @@ func maintenanceMarkdown(result storage.MaintenanceResult) string {
 	}
 	md += "Live orders, live fills, live positions, and operator settings were not pruned.\n"
 	return md
-}
-
-func saveJSONFile(dir, name string, v any) error {
-	return reportio.WriteJSON(dir, name, v)
 }

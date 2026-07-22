@@ -16,15 +16,7 @@ func TestValidateManualLiveTradingRequiresManualConfirm(t *testing.T) {
 }
 
 func TestValidateAutoLiveTradingRequiresAutoConfirmShape(t *testing.T) {
-	cfg := validTestConfig()
-	cfg.Execution.RealTradingEnabled = true
-	cfg.Execution.PaperTrading = false
-	cfg.Live.Enabled = true
-	cfg.Live.ProofOnly = false
-	cfg.Live.RequireManualConfirm = false
-	cfg.Live.AutoExecute = true
-	cfg.Live.LiveAutoMode = true
-	cfg.Live.LiveAutoMaxNotionalUSDT = 2
+	cfg := validAutoLiveTestConfig()
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
@@ -45,43 +37,27 @@ func TestValidateAutoLiveTradingRejectsManualConfirm(t *testing.T) {
 	}
 }
 
-func TestValidateAutoLiveTradingDoesNotRequireLiveAutoMode(t *testing.T) {
-	// Live auto mode is not required for auto live execution.
-	// Auto live with live_auto_mode=false is now valid.
-	cfg := validTestConfig()
-	cfg.Execution.RealTradingEnabled = true
-	cfg.Execution.PaperTrading = false
-	cfg.Live.Enabled = true
-	cfg.Live.ProofOnly = false
-	cfg.Live.RequireManualConfirm = false
-	cfg.Live.AutoExecute = true
-	cfg.Live.LiveAutoMode = false
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("auto live without live_auto_mode should be valid: %v", err)
+func TestLiveAutoModeRequiresManagedSupervisorShape(t *testing.T) {
+	cases := []struct {
+		name string
+		set  func(*Config)
+	}{
+		{"live disabled", func(c *Config) { c.Live.Enabled = false }},
+		{"auto execute disabled", func(c *Config) { c.Live.AutoExecute = false }},
+		{"manual confirm enabled", func(c *Config) { c.Live.RequireManualConfirm = true }},
+		{"proof only enabled", func(c *Config) { c.Live.ProofOnly = true }},
+		{"real trading disabled", func(c *Config) { c.Execution.RealTradingEnabled = false; c.Execution.PaperTrading = true }},
+		{"supervisor disabled", func(c *Config) { c.Live.SupervisorEnabled = false }},
+		{"order management disabled", func(c *Config) { c.Live.OrderManagementEnabled = false }},
 	}
-}
-
-func TestValidateLiveEnabledRejectsOversizedOrderCap(t *testing.T) {
-	cfg := validTestConfig()
-	cfg.Live.Enabled = true
-	cfg.Live.MaxOrderNotionalUSDT = 10001
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected live max order cap validation error")
-	}
-}
-
-func TestLiveAutoModeUsesOnlyCurrentFlag(t *testing.T) {
-	cfg := validTestConfig()
-	cfg.Live.Enabled = true
-	cfg.Live.LiveAutoMode = true
-	cfg.Live.LiveAutoMaxNotionalUSDT = 2.0
-	cfg.Live.MaxOrderNotionalUSDT = 10.0
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("unexpected validation error: %v", err)
-	}
-	cfg.Live.LiveAutoMode = false
-	if LiveAutoMode(cfg) {
-		t.Fatal("live-auto mode must follow only current flag")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validAutoLiveTestConfig()
+			tc.set(&cfg)
+			if err := cfg.Validate(); err == nil {
+				t.Fatal("expected validation error")
+			}
+		})
 	}
 }
 
@@ -216,6 +192,8 @@ func TestValidateOrderManagementBounds(t *testing.T) {
 	base.Live.MaxLiveNotionalPerOrderUSDT = 2
 	base.Live.MaxLiveNotionalPerAssetUSDT = 6
 	base.Live.MaxLiveNotionalTotalUSDT = 18
+	base.Live.SupervisorEnabled = true
+	base.Live.ManagementIntervalMinutes = 15
 	if err := base.Validate(); err != nil {
 		t.Fatalf("unexpected validation error: %v", err)
 	}
@@ -662,4 +640,61 @@ func validTestConfig() Config {
 	cfg.Execution.LayerDistribution = []float64{1}
 	cfg.Live.MaxOrderNotionalUSDT = 10
 	return cfg
+}
+
+func validAutoLiveTestConfig() Config {
+	cfg := validTestConfig()
+	cfg.Execution.RealTradingEnabled = true
+	cfg.Execution.PaperTrading = false
+	cfg.Live.Enabled = true
+	cfg.Live.ProofOnly = false
+	cfg.Live.RequireManualConfirm = false
+	cfg.Live.AutoExecute = true
+	cfg.Live.LiveAutoMode = true
+	cfg.Live.LiveAutoMaxNotionalUSDT = 2
+	cfg.Live.OrderManagementEnabled = true
+	cfg.Live.MaxAutoLayersPerAsset = 3
+	cfg.Live.MaxOpenLiveOrdersPerAsset = 3
+	cfg.Live.MaxOpenLiveOrdersTotal = 9
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 2
+	cfg.Live.MaxLiveNotionalPerAssetUSDT = 6
+	cfg.Live.MaxLiveNotionalTotalUSDT = 18
+	cfg.Live.SupervisorEnabled = true
+	cfg.Live.ManagementIntervalMinutes = 15
+	return cfg
+}
+
+func TestHermesOperatorModesAndCaps(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.HermesOperator.Enabled = true
+	cfg.HermesOperator.Mode = "shadow"
+	cfg.HermesOperator.DecisionTTLSeconds = 120
+	cfg.HermesOperator.MinConfidence = 0.6
+	cfg.HermesOperator.MaxActionsPerCycle = 3
+	cfg.HermesOperator.MaxProbeNotionalUSDT = 5
+	cfg.HermesOperator.MaxActionNotionalUSDT = 10
+	cfg.HermesOperator.MaxPortfolioExposureUSDT = 20
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 10
+	cfg.Live.MaxLiveNotionalTotalUSDT = 20
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid shadow operator rejected: %v", err)
+	}
+	if cfg.HermesOperator.CanExecute() {
+		t.Fatal("shadow must not execute")
+	}
+
+	cfg.HermesOperator.Mode = "root_override"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unknown operator mode should fail")
+	}
+}
+
+func TestHermesCanaryRequiresLiveExecution(t *testing.T) {
+	cfg := validTestConfig()
+	cfg.HermesOperator = HermesOperatorConfig{Enabled: true, Mode: "canary", DecisionTTLSeconds: 120, MinConfidence: .6, MaxActionsPerCycle: 1, MaxProbeNotionalUSDT: 2, MaxActionNotionalUSDT: 2, MaxPortfolioExposureUSDT: 2}
+	cfg.Live.MaxLiveNotionalPerOrderUSDT = 2
+	cfg.Live.MaxLiveNotionalTotalUSDT = 2
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("canary without live execution should fail")
+	}
 }

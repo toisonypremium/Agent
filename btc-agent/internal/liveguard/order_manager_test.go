@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
@@ -17,11 +18,12 @@ import (
 )
 
 type fakeManagedExchange struct {
-	placed   []live.LimitOrderRequest
-	canceled []live.CancelOrderRequest
-	placeErr error
-	book     liquidity.OrderBookSnapshot
-	bookErr  error
+	placed    []live.LimitOrderRequest
+	canceled  []live.CancelOrderRequest
+	placeErr  error
+	cancelErr error
+	book      liquidity.OrderBookSnapshot
+	bookErr   error
 }
 
 func (f *fakeManagedExchange) PlaceSpotLimitOrder(ctx context.Context, req live.LimitOrderRequest) (live.OrderResult, error) {
@@ -34,6 +36,9 @@ func (f *fakeManagedExchange) PlaceSpotLimitOrder(ctx context.Context, req live.
 
 func (f *fakeManagedExchange) CancelOrder(ctx context.Context, req live.CancelOrderRequest) (live.CancelOrderResult, error) {
 	f.canceled = append(f.canceled, req)
+	if f.cancelErr != nil {
+		return live.CancelOrderResult{InstID: req.InstID, OrderID: req.OrderID, ClientOrderID: req.ClientOrderID}, f.cancelErr
+	}
 	return live.CancelOrderResult{InstID: req.InstID, OrderID: req.OrderID, ClientOrderID: req.ClientOrderID, Canceled: true, Code: "0"}, nil
 }
 
@@ -61,6 +66,8 @@ func manageLiveOrdersWithRecorderConfirmed(ctx context.Context, cfg config.Confi
 
 type fakeManagedRecorder struct {
 	reserveErr   error
+	submitErr    error
+	rejectErr    error
 	reserved     []string
 	submitted    []string
 	rejected     []string
@@ -77,13 +84,13 @@ func (f *fakeManagedRecorder) ReserveManagedLiveOrder(clientOrderID string, desi
 
 func (f *fakeManagedRecorder) MarkManagedLiveOrderSubmitted(clientOrderID string, result live.OrderResult) error {
 	f.submitted = append(f.submitted, clientOrderID)
-	return nil
+	return f.submitErr
 }
 
 func (f *fakeManagedRecorder) MarkManagedLiveOrderRejected(clientOrderID string, reason string) error {
 	f.rejected = append(f.rejected, clientOrderID)
 	f.rejectReason = append(f.rejectReason, reason)
-	return nil
+	return f.rejectErr
 }
 
 func TestManageLiveOrdersAllowsMultipleAssetsAndLayers(t *testing.T) {
@@ -134,11 +141,40 @@ func TestManageLiveOrdersCancelsWhenPlanArmed(t *testing.T) {
 	}
 }
 
+func TestManageLiveOrdersBlocksDuplicateManagedKeys(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	ex := &fakeManagedExchange{}
+	open := []live.OrderStatus{
+		{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusSubmitted, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1},
+		{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c2", OrderID: "o2", Status: live.StatusSubmitted, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1},
+	}
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if got.Status != ManagedCycleBlocked || len(got.Blocked) == 0 || len(ex.placed) != 0 || len(ex.canceled) != 0 {
+		t.Fatalf("duplicate managed keys must block before exchange mutation: %+v", got)
+	}
+}
+
+func TestManageLiveOrdersStopsAfterSubmittedPersistenceFailure(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	ex := &fakeManagedExchange{}
+	recorder := &fakeManagedRecorder{submitErr: fmt.Errorf("db unavailable")}
+	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, recorder)
+	if got.Status != ManagedCyclePartial || len(ex.placed) != 1 || len(got.Placed) != 0 || len(got.Blocked) != 1 {
+		t.Fatalf("persistence failure must stop after first accepted exchange order: %+v", got)
+	}
+	if got.Blocked[0].Action != "unknown_needs_reconcile" || !strings.Contains(got.Blocked[0].Reason, "reconcile") {
+		t.Fatalf("expected explicit reconcile state: %+v", got.Blocked[0])
+	}
+}
+
 func managedConfig() config.Config {
 	var cfg config.Config
 	cfg.Live.Enabled = true
 	cfg.Live.AutoExecute = true
 	cfg.Live.OrderManagementEnabled = true
+	cfg.Live.SupervisorEnabled = true
 	cfg.Live.LiveAutoMode = true
 	cfg.Live.LiveAutoMaxNotionalUSDT = 2
 	cfg.Live.MaxOrderNotionalUSDT = 10
@@ -206,6 +242,49 @@ func TestManageLiveOrdersWithRecorderMarksRejectedOnSubmitError(t *testing.T) {
 	got := manageLiveOrdersWithRecorderConfirmed(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, rec)
 	if got.Status != ManagedCyclePartial || len(rec.rejected) == 0 || len(got.Blocked) == 0 {
 		t.Fatalf("submit error should mark rejected: %+v recorder=%+v", got, rec)
+	}
+}
+
+func TestManageLiveOrdersBlocksNilExchangeDependencies(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, nil, nil, nil, nil, nil, fakeHaltReader{halted: false})
+	if got.Status != ManagedCycleBlocked || !strings.Contains(strings.Join(got.Reasons, " "), "order placer/canceler unavailable") {
+		t.Fatalf("nil exchange dependencies must fail closed: %+v", got)
+	}
+}
+
+func TestManageLiveOrdersCancelErrorIsPartialAndBlocked(t *testing.T) {
+	cfg := managedConfig()
+	plan := managedPlan()
+	plan.State = agent2.StateWatch
+	ex := &fakeManagedExchange{cancelErr: fmt.Errorf("cancel rejected")}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1}}
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if got.Status != ManagedCyclePartial || len(got.Canceled) != 0 || len(got.Blocked) != 1 || len(ex.canceled) != 1 {
+		t.Fatalf("cancel error must be partial and blocked: %+v", got)
+	}
+}
+
+func TestManageLiveOrdersTotalCapBlocksBeforeExchangeCall(t *testing.T) {
+	cfg := managedConfig()
+	cfg.Live.MaxOpenLiveOrdersTotal = 1
+	plan := managedPlan()
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}, "SOLUSDT": {Score: 75, Grade: "B"}})
+	ex := &fakeManagedExchange{}
+	open := []live.OrderStatus{{InstID: "ETH-USDT", Symbol: "ETHUSDT", ClientOrderID: "c1", OrderID: "o1", Status: live.StatusLiveOpen, Price: 100, Quantity: 0.02, Notional: 2, LayerIndex: 1}}
+	got := manageLiveOrdersConfirmed(context.Background(), cfg, plan, open, nil, nil, ex, ex, fakeHaltReader{halted: false})
+	if len(ex.placed) != 0 || len(got.Blocked) == 0 {
+		t.Fatalf("total open-order cap must block before exchange call: placed=%d result=%+v", len(ex.placed), got)
+	}
+	foundCapBlock := false
+	for _, blocked := range got.Blocked {
+		if blocked.Reason == "total open order limit reached" {
+			foundCapBlock = true
+		}
+	}
+	if !foundCapBlock {
+		t.Fatalf("missing total open-order cap block: %+v", got.Blocked)
 	}
 }
 
@@ -680,4 +759,26 @@ func containsManagedString(items []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func TestShouldCancelOpenOrderStale(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Live.CancelStaleAfterMinutes = 240
+	plan := agent2.Plan{State: agent2.StateActiveLimit}
+	desired := ManagedDesiredOrder{Symbol: "ETHUSDT", Price: 1800}
+	order := live.OrderStatus{Symbol: "ETHUSDT", SubmittedAt: time.Now().Add(-5 * time.Hour).Unix()}
+	if !shouldCancelOpenOrder(cfg, plan, order, desired) {
+		t.Fatal("expected stale order to be cancelled")
+	}
+}
+
+func TestShouldNotCancelOpenOrderWithinTimeout(t *testing.T) {
+	cfg := config.Config{}
+	cfg.Live.CancelStaleAfterMinutes = 240
+	plan := agent2.Plan{State: agent2.StateActiveLimit}
+	desired := ManagedDesiredOrder{Symbol: "ETHUSDT", Price: 1800}
+	order := live.OrderStatus{Symbol: "ETHUSDT", SubmittedAt: time.Now().Add(-1 * time.Hour).Unix()}
+	if shouldCancelOpenOrder(cfg, plan, order, desired) {
+		t.Fatal("expected order within timeout to be kept")
+	}
 }

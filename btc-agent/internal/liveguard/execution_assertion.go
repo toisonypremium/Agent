@@ -16,6 +16,9 @@ type ManagedExecutionContext struct {
 	FirstOrderDryRunApproved   bool   `json:"first_order_dry_run_approved,omitempty"`
 	ManagedOrderHistoryKnown   bool   `json:"managed_order_history_known,omitempty"`
 	HasManagedRealOrderHistory bool   `json:"has_managed_real_order_history,omitempty"`
+	HermesMode                 string `json:"hermes_mode,omitempty"`
+	HermesDecisionID           string `json:"hermes_decision_id,omitempty"`
+	HermesIntent               string `json:"hermes_intent,omitempty"`
 }
 
 type ExecutionAssertionInput struct {
@@ -32,11 +35,20 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 	cfg := in.Config
 	d := in.Desired
 	reasons := []string{}
+	if !cfg.Live.LiveAutoMode {
+		reasons = append(reasons, "live.live_auto_mode=false")
+	}
 	if !cfg.Live.Enabled {
 		reasons = append(reasons, "live.enabled=false")
 	}
 	if !cfg.Live.AutoExecute {
 		reasons = append(reasons, "live.auto_execute=false")
+	}
+	if !cfg.Live.SupervisorEnabled {
+		reasons = append(reasons, "live.supervisor_enabled=false")
+	}
+	if !cfg.Live.OrderManagementEnabled {
+		reasons = append(reasons, "live.order_management_enabled=false")
 	}
 	if cfg.Live.RequireManualConfirm {
 		reasons = append(reasons, "live.require_manual_confirm=true")
@@ -66,6 +78,14 @@ func AssertManagedExecutionAllowed(in ExecutionAssertionInput) []string {
 		}
 	} else if phase != "ACCUMULATION_CONFIRMED" {
 		reasons = append(reasons, "BTC accumulation phase must be ACCUMULATION_CONFIRMED")
+	}
+	if strings.EqualFold(d.Source, "HERMES_OPERATOR") {
+		if strings.TrimSpace(in.HermesDecisionID) == "" {
+			reasons = append(reasons, "Hermes decision_id required")
+		}
+		if strings.EqualFold(in.HermesIntent, "PROBE_LIMIT") && d.AllocationTier != string(OpportunityProbe) {
+			reasons = append(reasons, "Hermes canary order must use PROBE allocation tier")
+		}
 	}
 	if strings.ToUpper(d.Side) != "BUY" {
 		reasons = append(reasons, "desired side must be BUY")

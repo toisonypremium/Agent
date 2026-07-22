@@ -18,3 +18,16 @@ secrets.env
 .codebase-memory/
 reports/
 logs/
+
+# Local runtime and audit artifacts
+.audit-quarantine/
+*.sqlite
+*.sqlite-*
+*.bak
+# Locally built executables and test artifacts
+btc-agent
+live-auto-readiness-*
+*.test
+
+# Local goal validation artifacts
+.goal-check/

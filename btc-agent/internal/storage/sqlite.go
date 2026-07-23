@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
@@ -156,4 +157,26 @@ func (d *DB) SaveManagedCycleReport(result liveguard.ManagedCycleResult) error {
 		return err
 	}
 	return d.SaveReport("auto_live_management", string(b))
+}
+
+// OpenReadOnly opens an existing SQLite database without running migrations or
+// creating parent directories. It is for observers such as the Web Console;
+// callers cannot use it to bootstrap or mutate runtime state.
+func OpenReadOnly(path string) (*DB, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("sqlite read-only path is not a regular file: %s", path)
+	}
+	dsn := "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(ON)&_pragma=mmap_size(0)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	return &DB{db}, nil
 }

@@ -22,7 +22,7 @@ var telegramVietnameseReplacer = strings.NewReplacer(
 	"FREE API", "NGUỒN DỮ LIỆU MIỄN PHÍ", "SOURCES", "CÁC NGUỒN", "MACRO", "BỐI CẢNH KINH TẾ", "SENTIMENT", "TÂM LÝ THỊ TRƯỜNG", "FX", "TỶ GIÁ",
 	"Global cap", "Tổng vốn hóa", "Global volume", "Khối lượng toàn thị trường", "BTC dominance", "Tỷ trọng BTC", "Fear & Greed", "Tâm lý sợ hãi và tham lam", "News items", "Số tin",
 	"fresh=", "còn mới=", "age=", "độ trễ=", "err=", "lỗi=", "URL", "đường dẫn",
-	"Trigger", "Điều kiện kích hoạt", "Dashboard", "Bảng điều khiển", "Scorecard", "Bảng điểm", "Universe", "Danh sách thị trường",
+	"Trigger", "Điều kiện kích hoạt", "Scorecard", "Bảng điểm", "Universe", "Danh sách thị trường",
 	"READ_ONLY — no order placed.", "Bot giữ nguyên trạng thái, không mở lệnh mới.",
 	"HERMES INTELLIGENCE BRIEF", "BẢN PHÂN TÍCH VÀ KẾ HOẠCH CỦA HERMES",
 	"EXECUTIVE DECISION", "KẾT LUẬN NHANH",

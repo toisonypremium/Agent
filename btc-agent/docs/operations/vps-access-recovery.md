@@ -41,7 +41,7 @@ ssh vps-ssh
 | `100.93.4.11:22` | Tailscale fallback | VPS address exists; local Termux route was unavailable |
 
 Do not point Cloudflare SSH at `vps.linhbot.xyz`. That hostname currently serves
-the dashboard behind HTTP Basic Auth and returns a WebSocket bad handshake to
+an unrelated HTTP service and returns a WebSocket bad handshake to
 `cloudflared access ssh`.
 
 A dedicated CNAME `ssh-vps.linhbot.xyz` was routed to the named SSH tunnel, but
@@ -100,7 +100,6 @@ The `admin` user has `Linger=yes`, and both user tunnel units are enabled with
   enabled, Restart=always
 
 ~/.config/systemd/user/9router-named-tunnel.service
-  9router dashboard named tunnel
   enabled, Restart=always
 
 /etc/systemd/system/9router-public-tunnel.service

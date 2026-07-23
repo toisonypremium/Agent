@@ -24,6 +24,10 @@ func main() {
 	if addr == "" {
 		addr = "127.0.0.1:8787"
 	}
+	addr, err := loopbackTCPAddr(addr)
+	if err != nil {
+		log.Fatal(err)
+	}
 	db, err := storage.OpenReadOnly(path)
 	if err != nil {
 		log.Fatal(err)

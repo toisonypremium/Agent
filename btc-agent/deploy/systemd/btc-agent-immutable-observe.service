@@ -1,0 +1,7 @@
+[Unit]
+Description=BTC Agent immutable shadow observation
+After=btc-agent-immutable.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/btc-agent/bin-runtime-observe.sh

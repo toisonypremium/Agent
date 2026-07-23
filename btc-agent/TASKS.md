@@ -35,7 +35,7 @@
 - [x] Add exit manager: EvaluateExits, PeakTracker, ExitPanicSell, wire into supervisor cycle, tests (18 cases).
 - [x] Add OpenedAt to LivePosition for accurate time-stop tracking.
 - [x] Schedule live-auto-audit in scheduler loop (audit_interval_minutes, default 60 min).
-- [x] Clear operator halt; bot monitoring active, order gates BLOCKED pending ACCUMULATION_CONFIRMED.
+- [x] Scheduler chạy monitoring với operator halt là authority runtime; không release, restart hoặc tài liệu nào được tự clear halt. Mọi thay đổi authority phải qua control-plane và audit hiện hành.
 
 ## Verification commands
 

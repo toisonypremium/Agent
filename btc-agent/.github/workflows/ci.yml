@@ -17,6 +17,9 @@ jobs:
       - run: go test -race -count=1 ./...
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/agent .
       - run: ./scripts/check-secrets.sh
+      - run: bash deploy/test-backup.sh
+      - run: bash deploy/test-health-check.sh
+      - run: bash deploy/test-service-unit.sh
   migrations:
     runs-on: ubuntu-latest
     services:

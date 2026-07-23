@@ -1,0 +1,28 @@
+[Unit]
+Description=BTC Agent immutable halted-shadow scheduler
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=%h/btc-agent/runtime
+EnvironmentFile=%h/btc-agent-systemd.env
+Environment=BTC_AGENT_INSTANCE_ID=immutable-shadow-01
+Environment=BTC_AGENT_SCHEDULER_LOCK_FILE=%h/.btc-agent-immutable-scheduler.lock
+ExecStart=%h/btc-agent/immutable/current/agent scheduler --config %h/btc-agent/runtime/config.yaml
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=60
+KillSignal=SIGTERM
+LimitNOFILE=65536
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/btc-agent/runtime %h/.btc-agent-immutable-scheduler.lock
+
+[Install]
+WantedBy=default.target

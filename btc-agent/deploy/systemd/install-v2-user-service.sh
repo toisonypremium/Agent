@@ -1,10 +1,7 @@
 #!/usr/bin/env bash
+# Deprecated: do not install a user-level scheduler from a Git checkout.
+# The supported unattended runtime is deploy/systemd/agent.service from an
+# immutable /opt/agent/current release.
 set -euo pipefail
-unit_dir="${HOME}/.config/systemd/user"
-source_unit="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/btc-agent-v2.service"
-mkdir -p "$unit_dir"
-install -m 0600 "$source_unit" "$unit_dir/btc-agent-v2.service"
-systemctl --user daemon-reload
-systemd-analyze --user verify "$unit_dir/btc-agent-v2.service"
-systemctl --user enable --now btc-agent-v2.service
-systemctl --user show btc-agent-v2.service -p MainPID -p NRestarts -p ActiveState -p SubState
+printf '%s\n' 'btc-agent-v2 user service is retired; install and verify agent.service instead' >&2
+exit 64

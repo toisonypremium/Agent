@@ -1,0 +1,11 @@
+[Unit]
+Description=Hourly BTC Agent immutable shadow observation
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=btc-agent-immutable-observe.service
+
+[Install]
+WantedBy=timers.target

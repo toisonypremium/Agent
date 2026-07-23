@@ -17,11 +17,15 @@ Record without secret values:
 
 ## Preflight
 
-1. Build and test outside production.
-2. Run `deploy/backup.sh`; verify the backup can be listed/read.
+1. Build and test outside production, including `deploy/test-backup.sh`, `deploy/test-health-check.sh` and `deploy/test-service-unit.sh`.
+2. Run `deploy/backup.sh`, then `deploy/verify-backup.sh <archive>`; verify the backup checksum, manifest and every SQLite `PRAGMA quick_check` pass.
 3. Confirm the rollback release and `deploy/rollback.sh` target exist.
-4. Confirm exactly one V2 scheduler service is enabled and no V1 cron/service can
-   execute. Do not remove V1 rollback files yet.
+4. Run the verifier for the selected production profile on the Linux host:
+   - root-managed: `deploy/verify-runtime.sh`;
+   - unprivileged immutable user service: `deploy/systemd/verify-immutable-user-service.sh`.
+   It must show exactly one immutable scheduler; no V1 cron/service, PM2 entry,
+   legacy user service, or Termux boot loop may execute. Do not remove V1 rollback
+   files yet.
 5. Confirm config and environment files are owner-only. Never print their contents.
 
 Stop on missing backup, ambiguous service ownership, unexpected process, secret
@@ -53,6 +57,8 @@ Record:
 Required result before shadow observation:
 
 - exactly one fresh execution owner;
+- the selected runtime verifier passes (`deploy/verify-runtime.sh` or
+  `deploy/systemd/verify-immutable-user-service.sh`);
 - monotonic fencing token after restart;
 - clean reconciliation with no remote-only/unknown/identity conflict;
 - no stale data or unavailable protection snapshot;
@@ -63,11 +69,14 @@ Required result before shadow observation:
 
 ## Shadow/canary observation
 
-Observe scheduler restarts, lease renewal, reconcile cycles, order/fill deltas, capital
+Observe for at least seven continuous days with operator halt active. Exercise a
+controlled restart and a full reboot, and test delivery of each critical alert. Observe
+scheduler restarts, lease renewal, reconcile cycles, order/fill deltas, capital
 reservations, alerts, outbox delivery and dashboard freshness for the approved window.
 Record every skipped check and reason. Any stale lease/data, unknown order, reconcile
 mismatch, duplicate submission, dead-letter growth, unavailable protection snapshot,
-or unexplained balance/position delta fails the verification.
+failed critical alert, unexplained balance/position delta, or second scheduler fails
+the verification.
 
 Only an authorized operator may clear halt or approve canary/real execution. The
 application must still enforce `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` and

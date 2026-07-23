@@ -26,10 +26,7 @@ Run outside the VPS runtime directory:
 go test -count=1 ./...
 go vet ./...
 CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/agent .
-bash deploy/test-backup.sh
-bash deploy/test-health-check.sh
-bash deploy/test-service-unit.sh
-bash deploy/test-immutable-runtime.sh
+make verify
 ```
 
 Record the binary SHA-256 and create a new release directory. Never overwrite an
@@ -54,7 +51,7 @@ From a checked, approved source release on the VPS:
 
 ```bash
 bash deploy/systemd/install-immutable-user-service.sh
-bash deploy/systemd/verify-immutable-user-service.sh
+bash deploy/verify-immutable-runtime.sh
 ```
 
 The installer enables:

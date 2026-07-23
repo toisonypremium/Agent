@@ -1,18 +1,31 @@
-.PHONY: verify test vet build status live-proof
+.PHONY: fmt-check test vet build linux-build config-check secrets-check immutable-drills verify
 
-verify: test vet build status live-proof
+fmt-check:
+	test -z "$$(gofmt -l .)"
 
 test:
-	go test -v -count=1 ./...
+	go test -count=1 ./...
 
 vet:
 	go vet ./...
 
 build:
-	go build -o bin/btc-agent .
+	go build -trimpath -o bin/agent .
 
-status:
-	./bin/btc-agent status --config config.yaml
+linux-build:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/agent-linux-amd64 .
 
-live-proof:
-	./bin/btc-agent live-proof --config config.yaml
+config-check: build
+	./bin/agent config-check --config config.yaml.example
+
+secrets-check:
+	bash scripts/check-secrets.sh
+
+immutable-drills:
+	bash deploy/test-immutable-backup.sh
+	bash deploy/test-immutable-health-check.sh
+	bash deploy/test-immutable-runtime.sh
+	bash deploy/test-immutable-runtime-verify.sh
+	bash deploy/test-immutable-user-release.sh
+
+verify: fmt-check test vet config-check secrets-check immutable-drills

@@ -1,50 +1,40 @@
-# Agent Done Rules
+# Agent completion rules
 
-Agents must not report `done` unless work is proven by files and commands.
+Do not report `done` without file and command evidence.
 
-## Required proof
+## Required evidence
 
-Before claiming completion, agent must provide:
+- Changed files with concise purpose.
+- Exact commands run and PASS/FAIL result.
+- Safety-relevant failures, warnings, and validation gaps.
+- Remaining risk, blocker, or time-bound evidence requirement.
+- Explicit statement when no production action occurred.
 
-- changed files with short summaries;
-- exact verification commands run;
-- PASS/FAIL for each command;
-- key output for failures or safety-relevant warnings;
-- remaining real risks.
-
-## Verification gate
-
-Run:
+## Baseline gate
 
 ```bash
 make verify
 ```
 
-Equivalent expanded commands:
+CI additionally runs Linux race tests, `staticcheck`, and `govulncheck`.
+Local Termux must state the race-test limitation rather than pretending to run
+it.
 
-```bash
-go test -v -count=1 ./...
-go vet ./...
-go build -o bin/btc-agent .
-./bin/btc-agent status --config config.yaml
-./bin/btc-agent live-proof --config config.yaml
-```
+## Risk-based extensions
 
-`live-proof` must run without panic and must not place any real order.
+| Change | Additional proof |
+|---|---|
+| Storage/execution/reconcile/capital/lifecycle | focused matrix: success, replay, collision, rollback, legacy compatibility, unknown-outcome fail-closed, restart/readback |
+| Deployment | approved SHA, release installer result, immutable runtime verifier, halt state, scheduler count, backup evidence |
+| Config/credentials/authority | explicit operator approval immediately before action; redacted evidence only |
+| Docs-only | links/check commands accurate; no claim of runtime state from docs |
 
-## Hard rule
+## Hard rules
 
-If no source, test, or docs files changed, final answer must start exactly:
-
-```text
-NOT DONE - no source files changed
-```
-
-## Safety rules
-
-- Do not add secrets.
-- Do not print secrets in logs or final answers.
-- Do not commit `config.yaml`, `config.local.yaml`, `.env`, databases, reports, logs, backups, or binaries.
-- Do not enable autonomous real trading.
-- Do not remove safety gates.
-- Do not place real orders.
+- If no tracked source, test, deployment, or docs file changed, say so plainly;
+  never fabricate completion.
+- Do not commit secrets, runtime config, databases, reports, logs, backups, or
+  binaries.
+- Do not enable autonomous real trading, weaken safety gates, or place real
+  orders during development or validation.
+- Never claim a runtime operation without command output from that runtime.

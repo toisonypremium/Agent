@@ -162,6 +162,13 @@ func TestRunPaperManagerUpdatesOrderAndWritesReports(t *testing.T) {
 	if counts[paper.StatusFilled] != 1 {
 		t.Fatalf("expected filled count, got %+v", counts)
 	}
+	allOrders, err := db.PaperOrders()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allOrders) != 1 || allOrders[0].Status != paper.StatusFilled || allOrders[0].ClosedAt.IsZero() || allOrders[0].ClosedAt.Before(allOrders[0].Timestamp) {
+		t.Fatalf("paper manager did not retain terminal lifecycle timestamp: %+v", allOrders)
+	}
 	for _, name := range []string{"paper_manager_latest.md", "paper_manager_latest.json"} {
 		if _, err := os.Stat(filepath.Join("reports", name)); err != nil {
 			t.Fatalf("missing report %s: %v", name, err)

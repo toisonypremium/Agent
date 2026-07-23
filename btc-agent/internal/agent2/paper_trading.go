@@ -14,6 +14,7 @@ type PaperOrder struct {
 	Price, Quantity, Notional, InvalidationPrice float64
 	Status                                       string    `json:"status"`
 	ExpiresAt                                    time.Time `json:"expires_at"`
+	ClosedAt                                     time.Time `json:"closed_at,omitempty"`
 	Reason                                       string    `json:"reason"`
 }
 

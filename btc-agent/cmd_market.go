@@ -265,7 +265,7 @@ func runPaperManager(cfg config.Config, db *storage.DB) error {
 	}
 	result := paper.ManageOpenOrders(time.Now(), orders, candlesBySymbol, plan)
 	for _, event := range result.Events {
-		if err := db.UpdatePaperOrderStatus(event.OrderID, event.NewStatus, event.Reason); err != nil {
+		if err := db.UpdatePaperOrderStatusAt(event.OrderID, event.NewStatus, event.Reason, result.GeneratedAt); err != nil {
 			return fmt.Errorf("update paper order %s: %w", event.OrderID, err)
 		}
 	}

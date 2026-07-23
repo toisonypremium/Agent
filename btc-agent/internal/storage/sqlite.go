@@ -108,6 +108,9 @@ func (d *DB) Migrate() error {
 			return err
 		}
 	}
+	if err := d.ensureColumn("paper_orders", "closed_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
 	if err := d.ensureColumn("live_positions", "opened_at", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}

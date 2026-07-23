@@ -102,3 +102,24 @@ func (d *DB) OpenPaperOrders() ([]agent2.PaperOrder, error) {
 	}
 	return orders, rows.Err()
 }
+
+// PaperOrders returns the complete retained paper-order lifecycle, newest first.
+func (d *DB) PaperOrders() ([]agent2.PaperOrder, error) {
+	rows, err := d.Query(`SELECT id,timestamp,symbol,side,layer,price,quantity,notional,status,expires_at,invalidation_price,reason FROM paper_orders ORDER BY timestamp DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	orders := []agent2.PaperOrder{}
+	for rows.Next() {
+		var o agent2.PaperOrder
+		var ts, exp int64
+		if err := rows.Scan(&o.ID, &ts, &o.Symbol, &o.Side, &o.Layer, &o.Price, &o.Quantity, &o.Notional, &o.Status, &exp, &o.InvalidationPrice, &o.Reason); err != nil {
+			return nil, err
+		}
+		o.Timestamp = time.Unix(ts, 0)
+		o.ExpiresAt = time.Unix(exp, 0)
+		orders = append(orders, o)
+	}
+	return orders, rows.Err()
+}

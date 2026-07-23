@@ -220,6 +220,26 @@ func monitorPlan(cfg config.Config, db *storage.DB) (agent2.Plan, error) {
 	return p, nil
 }
 
+func runPaperScorecard(db *storage.DB) error {
+	orders, err := db.PaperOrders()
+	if err != nil {
+		return fmt.Errorf("load paper orders: %w", err)
+	}
+	report := paper.BuildScorecard(time.Now().UTC(), orders)
+	if err := saveJSONFile("reports", "paper_scorecard_latest.json", report); err != nil {
+		return err
+	}
+	if err := os.MkdirAll("reports", 0700); err != nil {
+		return err
+	}
+	md := paper.ScorecardMarkdown(report)
+	if err := os.WriteFile(filepath.Join("reports", "paper_scorecard_latest.md"), []byte(md), 0600); err != nil {
+		return err
+	}
+	fmt.Println(md)
+	return nil
+}
+
 func runPaperManager(cfg config.Config, db *storage.DB) error {
 	orders, err := db.OpenPaperOrders()
 	if err != nil {

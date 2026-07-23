@@ -1,6 +1,6 @@
 # Current delivery roadmap
 
-**Source fixed point:** `6df4952`
+**Source fixed point:** latest reviewed `main`; record the exact SHA with every evidence window
 **Runtime profile:** immutable user service, halted-paper.
 **Authority:** operator halt remains `ACTIVE`; no canary or real-order approval.
 

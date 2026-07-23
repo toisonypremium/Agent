@@ -70,7 +70,7 @@ func (m *Manager) Verify(ctx context.Context, lease Lease) error {
 		return err
 	}
 	now := m.now().UTC()
-	if !ok || current.InstanceID != m.instanceID || current.FencingToken != lease.FencingToken || !current.ExpiresAt.After(now) {
+	if !ok || lease.Name != m.name || lease.InstanceID != m.instanceID || lease.FencingToken <= 0 || current.InstanceID != m.instanceID || current.FencingToken != lease.FencingToken || !current.ExpiresAt.After(now) {
 		return fmt.Errorf("%w: name=%s instance=%s fence=%d", ErrNotOwner, m.name, m.instanceID, lease.FencingToken)
 	}
 	return nil

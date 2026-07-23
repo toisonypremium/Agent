@@ -76,3 +76,50 @@ func TestOnlyOneOwnerAndExpiredLeaseGetsHigherFence(t *testing.T) {
 		t.Fatalf("stale owner verified: %v", err)
 	}
 }
+
+func TestVerifyRejectsForgedLeaseIdentityDespiteMatchingFence(t *testing.T) {
+	ctx := context.Background()
+	store := &memoryStore{}
+	now := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	manager, err := NewManager(store, "okx-live", "owner-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return now }
+	lease, err := manager.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, forged := range []Lease{
+		{Name: "other", InstanceID: lease.InstanceID, FencingToken: lease.FencingToken},
+		{Name: lease.Name, InstanceID: "owner-b", FencingToken: lease.FencingToken},
+		{Name: lease.Name, InstanceID: lease.InstanceID, FencingToken: 0},
+	} {
+		if err := manager.Verify(ctx, forged); !errors.Is(err, ErrNotOwner) {
+			t.Fatalf("forged lease %+v verified: %v", forged, err)
+		}
+	}
+}
+
+func TestRenewFailsClosedWithoutStoreRenewalForForgedLease(t *testing.T) {
+	ctx := context.Background()
+	store := &memoryStore{}
+	now := time.Date(2026, 7, 23, 0, 0, 0, 0, time.UTC)
+	manager, err := NewManager(store, "okx-live", "owner-a", time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.now = func() time.Time { return now }
+	lease, err := manager.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	forged := lease
+	forged.InstanceID = "owner-b"
+	if _, err := manager.Renew(ctx, forged); !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("forged lease renewed: %v", err)
+	}
+	if store.lease.ExpiresAt != lease.ExpiresAt {
+		t.Fatalf("forged renew mutated stored lease: %+v", store.lease)
+	}
+}

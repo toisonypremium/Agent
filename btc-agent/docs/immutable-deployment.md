@@ -33,8 +33,20 @@ bash deploy/test-immutable-runtime.sh
 ```
 
 Record the binary SHA-256 and create a new release directory. Never overwrite an
-existing release. Atomically update only the `current` symlink after checksum
-verification.
+existing release. Install with the approved, checksum-verified installer:
+
+```bash
+sha256sum bin/agent
+BTC_AGENT_RELEASE_APPROVED=yes \
+BTC_AGENT_RESTART_IMMUTABLE_SERVICE=yes \
+bash deploy/install-immutable-user-release.sh \
+  agent-<timestamp> bin/agent <sha256>
+```
+
+The installer verifies the mandatory SHA-256, creates a release directory once,
+atomically updates only the `current` symlink, and leaves config, credentials and
+operator halt unchanged. Omit `BTC_AGENT_RESTART_IMMUTABLE_SERVICE=yes` to stage
+a release without restarting the scheduler.
 
 ## Install systemd support
 
@@ -57,8 +69,12 @@ The installer enables:
 systemctl --user is-active btc-agent-immutable.service
 /home/admin/btc-agent/immutable/current/agent operator-status \
   --config /home/admin/btc-agent/runtime/config.yaml
-bash deploy/systemd/verify-immutable-user-service.sh
+bash deploy/verify-immutable-runtime.sh
 ```
+
+`verify-immutable-runtime.sh` checks paper-mode configuration, active halt,
+service/timers, exactly one scheduler, fresh lease/heartbeat, SQLite integrity,
+verified latest backup, and zero failed user units.
 
 Expected results:
 

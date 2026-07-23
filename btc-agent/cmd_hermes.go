@@ -287,7 +287,6 @@ func recordSkippedLLMUsage(db *storage.DB, cfg config.Config, trigger hermesagen
 		log.Printf("[LLM_USAGE] skipped event persist failed reason=%s", reason)
 		return
 	}
-	enqueueLLMUsageCloud(context.Background(), db, event)
 }
 
 func logHermesLLMCall(purpose string, trigger hermesagent.HermesTrigger, started time.Time, err error) {

@@ -14,8 +14,6 @@ type Status struct {
 	LastAnalysis        time.Time `json:"last_analysis,omitempty"`
 	LastReconciliation  time.Time `json:"last_reconciliation,omitempty"`
 	LastExchangeSuccess time.Time `json:"last_exchange_success,omitempty"`
-	LastSupabaseSync    time.Time `json:"last_supabase_sync,omitempty"`
-	OutboxPending       int       `json:"outbox_pending"`
 	LastError           string    `json:"last_error,omitempty"`
 	UptimeSeconds       int64     `json:"uptime_seconds"`
 }

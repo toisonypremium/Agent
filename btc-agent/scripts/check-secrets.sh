@@ -7,7 +7,7 @@ set -a
 [ -f .env ] && source .env
 set +a
 
-tracked_secret_files="$(git ls-files | grep -E '(^|/)(\.env($|\.)|config\.ya?ml$|config\.local\.ya?ml$|secrets\.env$)|\.(db|sqlite)(-|$)|(^|/)(reports|logs|backups|bin)/' | grep -vE '(^|/)(config\.yaml\.example|btc-agent\.env\.example|deploy/cloudflared/config\.yml)$' || true)"
+tracked_secret_files="$(git ls-files | grep -E '(^|/)(\.env($|\.)|config\.ya?ml$|config\.local\.ya?ml$|secrets\.env$)|\.(db|sqlite)(-|$)|(^|/)(reports|logs|backups|bin)/' | grep -vE '(^|/)(config\.yaml\.example|btc-agent\.env\.example)$' || true)"
 if [[ -n "$tracked_secret_files" ]]; then
   printf 'forbidden tracked runtime/secret files:\n%s\n' "$tracked_secret_files" >&2
   exit 1

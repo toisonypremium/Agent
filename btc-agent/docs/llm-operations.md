@@ -2,12 +2,10 @@
 
 ## Authority boundary
 
-- Web + local SQLite are the primary operational view.
-- Supabase is a cloud read model. R2 stores immutable audit artifacts.
-- Telegram is an optional fallback channel.
+- Local SQLite is the primary operational record.
+- Telegram is an optional notification and read-only status channel.
 - LLM output is narrative or a constrained proposal. It does not override operator halt, doctor, reconciliation, ownership/fencing, stale-data, exchange-filter, inventory, capital, or protection locks.
 - Hermes refreshes its protection snapshot before an execution-consumable LLM decision. Missing, malformed, unreadable, or unwritable protection state fails closed before the call; persistence failure emits `HERMES_PROTECTION_SNAPSHOT_FAILED`.
-- Web refresh never calls an LLM and has no direct BUY/SELL/CANCEL route.
 
 ## Scheduling
 
@@ -44,30 +42,6 @@ Local SQLite stores metadata only:
 
 Never store raw prompts, user text, response content, API headers, keys, tokens, or credential-bearing URLs.
 
-Supabase receives idempotent `llm_usage_events`. R2 receives:
-
-```text
-llm-usage/YYYY/MM/DD/events/<request-id>.json
-llm-usage/YYYY/MM/DD/summary-<aggregate-hash>.json
-```
-
-Outbox retries use bounded exponential backoff and dead-letter after the configured limit. Cloud failure does not grant execution authority and does not stop deterministic safety processing.
-
-## Dashboard checks
-
-Review the `llm_usage` and `rui_ro` domains in `/api/v3/bootstrap`:
-
-- calls and skipped calls today
-- prompt/completion/total tokens
-- failed calls and usage unavailable
-- repeated state hashes
-- operator halt, Hermes demotion and mode
-- reconciliation remote-only/conflicts/discovery failure
-- execution lease owner/fencing/expiry
-- outbox pending/dead-letter
-- protection and capital locks
-- position provenance: Hermes execution-owned versus legacy account-observed
-
 Estimated cost remains unknown unless an explicit pricing configuration is added.
 
 ## Incident procedures
@@ -89,16 +63,10 @@ Estimated cost remains unknown unless an explicit pricing configuration is added
 
 ### Duplicate state hash
 
-1. Check `llm_call_reservations` status and outbox idempotency.
+1. Check `llm_call_reservations` status.
 2. Confirm only supervisor `pre_execution` writes `hermes_shadow_decision_latest.json` in executable modes.
 3. Keep operator halt active if duplicate execution artifacts or stale decisions are suspected.
 
-### Supabase/R2 unavailable
-
-1. Inspect local outbox pending/dead-letter counts.
-2. Restore cloud connectivity without changing execution authority.
-3. Local SQLite remains the usage ledger; do not delete/re-enqueue by hand without preserving idempotency keys.
-
 ### Disable all LLM calls
 
-Set `ai.enabled: false` through reviewed runtime configuration. Deterministic analysis, Web monitoring, doctor, reconciliation and hard execution safety remain active; no LLM decision is created.
+Set `ai.enabled: false` through reviewed runtime configuration. Deterministic analysis, doctor, reconciliation and hard execution safety remain active; no LLM decision is created.

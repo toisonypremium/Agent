@@ -4,7 +4,7 @@
 
 1. Activate global/operator halt. Do not clear it automatically.
 2. Stop new execution only; retain the scheduler for reconcile-only operation when safe.
-3. Preserve the SQLite database including WAL/SHM, outbox, reports and logs.
+3. Preserve the SQLite database including WAL/SHM, reports and logs.
 4. Snapshot OKX balances, positions, open orders, fills and client order IDs.
 5. Record UTC timestamps, release SHA, binary SHA, execution owner, fencing token,
    lease expiry, heartbeat age and the triggering evidence.

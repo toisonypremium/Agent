@@ -205,7 +205,7 @@ func normalizeTelegramCommand(text string) string {
 		cmd = translated
 	}
 	switch cmd {
-	case "/menu", "/start", "/hide", "/anbanphim", "/trogiup", "/macro", "/sources", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
+	case "/menu", "/start", "/hide", "/anbanphim", "/trogiup", "/macro", "/sources", "/status", "/why", "/plan", "/schedule", "/flow", "/coins", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/hermes", "/h", "/ask", "/exits", "/audit", "/help":
 		return cmd
 	default:
 		return ""
@@ -268,18 +268,11 @@ func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) 
 			return "Chưa có universe research report. Chạy universe-research hoặc chờ report được tạo.", true
 		}
 		return telegramCommandUniverse(report), true
-	case "/dashboard":
-		report, ok := loadDecisionDashboardReportFile()
-		if !ok {
-			return "Chưa có decision dashboard report. Chờ live supervisor chạy một chu kỳ.", true
-		}
-		return telegramCommandDashboard(report), true
 	case "/trigger":
-		report, ok := loadDecisionDashboardReportFile()
-		if !ok {
-			return "Chưa có decision dashboard report. Chờ live supervisor chạy một chu kỳ.", true
+		if !scenarioOK {
+			return "Chưa có scenario report. Chờ chu kỳ giám sát tiếp theo.", true
 		}
-		return telegramCommandTrigger(report), true
+		return telegramCommandScenarioTrigger(scenario), true
 	case "/orders":
 		if !snapshotOK || !scenarioOK {
 			return "Chưa có dữ liệu trạng thái mới. Hãy chờ bot cập nhật.", true
@@ -476,35 +469,14 @@ func telegramCommandUniverse(r agent2.UniverseResearchReport) string {
 	return b.String()
 }
 
-func telegramCommandDashboard(r DecisionDashboardReport) string {
-	var b strings.Builder
-	b.WriteString("BTC Agent — Dashboard\n")
-	b.WriteString(fmt.Sprintf("Bot ready=%v | Market ready=%v | can_submit=%v\n", r.BotReady, r.MarketReady, r.CanSubmitNow))
-	b.WriteString(fmt.Sprintf("Plan=%s | BTC=%s\n", r.PlanState, r.BTCPermission))
-	b.WriteString(fmt.Sprintf("Best production=%s | universe=%s\n", emptyStringDefault(r.BestProductionCoin, "n/a"), emptyStringDefault(r.BestUniverseCoin, "n/a")))
-	b.WriteString("Next: " + emptyStringDefault(r.NextTrigger, "n/a") + "\n")
-	for _, blocker := range firstStrings(r.Blockers, 4) {
-		b.WriteString("- " + blocker + "\n")
-	}
-	b.WriteString("Read-only: dashboard không đặt lệnh, không bypass ACTIVE_LIMIT.\n")
-	return b.String()
-}
-
-func telegramCommandTrigger(r DecisionDashboardReport) string {
+func telegramCommandScenarioTrigger(r ScenarioReport) string {
 	var b strings.Builder
 	b.WriteString("BTC Agent — Trigger tiếp theo\n")
-	b.WriteString("Next: " + emptyStringDefault(r.NextTrigger, "n/a") + "\n")
-	if len(r.Blockers) > 0 {
-		b.WriteString("Các lý do đang chặn:\n")
-		for _, blocker := range firstStrings(r.Blockers, 5) {
-			b.WriteString("- " + blocker + "\n")
-		}
+	if len(r.NearTriggers) > 0 {
+		b.WriteString("Next: " + r.NearTriggers[0] + "\n")
 	}
-	if len(r.Actions) > 0 {
-		b.WriteString("Actions:\n")
-		for _, action := range firstStrings(r.Actions, 4) {
-			b.WriteString("- " + action + "\n")
-		}
+	for _, blocker := range firstStrings(r.Blockers, 5) {
+		b.WriteString("- " + blocker + "\n")
 	}
 	b.WriteString("Chỉ dùng để xem: điều kiện này không tự đặt lệnh và không bỏ qua bước kiểm tra cuối.\n")
 	return b.String()
@@ -657,18 +629,17 @@ func loadCapitalPlanResearchReportFile() (CapitalPlanResearchReport, bool) {
 	return out, true
 }
 
-func loadDecisionDashboardReportFile() (DecisionDashboardReport, bool) {
-	b, err := os.ReadFile(filepath.Join("reports", "decision_dashboard_latest.json"))
+func loadUniverseResearchReportFile() (agent2.UniverseResearchReport, bool) {
+	b, err := os.ReadFile(filepath.Join("reports", "coin_universe_research_latest.json"))
 	if err != nil {
-		return DecisionDashboardReport{}, false
+		return agent2.UniverseResearchReport{}, false
 	}
-	var out DecisionDashboardReport
+	var out agent2.UniverseResearchReport
 	if err := json.Unmarshal(b, &out); err != nil {
-		return DecisionDashboardReport{}, false
+		return agent2.UniverseResearchReport{}, false
 	}
 	return out, true
 }
-
 func loadLivePositionReportFile() (liveguard.LiveLedgerReport, bool) {
 	b, err := os.ReadFile(filepath.Join("reports", "live_position_latest.json"))
 	if err != nil {

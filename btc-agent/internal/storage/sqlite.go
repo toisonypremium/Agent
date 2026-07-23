@@ -67,8 +67,6 @@ func (d *DB) Migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_operator_audit_timestamp ON operator_audit_events(timestamp DESC);`,
 		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`,
 		`CREATE TABLE IF NOT EXISTS execution_leases(name TEXT PRIMARY KEY, instance_id TEXT NOT NULL, fencing_token INTEGER NOT NULL, acquired_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);`,
-		`CREATE TABLE IF NOT EXISTS outbox_events(id TEXT PRIMARY KEY, event_type TEXT NOT NULL, destination TEXT NOT NULL, payload BLOB NOT NULL, idempotency_key TEXT NOT NULL UNIQUE, status TEXT NOT NULL, retry_count INTEGER NOT NULL DEFAULT 0, next_retry_at INTEGER NOT NULL, last_error TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);`,
-		`CREATE INDEX IF NOT EXISTS idx_outbox_claim ON outbox_events(status, next_retry_at, created_at);`,
 		`CREATE TABLE IF NOT EXISTS llm_usage_events(request_id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, purpose TEXT NOT NULL, trigger_source TEXT NOT NULL DEFAULT '', trigger_reason TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER, usage_available INTEGER NOT NULL, latency_ms INTEGER NOT NULL, status TEXT NOT NULL, error_class TEXT NOT NULL DEFAULT '', state_hash TEXT NOT NULL DEFAULT '');`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_usage_timestamp ON llm_usage_events(timestamp DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_usage_purpose_timestamp ON llm_usage_events(purpose,timestamp DESC);`,

@@ -11,7 +11,7 @@
 - [x] Merge cutover branch after CI and halted shadow verification; main is at `fc6e4c7`.
 - [ ] Run V1 cleanup only after approved rollback window and explicit `AGENT_CLEANUP_APPROVED`.
 - [ ] Keep production operator halt active; no real-order approval from this release.
-- [x] Add authoritative CI checks for Go race/vet/build, secret scan, migrations, dashboard and R2 tests.
+- [x] Add authoritative CI checks for Go race/vet/build, secret scan, backup and systemd checks.
 - [x] Add report-only liquidation proxy and anchored VWAP/volume profile diagnostics.
 - [x] Wire autonomous exits through Hermes-owned, no-short, reconcile-safe limit SELL lifecycle with residual reservation.
 
@@ -20,7 +20,7 @@
 - [x] Add repository hygiene docs and verification gate.
 - [x] Keep local config, data, reports, logs, backups, and binaries out of version control through `.gitignore`.
 - [x] Harden live-auto readiness and supervisor path.
-- [x] Add technical scorecard, opportunity composite score, capital research plan, universe research, decision dashboard, and Telegram read-only management commands.
+- [x] Add technical scorecard, opportunity composite score, capital research plan, universe research, and Telegram read-only management commands.
 - [x] Connect live allocator to `OpportunityComposite` inside `ACTIVE_LIMIT` guard.
 - [x] Remove stale canary/auto-ladder production logic from new live-auto scenario.
 - [x] Add real-data survey report path for learning evidence without changing live authority.

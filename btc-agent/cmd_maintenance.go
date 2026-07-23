@@ -100,8 +100,6 @@ func protectedReportFiles() []string {
 		"capital_plan_research_latest.json",
 		"coin_universe_research_latest.md",
 		"coin_universe_research_latest.json",
-		"decision_dashboard_latest.md",
-		"decision_dashboard_latest.json",
 		"cancel_all_live_orders_latest.md",
 		"cancel_all_live_orders_latest.json",
 		"telegram_state.json",

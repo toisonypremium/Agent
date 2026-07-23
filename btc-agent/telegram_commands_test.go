@@ -11,7 +11,7 @@ import (
 )
 
 func TestNormalizeTelegramCommandReadOnlyAllowlist(t *testing.T) {
-	for _, input := range []string{"/status", "/why now", "/coins@btc_agent_bot", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/dashboard", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/help"} {
+	for _, input := range []string{"/status", "/why now", "/coins@btc_agent_bot", "/filters", "/scorecard", "/allocation", "/capital", "/universe", "/trigger", "/orders", "/positions", "/doctor", "/supervisor", "/next", "/risk", "/help"} {
 		if got := normalizeTelegramCommand(input); got == "" {
 			t.Fatalf("expected allowed command for %q", input)
 		}
@@ -100,26 +100,6 @@ func TestTelegramCommandUniverseIsResearchOnly(t *testing.T) {
 	for _, want := range []string{"BTC Agent — Universe Research", "LINKUSDT", "Research-only", "không tự thay production assets"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("universe reply missing %q:\n%s", want, text)
-		}
-	}
-}
-
-func TestTelegramCommandDashboardIsReadOnly(t *testing.T) {
-	report := DecisionDashboardReport{BotReady: true, MarketReady: false, CanSubmitNow: false, PlanState: agent2.StateWatch, BTCPermission: "WATCH", BestProductionCoin: "ETHUSDT", BestUniverseCoin: "LINKUSDT", NextTrigger: "Chờ BTC ALLOWED", Blockers: []string{"plan chưa ACTIVE_LIMIT"}}
-	text := telegramCommandDashboard(report)
-	for _, want := range []string{"BTC Agent — Dashboard", "ETHUSDT", "Read-only", "không bypass ACTIVE_LIMIT"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("dashboard reply missing %q:\n%s", want, text)
-		}
-	}
-}
-
-func TestTelegramCommandTriggerIsReadOnly(t *testing.T) {
-	report := DecisionDashboardReport{NextTrigger: "Chờ BTC ALLOWED", Blockers: []string{"plan chưa ACTIVE_LIMIT"}, Actions: []string{"Đứng ngoài"}}
-	text := telegramCommandTrigger(report)
-	for _, want := range []string{"BTC Agent — Trigger", "Chờ BTC ALLOWED", "Chỉ dùng để xem", "không bỏ qua bước kiểm tra cuối"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("trigger reply missing %q:\n%s", want, text)
 		}
 	}
 }

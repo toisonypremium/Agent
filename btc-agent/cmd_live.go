@@ -955,11 +955,6 @@ func writeAutoLiveManagementResult(ctx context.Context, cfg config.Config, db *s
 		if err := writeCapitalPlanResearchReportFile(capitalReport); err != nil {
 			log.Printf("capital plan research report warning: %v", err)
 		}
-		filterReport := buildFilterAttributionReport(snapshot)
-		scenario := buildScenarioReport(cfg, snapshot)
-		if err := writeDecisionDashboardReport(snapshot, scenario, technicalReport, capitalReport, filterReport); err != nil {
-			log.Printf("decision dashboard report warning: %v", err)
-		}
 	}
 	if cfg.Notify.Enabled && cfg.Notify.Provider == "telegram" && notifyTelegram {
 		sendTelegram(ctx, cfg, "auto-live-management", telegramreport.LiveOrderManagementHumanText(result))

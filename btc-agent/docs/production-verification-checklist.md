@@ -50,9 +50,7 @@ Record:
 - remote pending/remote-only orders and identity conflicts;
 - reconciled positions and residual reservations;
 - execution owner, fencing token and lease expiry/freshness;
-- outbox pending/dead-letter/stale claims;
-- Supabase/R2 delivery status, or `DISABLED` when credentials are intentionally absent;
-- dry-run `desired`, `would_place`, `placed`, `canceled` and exchange call count.
+- - dry-run `desired`, `would_place`, `placed`, `canceled` and exchange call count.
 
 Required result before shadow observation:
 
@@ -72,7 +70,7 @@ Required result before shadow observation:
 Observe for at least seven continuous days with operator halt active. Exercise a
 controlled restart and a full reboot, and test delivery of each critical alert. Observe
 scheduler restarts, lease renewal, reconcile cycles, order/fill deltas, capital
-reservations, alerts, outbox delivery and dashboard freshness for the approved window.
+reservations and alerts for the approved window.
 Record every skipped check and reason. Any stale lease/data, unknown order, reconcile
 mismatch, duplicate submission, dead-letter growth, unavailable protection snapshot,
 failed critical alert, unexplained balance/position delta, or second scheduler fails

@@ -184,9 +184,6 @@ func writeBotStateAndScenario(cfg config.Config, db *storage.DB, supervisor live
 	if err := writeCapitalPlanResearchReportFile(capitalReport); err != nil {
 		return snapshot, scenario, err
 	}
-	if err := writeDecisionDashboardReport(snapshot, scenario, technicalReport, capitalReport, filterReport); err != nil {
-		return snapshot, scenario, err
-	}
 	return snapshot, scenario, nil
 }
 

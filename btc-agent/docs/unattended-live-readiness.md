@@ -48,7 +48,7 @@ operator halt as part of deployment or restart.
 With the protected service environment loaded, run the commands in
 [production-verification-checklist.md](production-verification-checklist.md).
 Record UTC start/end, Git SHA, binary SHA, owner instance, fencing token, lease
-freshness, operator halt, reconciliation, outbox, dashboard freshness, alerts and
+freshness, operator halt, reconciliation, alerts and
 dry-run exchange call count.
 
 Observe for at least seven days with halt active. Exercise a controlled service
@@ -67,6 +67,6 @@ unrestricted autonomous trading from this runbook.
 ## Incident actions
 
 For uncertain exchange outcome, stale safety signal, security concern, or ownership
-loss: request/activate operator halt, preserve DB/WAL/outbox/logs, snapshot remote
+loss: request/activate operator halt, preserve DB/WAL/logs, snapshot remote
 balances/positions/orders, and reconcile before retrying. Never send a replacement
 order with a new client ID until the original outcome is known.

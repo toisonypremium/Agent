@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -56,5 +57,28 @@ func TestCanonicalConfigPathRejectsDirectory(t *testing.T) {
 	_, err := canonicalConfigPath(t.TempDir())
 	if err == nil {
 		t.Fatal("expected directory config path to fail")
+	}
+}
+
+func TestConfigCheckDoesNotCreateSQLiteState(t *testing.T) {
+	contents, err := os.ReadFile("config.yaml.example")
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := t.TempDir()
+	configPath := filepath.Join(root, "config.yaml")
+	if err := os.WriteFile(configPath, contents, 0600); err != nil {
+		t.Fatal(err)
+	}
+	workingDir, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(workingDir) })
+	if err := run(context.Background(), []string{"btc-agent", "config-check", "--config", configPath}); err != nil {
+		t.Fatalf("config-check: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "data", "btc_agent.db")); !os.IsNotExist(err) {
+		t.Fatalf("config-check created SQLite state, stat err=%v", err)
 	}
 }

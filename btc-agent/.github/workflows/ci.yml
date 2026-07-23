@@ -22,3 +22,4 @@ jobs:
       - run: bash deploy/test-health-check.sh
       - run: bash deploy/test-service-unit.sh
       - run: bash deploy/test-immutable-runtime.sh
+      - run: bash deploy/test-immutable-runtime-verify.sh

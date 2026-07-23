@@ -1,61 +1,59 @@
-# Tasks
+# Current delivery roadmap
 
-## Open
+**Source fixed point:** `6df4952`
+**Runtime profile:** immutable user service, halted-paper.
+**Authority:** operator halt remains `ACTIVE`; no canary or real-order approval.
 
-- [ ] Re-run current-release production verification after deploying the reviewed SHA; do not infer runtime state from docs.
-- [ ] Monitor until deterministic `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` appears; no sizing or authority change while blocked.
-- [ ] Use full verification gate before reporting implementation work done.
-- [ ] Use `real-data-survey` + `learn` as report-only evidence before future rule tuning.
-- [ ] Milestone C: collect enough embargoed evaluation samples, compare false-positive/drawdown against the approved baseline, and obtain manual review before any live sizing change. The report path is implemented; sizing expansion remains disabled.
-- [ ] Complete approved shadow/canary observation and retain V1 through rollback window.
-- [x] Merge cutover branch after CI and halted shadow verification; main is at `fc6e4c7`.
-- [ ] Run V1 cleanup only after approved rollback window and explicit `AGENT_CLEANUP_APPROVED`.
-- [ ] Keep production operator halt active; no real-order approval from this release.
-- [x] Add authoritative CI checks for Go race/vet/build, secret scan, backup and systemd checks.
-- [x] Add report-only liquidation proxy and anchored VWAP/volume profile diagnostics.
-- [x] Wire autonomous exits through Hermes-owned, no-short, reconcile-safe limit SELL lifecycle with residual reservation.
+## P0 — Evidence and operational integrity
 
-## Done
+- [ ] Complete the halted-shadow window ending around `2026-07-30T07:25:43Z`.
+  Evidence: continuous observer PASS, exactly one scheduler, fresh lease and
+  heartbeat, SQLite integrity, verified backup, zero failed user units.
+- [ ] Perform one controlled reboot verification inside the approved shadow
+  window. Preserve evidence; do not clear halt.
+- [ ] Collect natural paper-order lifecycle evidence under the contract in
+  [docs/paper-evidence-contract.md](docs/paper-evidence-contract.md). Do not
+  create synthetic orders or mutate production data to satisfy the threshold.
+- [ ] Review any persistence/report failure signals. Critical operational state
+  must be observable; report-only errors must be visible in runtime evidence.
+- [ ] Re-run immutable runtime verifier after every approved deploy/restart.
 
-- [x] Add repository hygiene docs and verification gate.
-- [x] Keep local config, data, reports, logs, backups, and binaries out of version control through `.gitignore`.
-- [x] Harden live-auto readiness and supervisor path.
-- [x] Add technical scorecard, opportunity composite score, capital research plan, universe research, and Telegram read-only management commands.
-- [x] Connect live allocator to `OpportunityComposite` inside `ACTIVE_LIMIT` guard.
-- [x] Remove stale canary/auto-ladder production logic from new live-auto scenario.
-- [x] Add real-data survey report path for learning evidence without changing live authority.
-- [x] Add OHLCV BTC accumulation phase detector and false-positive/forward-return audit without changing live authority.
-- [x] Add auto-live market-watch monitoring and operations-plan report without changing live authority.
-- [x] Split overloaded command/scheduler code and add read-only runtime ops event queue without changing live authority.
-- [x] Add report-only microstructure data sources and stale blockers without changing live authority.
-- [x] Milestone B: add microstructure data sources (CVD/OI/funding/orderbook) with data-health stale blockers before considering live expansion.
-- [x] Add live-auto safety hardening before autonomous real order approval.
-- [x] Add pre-live safety hardening: final execution assertion, live-auto-audit, forced dry-run simulation, first-order quarantine, and near-unlock events.
-- [x] Fix live-auto safety-hardening logic deviations: dry-run proof gate, BTC phase final assertion, audit verdict separation, forced simulation exchange counter, and near-unlock alert lifecycle.
-- [x] Add exit manager: EvaluateExits, PeakTracker, ExitPanicSell, wire into supervisor cycle, tests (18 cases).
-- [x] Add OpenedAt to LivePosition for accurate time-stop tracking.
-- [x] Schedule live-auto-audit in scheduler loop (audit_interval_minutes, default 60 min).
-- [x] Scheduler chạy monitoring với operator halt là authority runtime; không release, restart hoặc tài liệu nào được tự clear halt. Mọi thay đổi authority phải qua control-plane và audit hiện hành.
+## P1 — Before any separate canary request
 
-## Verification commands
+- [ ] Add failure-path coverage for scheduler orchestration, heartbeat,
+  ownership, execution guard, exchange parser/timeouts, and stale-data handling.
+- [ ] Export and retain CI coverage artifacts; set incremental regression gates
+  for safety-critical packages rather than a global vanity threshold.
+- [ ] Refactor only narrow orchestration seams in `scheduler.go` and `cmd_live.go`
+  behind contract tests. No broad rewrite during the halted-shadow window.
+- [ ] Freeze a baseline and evaluate out-of-sample/paper data before any rule or
+  sizing change. Manual review is mandatory.
+
+## P2 — Separate explicit canary approval required
+
+A canary is blocked until P0/P1 evidence passes, reconciliation is clean,
+backup/restore is verified, operator halt handling is reviewed, and an operator
+approves a bounded order cap, monitoring owner, stop conditions, and rollback.
+No release, CI result, paper scorecard, or document grants this approval.
+
+## Completed foundations
+
+- [x] Immutable user runtime: SHA-verified release installation, atomic current
+  symlink, verified SQLite backup, observer and daily digest.
+- [x] Runtime verifier: paper mode, active halt, one scheduler, fresh lease and
+  heartbeat, SQLite, backup, and failed-unit checks.
+- [x] Spot/DCA safety controls: no futures, leverage, shorts, market BUY, or
+  automatic stop-loss SELL; unknown outcomes retain capital reservation.
+- [x] CI: formatting, vet, static analysis, vulnerability check, Linux race
+  tests/build, config check, secret scan, immutable drills.
+- [x] Evidence-driven AI delivery workflow and task contract.
+
+## Standard verification
 
 ```bash
-gofmt -w .
-go test -v -count=1 ./...
-go vet ./...
-go build -o bin/btc-agent .
-BTC_AGENT_MODE=live-auto BTC_AGENT_ALLOW_AUTO_LIVE=true ./bin/btc-agent live-supervisor --config config.yaml --dry-run
-./bin/btc-agent live-doctor --config config.yaml
+make verify
+make linux-build
 ```
 
-## Safety invariants
-
-- Scheduler `live-auto` uses supervisor + managed order engine as production path.
-- `ACTIVE_LIMIT + ALLOWED + ACCUMULATION_CONFIRMED` required for normal live desired orders.
-- `WATCH`, `SCOUT`, and `ARMED` do not create normal live orders.
-- Spot limit BUY post-only only.
-- No futures.
-- No leverage.
-- No market order.
-- Telegram remains read-only.
-- `config.yaml`, `.env`, DB, reports, logs, backups, and binaries stay local-only.
+Linux CI remains authoritative for `go test -race`. Do not use production DB,
+credentials, or exchange calls for development validation.

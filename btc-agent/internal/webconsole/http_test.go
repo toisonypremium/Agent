@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -118,5 +119,32 @@ func TestAppDoesNotServeStaticFilesWithoutExplicitDirectory(t *testing.T) {
 	api.App("").ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/", nil))
 	if r.Code != http.StatusNotFound {
 		t.Fatalf("root status=%d", r.Code)
+	}
+}
+
+func TestStaticBundleOnlyExposesBuiltFiles(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("index"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "assets"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "app.js"), []byte("asset"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	api := testAPI(t)
+	for _, want := range []struct {
+		path   string
+		status int
+	}{{"/", 200}, {"/assets/app.js", 200}, {"/secret.txt", 404}, {"/assets/", 404}, {"/.env", 404}} {
+		r := httptest.NewRecorder()
+		api.App(dir).ServeHTTP(r, httptest.NewRequest(http.MethodGet, want.path, nil))
+		if r.Code != want.status {
+			t.Fatalf("%s status=%d want=%d", want.path, r.Code, want.status)
+		}
 	}
 }

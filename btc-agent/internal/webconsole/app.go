@@ -2,7 +2,10 @@ package webconsole
 
 import (
 	"net/http"
+	"os"
+	"path"
 	"path/filepath"
+	"strings"
 )
 
 // App serves the typed API before static assets. staticDir is an explicit build
@@ -15,8 +18,46 @@ func (a *API) App(staticDir string) http.Handler {
 		mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) })
 		return mux
 	}
-	mux.Handle("/", staticHeaders(http.FileServer(http.Dir(filepath.Clean(staticDir)))))
+	mux.Handle("/", staticHeaders(staticBundle(staticDir)))
 	return mux
+}
+
+// staticBundle exposes only a built index document and immutable assets below
+// assets/. It refuses directory listings, dot paths and all non-build files.
+func staticBundle(staticDir string) http.Handler {
+	root := filepath.Clean(staticDir)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			http.NotFound(w, r)
+			return
+		}
+		requested := path.Clean("/" + r.URL.Path)
+		if strings.Contains(requested, "/.") {
+			http.NotFound(w, r)
+			return
+		}
+		var file string
+		switch {
+		case requested == "/" || requested == "/index.html":
+			file = filepath.Join(root, "index.html")
+		case strings.HasPrefix(requested, "/assets/") && !strings.HasSuffix(requested, "/"):
+			file = filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(requested, "/")))
+		default:
+			http.NotFound(w, r)
+			return
+		}
+		info, err := os.Stat(file)
+		if err != nil || !info.Mode().IsRegular() {
+			http.NotFound(w, r)
+			return
+		}
+		if strings.HasPrefix(requested, "/assets/") {
+			w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		} else {
+			w.Header().Set("Cache-Control", "no-store")
+		}
+		http.ServeFile(w, r, file)
+	})
 }
 
 func staticHeaders(next http.Handler) http.Handler {

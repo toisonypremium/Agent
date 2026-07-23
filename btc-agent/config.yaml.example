@@ -86,7 +86,7 @@ notify:
 
 ai:
   enabled: false
-  provider: "9router"
+  provider: "openai_compatible"
   model: "Claw"
   base_url_env: "ANTHROPIC_BASE_URL"
   api_key_env: "ANTHROPIC_API_KEY"

@@ -72,7 +72,7 @@ systemctl --failed --no-pager
 systemctl status ssh --no-pager
 systemctl is-active tailscaled
 systemctl --user is-active btc-agent-vps-ssh-tunnel.service
-systemctl --user is-active 9router-named-tunnel.service
+systemctl --user is-active removed WebUI tunnel
 systemctl --user is-active btc-agent-scheduler.service
 ```
 
@@ -83,7 +83,7 @@ ssh: active
 failed units: 0
 tailscaled: active
 btc-agent-vps-ssh-tunnel: active
-9router-named-tunnel: active
+removed WebUI tunnel
 btc-agent-scheduler: active
 ```
 
@@ -99,10 +99,10 @@ The `admin` user has `Linger=yes`, and both user tunnel units are enabled with
   origin: ssh://127.0.0.1:22
   enabled, Restart=always
 
-~/.config/systemd/user/9router-named-tunnel.service
+~/.config/systemd/user/removed WebUI tunnel
   enabled, Restart=always
 
-/etc/systemd/system/9router-public-tunnel.service
+/etc/systemd/system/removed WebUI tunnel
   obsolete/alternate quick-tunnel unit
   disabled and inactive; do not enable without ownership review
 ```
@@ -135,14 +135,14 @@ separate trading-operations incident explicitly requires it.
    loginctl show-user admin -p Linger -p State -p RuntimePath
    systemctl status user@1000.service --no-pager
    systemctl --user status btc-agent-vps-ssh-tunnel.service --no-pager
-   systemctl --user status 9router-named-tunnel.service --no-pager
+   systemctl --user status removed WebUI tunnel --no-pager
    ```
 
 6. Read current-boot logs before restarting anything:
 
    ```bash
    journalctl -b --user -u btc-agent-vps-ssh-tunnel.service -n 120 --no-pager
-   journalctl -b --user -u 9router-named-tunnel.service -n 120 --no-pager
+   journalctl -b --user -u removed WebUI tunnel -n 120 --no-pager
    ```
 
 7. If a tunnel is failed and logs identify it as the access failure, restart
@@ -150,7 +150,7 @@ separate trading-operations incident explicitly requires it.
 
    ```bash
    systemctl --user restart btc-agent-vps-ssh-tunnel.service
-   systemctl --user restart 9router-named-tunnel.service
+   systemctl --user restart removed WebUI tunnel
    ```
 
 8. Re-test from Termux:

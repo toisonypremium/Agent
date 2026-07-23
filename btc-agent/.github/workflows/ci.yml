@@ -23,3 +23,4 @@ jobs:
       - run: bash deploy/test-service-unit.sh
       - run: bash deploy/test-immutable-runtime.sh
       - run: bash deploy/test-immutable-runtime-verify.sh
+      - run: bash deploy/test-immutable-user-release.sh

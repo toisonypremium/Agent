@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily BTC Agent immutable operational digest
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=btc-agent-immutable-daily-check.service
+
+[Install]
+WantedBy=timers.target

@@ -11,6 +11,9 @@ for file in \
   deploy/systemd/btc-agent-immutable-observe.timer \
   deploy/systemd/btc-agent-immutable-backup.service \
   deploy/systemd/btc-agent-immutable-backup.timer \
+  deploy/systemd/btc-agent-immutable-daily-check.service \
+  deploy/systemd/btc-agent-immutable-daily-check.timer \
+  deploy/check-runtime-daily.sh \
   deploy/systemd/install-immutable-user-service.sh; do
   test -f "$file" || { echo "missing immutable runtime artifact: $file" >&2; exit 1; }
 done

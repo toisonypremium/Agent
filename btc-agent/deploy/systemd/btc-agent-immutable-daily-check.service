@@ -1,0 +1,7 @@
+[Unit]
+Description=BTC Agent immutable halted-paper daily operational digest
+After=btc-agent-immutable.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/btc-agent/immutable/check-runtime-daily.sh

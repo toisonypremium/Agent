@@ -585,6 +585,21 @@ func parsePositiveFiniteValue(raw, field string) (float64, error) {
 	return value, nil
 }
 
+func parseNonNegativeFiniteValue(raw, field string) (float64, error) {
+	value, err := parseFiniteValue(raw, field)
+	if err != nil || value < 0 {
+		return 0, fmt.Errorf("invalid %s", field)
+	}
+	return value, nil
+}
+
+func parseOptionalPositiveFiniteValue(raw, field string) (float64, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, nil
+	}
+	return parsePositiveFiniteValue(raw, field)
+}
+
 func parseFiniteValue(raw, field string) (float64, error) {
 	if strings.TrimSpace(raw) == "" {
 		return 0, nil
@@ -786,7 +801,43 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 	}
 	out := []OrderStatus{}
 	for _, item := range raw.Data {
-		uTime, _ := strconv.ParseInt(item.UTime, 10, 64)
+		instID := strings.TrimSpace(item.InstID)
+		orderID := strings.TrimSpace(item.OrderID)
+		clientOrderID := strings.TrimSpace(item.ClOrdID)
+		if instID == "" || (orderID == "" && clientOrderID == "") {
+			return nil, fmt.Errorf("okx order status missing immutable order identity")
+		}
+		side := strings.ToUpper(strings.TrimSpace(item.Side))
+		if side != "BUY" && side != "SELL" {
+			return nil, fmt.Errorf("okx order status invalid side %q", item.Side)
+		}
+		price, err := parsePositiveFiniteValue(item.Px, "order price")
+		if err != nil {
+			return nil, fmt.Errorf("okx order status %w", err)
+		}
+		quantity, err := parsePositiveFiniteValue(item.Sz, "order quantity")
+		if err != nil {
+			return nil, fmt.Errorf("okx order status %w", err)
+		}
+		filled, err := parseNonNegativeFiniteValue(item.AccFillSz, "accumulated fill size")
+		if err != nil || filled > quantity {
+			return nil, fmt.Errorf("okx order status invalid accumulated fill size")
+		}
+		avgPrice, err := parseOptionalPositiveFiniteValue(item.AvgPx, "average fill price")
+		if err != nil {
+			return nil, fmt.Errorf("okx order status %w", err)
+		}
+		if filled > 0 && avgPrice <= 0 {
+			return nil, fmt.Errorf("okx order status missing average fill price")
+		}
+		fee, err := parseFiniteValue(item.Fee, "fee")
+		if err != nil {
+			return nil, fmt.Errorf("okx order status %w", err)
+		}
+		uTime, err := strconv.ParseInt(item.UTime, 10, 64)
+		if err != nil || uTime <= 0 {
+			return nil, fmt.Errorf("okx order status invalid update time")
+		}
 		uTime = normalizeOKXUnixTime(uTime)
 
 		status := StatusUnknownNeedsManualCheck
@@ -804,19 +855,19 @@ func parseOKXOrderStatus(data []byte) ([]OrderStatus, error) {
 		}
 
 		out = append(out, OrderStatus{
-			InstID:            item.InstID,
-			OrderID:           item.OrderID,
-			ClientOrderID:     item.ClOrdID,
+			InstID:            instID,
+			OrderID:           orderID,
+			ClientOrderID:     clientOrderID,
 			State:             item.State,
 			Status:            status,
-			Side:              item.Side,
+			Side:              side,
 			OrderType:         item.OrdType,
-			Price:             firstParseFloat(item.Px),
-			Quantity:          firstParseFloat(item.Sz),
-			FilledQuantity:    firstParseFloat(item.AccFillSz),
-			AvgPrice:          firstParseFloat(item.AvgPx),
-			AccumulatedFillSz: firstParseFloat(item.AccFillSz),
-			Fee:               firstParseFloat(item.Fee),
+			Price:             price,
+			Quantity:          quantity,
+			FilledQuantity:    filled,
+			AvgPrice:          avgPrice,
+			AccumulatedFillSz: filled,
+			Fee:               fee,
 			FeeCurrency:       strings.ToUpper(item.FeeCcy),
 			UpdatedAt:         uTime,
 		})
@@ -871,8 +922,8 @@ func (c *OKXClient) SpotLastPrice(ctx context.Context, symbol string) (float64, 
 	if json.Unmarshal(data, &raw) != nil || raw.Code != "0" || len(raw.Data) == 0 {
 		return 0, fmt.Errorf("okx ticker unavailable for %s: %s", instID, raw.Msg)
 	}
-	price, err := strconv.ParseFloat(raw.Data[0].Last, 64)
-	if err != nil || price <= 0 {
+	price, err := parsePositiveFiniteValue(raw.Data[0].Last, "ticker price")
+	if err != nil {
 		return 0, fmt.Errorf("invalid OKX ticker for %s", instID)
 	}
 	return price, nil

@@ -403,3 +403,34 @@ func TestParseInstrumentFiltersRejectsMalformedTradingConstraints(t *testing.T) 
 		})
 	}
 }
+
+func TestParseOKXOrderStatusRejectsMalformedReconciliationRows(t *testing.T) {
+	cases := []struct {
+		name string
+		row  string
+	}{
+		{"missing exchange identity", `{"instId":"ETH-USDT","ordId":"","clOrdId":"","state":"live","side":"buy","ordType":"limit","px":"100","sz":"1","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000000"}`},
+		{"unknown side", `{"instId":"ETH-USDT","ordId":"o1","clOrdId":"c1","state":"live","side":"hold","ordType":"limit","px":"100","sz":"1","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000000"}`},
+		{"nonfinite price", `{"instId":"ETH-USDT","ordId":"o1","clOrdId":"c1","state":"live","side":"buy","ordType":"limit","px":"NaN","sz":"1","accFillSz":"0","avgPx":"","fee":"0","uTime":"1700000000000"}`},
+		{"negative fill", `{"instId":"ETH-USDT","ordId":"o1","clOrdId":"c1","state":"live","side":"buy","ordType":"limit","px":"100","sz":"1","accFillSz":"-1","avgPx":"","fee":"0","uTime":"1700000000000"}`},
+		{"missing update time", `{"instId":"ETH-USDT","ordId":"o1","clOrdId":"c1","state":"live","side":"buy","ordType":"limit","px":"100","sz":"1","accFillSz":"0","avgPx":"","fee":"0","uTime":""}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseOKXOrderStatus([]byte(`{"code":"0","data":[` + tc.row + `]}`)); err == nil {
+				t.Fatal("malformed order row must fail closed")
+			}
+		})
+	}
+}
+
+func TestSpotLastPriceRejectsNonFiniteTicker(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"code":"0","data":[{"last":"NaN"}]}`))
+	}))
+	defer server.Close()
+	client := &OKXClient{baseURL: server.URL, http: server.Client()}
+	if _, err := client.SpotLastPrice(context.Background(), "ETHUSDT"); err == nil {
+		t.Fatal("non-finite ticker must fail closed")
+	}
+}

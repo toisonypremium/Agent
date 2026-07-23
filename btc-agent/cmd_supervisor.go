@@ -24,6 +24,29 @@ type liveSupervisorState struct {
 	PeakTracker       *liveguard.PeakTracker
 }
 
+// recordSupervisorOperationalFailure makes best-effort observability failures
+// queryable without changing execution authority or the current cycle outcome.
+func recordSupervisorOperationalFailure(db *storage.DB, now time.Time, operation string, err error) {
+	if db == nil || err == nil {
+		return
+	}
+	payload, marshalErr := json.Marshal(map[string]string{"operation": operation, "error": err.Error()})
+	if marshalErr != nil {
+		log.Printf("[Supervisor] operational failure payload warning: %v", marshalErr)
+		return
+	}
+	if eventErr := db.SaveRuntimeEvent(storage.RuntimeEvent{
+		Timestamp:   now.UTC(),
+		Source:      "btc-agent-supervisor",
+		Type:        "SUPERVISOR_OPERATIONAL_PERSISTENCE_FAILED",
+		Severity:    "warning",
+		Fingerprint: "supervisor-persistence:" + operation,
+		PayloadJSON: string(payload),
+	}); eventErr != nil {
+		log.Printf("[Supervisor] operational failure event warning: operation=%s err=%v", operation, eventErr)
+	}
+}
+
 func attachPortfolioRiskTelemetry(cfg config.Config, db *storage.DB, result *liveguard.SupervisorResult, now time.Time) {
 	if result == nil || db == nil {
 		return
@@ -161,8 +184,12 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 		result.Reasons = append(result.Reasons, "capital authority snapshot: "+e.Error())
 	} else {
 		util := liveguard.EvaluateCapitalUtilization(liveguard.CapitalUtilizationInput{TotalCapital: capital.AccountEquityUSDT, ExistingExposure: capital.ExistingExposureUSDT, OpenBuyNotional: capital.OpenBuyNotionalUSDT, ReserveCashRatio: cfg.Portfolio.ReserveCashRatio, HardExposureCap: capital.HardExposureCapUSDT, MarketRegime: latestMarketRegime(db), AccumulationPhase: latestAccumulationPhase(db)})
-		if b, je := json.Marshal(map[string]any{"authority": capital, "utilization": util}); je == nil {
-			_, _ = db.Exec(`INSERT INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('capital_utilization',?,?) ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at,payload_json=excluded.payload_json`, time.Now().Unix(), string(b))
+		if b, je := json.Marshal(map[string]any{"authority": capital, "utilization": util}); je != nil {
+			result.Reasons = append(result.Reasons, "capital utilization encoding: "+je.Error())
+			recordSupervisorOperationalFailure(db, time.Now(), "capital_utilization_encode", je)
+		} else if _, execErr := db.Exec(`INSERT INTO hermes_runtime_state(key,updated_at,payload_json) VALUES('capital_utilization',?,?) ON CONFLICT(key) DO UPDATE SET updated_at=excluded.updated_at,payload_json=excluded.payload_json`, time.Now().Unix(), string(b)); execErr != nil {
+			result.Reasons = append(result.Reasons, "persist capital utilization: "+execErr.Error())
+			recordSupervisorOperationalFailure(db, time.Now(), "capital_utilization", execErr)
 		}
 	}
 	telemetry, telemetryErr := collectExecutionTelemetry(ctx, cfg, db, time.Now())
@@ -248,7 +275,10 @@ func runLiveSupervisorCycleWithDoctorNotify(ctx context.Context, cfg config.Conf
 			}
 		}
 		if posErr == nil && len(positions) == 0 {
-			_ = db.SaveExitPeakStates(nil)
+			if err := db.SaveExitPeakStates(nil); err != nil {
+				result.Reasons = append(result.Reasons, "clear exit peak DB: "+err.Error())
+				recordSupervisorOperationalFailure(db, time.Now(), "clear_exit_peak_states", err)
+			}
 		}
 	}
 

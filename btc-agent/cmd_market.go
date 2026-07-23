@@ -291,6 +291,9 @@ func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, 
 	if err := fetch(ctx, cfg, db); err != nil {
 		return err
 	}
+	if err := runPaperManager(cfg, db); err != nil {
+		return fmt.Errorf("manage paper orders: %w", err)
+	}
 	analysis, err := analyze(ctx, cfg, db)
 	if err != nil {
 		return err
@@ -298,6 +301,9 @@ func runDailyWithNotify(ctx context.Context, cfg config.Config, db *storage.DB, 
 	p, err := plan(ctx, cfg, db)
 	if err != nil {
 		return err
+	}
+	if err := runPaperScorecard(db); err != nil {
+		return fmt.Errorf("write paper scorecard: %w", err)
 	}
 	report := agent1.DailyReport(analysis, agent2.Summary(p))
 	if err := db.SaveReport("run_daily", report); err != nil {

@@ -32,3 +32,14 @@ jobs:
       - run: bash deploy/test-immutable-runtime.sh
       - run: bash deploy/test-immutable-runtime-verify.sh
       - run: bash deploy/test-immutable-user-release.sh
+  web:
+    runs-on: ubuntu-latest
+    defaults: {run: {working-directory: btc-agent/web}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: '22.16.0', cache: npm, cache-dependency-path: btc-agent/web/package-lock.json}
+      - run: npm ci
+      - run: npm audit --omit=dev
+      - run: npm run lint
+      - run: npm run build

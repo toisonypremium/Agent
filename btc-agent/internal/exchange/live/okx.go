@@ -344,8 +344,30 @@ func parseOKXTradeFills(data []byte) ([]TradeFill, error) {
 	}
 	out := make([]TradeFill, 0, len(raw.Data))
 	for _, x := range raw.Data {
-		ts, _ := strconv.ParseInt(x.Ts, 10, 64)
-		out = append(out, TradeFill{InstID: x.InstID, TradeID: x.TradeID, OrderID: x.OrderID, Side: strings.ToUpper(x.Side), Price: firstParseFloat(x.FillPx), Quantity: firstParseFloat(x.FillSz), Fee: firstParseFloat(x.Fee), FeeCurrency: strings.ToUpper(x.FeeCcy), Timestamp: normalizeOKXUnixTime(ts)})
+		if strings.TrimSpace(x.InstID) == "" || strings.TrimSpace(x.TradeID) == "" || strings.TrimSpace(x.OrderID) == "" {
+			return nil, fmt.Errorf("okx fill history missing immutable fill identity")
+		}
+		side := strings.ToUpper(strings.TrimSpace(x.Side))
+		if side != "BUY" && side != "SELL" {
+			return nil, fmt.Errorf("okx fill history invalid side %q", x.Side)
+		}
+		price, err := parsePositiveFiniteValue(x.FillPx, "fill price")
+		if err != nil {
+			return nil, fmt.Errorf("okx fill history %w", err)
+		}
+		quantity, err := parsePositiveFiniteValue(x.FillSz, "fill size")
+		if err != nil {
+			return nil, fmt.Errorf("okx fill history %w", err)
+		}
+		fee, err := parseFiniteValue(x.Fee, "fee")
+		if err != nil {
+			return nil, fmt.Errorf("okx fill history %w", err)
+		}
+		ts, err := strconv.ParseInt(x.Ts, 10, 64)
+		if err != nil || ts <= 0 {
+			return nil, fmt.Errorf("okx fill history invalid timestamp")
+		}
+		out = append(out, TradeFill{InstID: x.InstID, TradeID: x.TradeID, OrderID: x.OrderID, Side: side, Price: price, Quantity: quantity, Fee: fee, FeeCurrency: strings.ToUpper(x.FeeCcy), Timestamp: normalizeOKXUnixTime(ts)})
 	}
 	return out, nil
 }
@@ -531,9 +553,28 @@ func parseOrderBookLevel(level []string, side string) (float64, float64, error) 
 }
 
 func parsePositiveFiniteOrderBookValue(raw, field string) (float64, error) {
-	value, err := strconv.ParseFloat(raw, 64)
-	if err != nil || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+	value, err := parsePositiveFiniteValue(raw, field)
+	if err != nil {
 		return 0, fmt.Errorf("okx order book invalid %s", field)
+	}
+	return value, nil
+}
+
+func parsePositiveFiniteValue(raw, field string) (float64, error) {
+	value, err := parseFiniteValue(raw, field)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("invalid %s", field)
+	}
+	return value, nil
+}
+
+func parseFiniteValue(raw, field string) (float64, error) {
+	if strings.TrimSpace(raw) == "" {
+		return 0, nil
+	}
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("invalid %s", field)
 	}
 	return value, nil
 }

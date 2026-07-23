@@ -37,3 +37,24 @@ func TestSpotFillHistoryPaginatesAndDeduplicates(t *testing.T) {
 		t.Fatalf("calls=%d fills=%d first=%+v", calls, len(fills), fills[0])
 	}
 }
+
+func TestParseOKXTradeFillsRejectsMalformedReconciliationData(t *testing.T) {
+	cases := []struct {
+		name string
+		row  string
+	}{
+		{"missing trade ID", `{"instId":"BTC-USDT","tradeId":"","ordId":"o1","side":"buy","fillPx":"10","fillSz":"1","ts":"1000"}`},
+		{"unknown side", `{"instId":"BTC-USDT","tradeId":"t1","ordId":"o1","side":"hold","fillPx":"10","fillSz":"1","ts":"1000"}`},
+		{"nonfinite price", `{"instId":"BTC-USDT","tradeId":"t1","ordId":"o1","side":"buy","fillPx":"NaN","fillSz":"1","ts":"1000"}`},
+		{"negative quantity", `{"instId":"BTC-USDT","tradeId":"t1","ordId":"o1","side":"buy","fillPx":"10","fillSz":"-1","ts":"1000"}`},
+		{"missing timestamp", `{"instId":"BTC-USDT","tradeId":"t1","ordId":"o1","side":"buy","fillPx":"10","fillSz":"1","ts":""}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			data := []byte(`{"code":"0","data":[` + tc.row + `]}`)
+			if _, err := parseOKXTradeFills(data); err == nil {
+				t.Fatal("malformed fill must fail closed")
+			}
+		})
+	}
+}

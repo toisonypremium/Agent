@@ -168,3 +168,36 @@ func paperOrderDTO(order agent2.PaperOrder) PaperOrder {
 	}
 	return out
 }
+
+type Event struct {
+	ID        int64  `json:"id"`
+	Timestamp string `json:"timestamp"`
+	Source    string `json:"source"`
+	Type      string `json:"type"`
+	Severity  string `json:"severity"`
+}
+
+type EventsPage struct {
+	Events []Event `json:"events"`
+	Limit  int     `json:"limit"`
+}
+
+// Events exposes ledger metadata only. Runtime payload JSON is deliberately
+// excluded because event producers may include unreviewed nested data.
+func (s *Service) Events(limit int) (EventsPage, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 100 {
+		limit = 100
+	}
+	rows, err := s.db.PendingRuntimeEvents(limit)
+	if err != nil {
+		return EventsPage{}, fmt.Errorf("read runtime events: %w", err)
+	}
+	out := EventsPage{Events: make([]Event, 0, len(rows)), Limit: limit}
+	for _, row := range rows {
+		out.Events = append(out.Events, Event{ID: row.ID, Timestamp: row.Timestamp.UTC().Format(time.RFC3339), Source: row.Source, Type: row.Type, Severity: row.Severity})
+	}
+	return out, nil
+}

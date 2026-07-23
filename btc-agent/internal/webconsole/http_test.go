@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -24,6 +25,9 @@ func testAPI(t *testing.T) *API {
 	if err := db.SaveOrders([]agent2.PaperOrder{{ID: "paper-1", Timestamp: now.Add(-time.Hour), Symbol: "ETHUSDT", Side: "BUY", Layer: 1, Price: 1, Quantity: 2, Notional: 2, Status: "OPEN", ExpiresAt: now.Add(time.Hour)}}); err != nil {
 		t.Fatal(err)
 	}
+	if err := db.SaveRuntimeEvent(storage.RuntimeEvent{Source: "fixture", Type: "SAFE_EVENT", Severity: "info", PayloadJSON: `{"token":"must-not-leak"}`}); err != nil {
+		t.Fatal(err)
+	}
 	if _, ok, err := db.AcquireExecutionLease(context.Background(), "okx-live", "fixture", now, time.Minute); err != nil || !ok {
 		t.Fatalf("lease ok=%v err=%v", ok, err)
 	}
@@ -35,7 +39,7 @@ func testAPI(t *testing.T) *API {
 }
 func TestReadOnlyRoutesAndSecurityHeaders(t *testing.T) {
 	api := testAPI(t)
-	for _, path := range []string{"/healthz", "/api/v1/overview", "/api/v1/paper/scorecard", "/api/v1/paper/orders?limit=1"} {
+	for _, path := range []string{"/healthz", "/api/v1/overview", "/api/v1/paper/scorecard", "/api/v1/paper/orders?limit=1", "/api/v1/events?limit=1"} {
 		r := httptest.NewRecorder()
 		api.Handler().ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
 		if r.Code != http.StatusOK {
@@ -93,5 +97,17 @@ func TestNoMutationRouteExists(t *testing.T) {
 		if r.Code != http.StatusNotFound {
 			t.Fatalf("forbidden route %s got=%d", path, r.Code)
 		}
+	}
+}
+
+func TestEventsNeverExposeRuntimePayload(t *testing.T) {
+	api := testAPI(t)
+	r := httptest.NewRecorder()
+	api.Handler().ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/api/v1/events", nil))
+	if r.Code != http.StatusOK {
+		t.Fatalf("events status=%d", r.Code)
+	}
+	if strings.Contains(r.Body.String(), "must-not-leak") || strings.Contains(r.Body.String(), "payload_json") {
+		t.Fatalf("unsafe event data exposed: %s", r.Body.String())
 	}
 }

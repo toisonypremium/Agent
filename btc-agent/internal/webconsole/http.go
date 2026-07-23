@@ -34,6 +34,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/overview", a.overview)
 	mux.HandleFunc("GET /api/v1/paper/scorecard", a.scorecard)
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
+	mux.HandleFunc("GET /api/v1/events", a.events)
 	return secureHeaders(mux)
 }
 
@@ -56,6 +57,18 @@ func (a *API) scorecard(w http.ResponseWriter, _ *http.Request) {
 	}
 	writeEnvelope(w, a.now, out)
 }
+func (a *API) events(w http.ResponseWriter, r *http.Request) {
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	out, err := a.service.Events(limit)
+	if err != nil {
+		writeProblem(w, http.StatusServiceUnavailable, "events_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
 func (a *API) paperOrders(w http.ResponseWriter, r *http.Request) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
@@ -74,6 +87,18 @@ func (a *API) paperOrders(w http.ResponseWriter, r *http.Request) {
 	writeEnvelope(w, a.now, out)
 }
 
+func queryLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
+	limit := 50
+	if raw := r.URL.Query().Get("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed < 1 {
+			writeProblem(w, http.StatusBadRequest, "invalid_limit")
+			return 0, false
+		}
+		limit = parsed
+	}
+	return limit, true
+}
 func writeEnvelope[T any](w http.ResponseWriter, now Clock, data T) {
 	writeJSON(w, http.StatusOK, Envelope[T]{SchemaVersion: SchemaVersion, GeneratedAt: now().UTC(), Freshness: Freshness{State: "fresh", AgeSeconds: 0}, Data: data, Warnings: []string{}})
 }

@@ -33,6 +33,7 @@ values and stack traces are never exposed.
 | `GET` | `/api/v1/overview` | halt, market, lease and paper summary | typed allowlist |
 | `GET` | `/api/v1/paper/scorecard` | lifecycle scorecard | paper evidence only |
 | `GET` | `/api/v1/paper/orders?limit=1..100` | newest paper orders | hard maximum 100 |
+| `GET` | `/api/v1/events?limit=1..100` | sanitized pending event metadata | payload JSON intentionally excluded |
 
 Security headers include CSP `default-src 'none'`, `frame-ancestors 'none'`,
 `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy:

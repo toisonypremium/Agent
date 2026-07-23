@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -102,7 +103,7 @@ func runCanaryRehearsal(ctx context.Context, cfg config.Config) error {
 	}
 	fmt.Println(report.Summary)
 	if report.Status != "PASS" {
-		return fmt.Errorf(report.Summary)
+		return errors.New(report.Summary)
 	}
 	return nil
 }

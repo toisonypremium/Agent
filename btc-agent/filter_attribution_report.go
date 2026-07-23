@@ -52,10 +52,6 @@ type FilterAttributionNearActionable struct {
 	NextTrigger   string       `json:"next_trigger,omitempty"`
 }
 
-func writeFilterAttributionReport(snapshot BotRuntimeSnapshot) error {
-	return writeFilterAttributionReportFile(buildFilterAttributionReport(snapshot))
-}
-
 func writeFilterAttributionReportFromManaged(result liveguard.ManagedCycleResult) error {
 	return writeFilterAttributionReportFile(buildFilterAttributionReportFromManaged(result))
 }

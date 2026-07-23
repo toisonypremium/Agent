@@ -507,27 +507,6 @@ func telegramCommandNext(r ScenarioReport) string {
 	return b.String()
 }
 
-func telegramCommandRisk(s BotRuntimeSnapshot, r ScenarioReport) string {
-	var b strings.Builder
-	b.WriteString("BTC Agent — Risk\n")
-	b.WriteString(fmt.Sprintf("BTC risk=%s | falling=%s | fomo=%s\n", s.BTC.RiskLevel, s.BTC.FallingKnifeRisk, s.BTC.FomoRisk))
-	b.WriteString("Bộ bảo vệ vốn: " + emptyStringDefault(s.RiskGovernorSummary, "chưa rõ") + "\n")
-	if len(s.RiskGovernorWarnings) > 0 {
-		b.WriteString("Cảnh báo:\n")
-		for _, item := range firstStrings(s.RiskGovernorWarnings, 4) {
-			b.WriteString("- " + item + "\n")
-		}
-	}
-	if len(r.Blockers) > 0 {
-		b.WriteString("Các lý do đang chặn:\n")
-		for _, item := range firstStrings(r.Blockers, 6) {
-			b.WriteString("- " + item + "\n")
-		}
-	}
-	b.WriteString("An toàn: chỉ mua spot bằng limit post-only; không futures; không leverage; không market order.\n")
-	return b.String()
-}
-
 func loadBotRuntimeSnapshotReport() (BotRuntimeSnapshot, bool) {
 	b, err := os.ReadFile(filepath.Join("reports", "bot_state_latest.json"))
 	if err != nil {

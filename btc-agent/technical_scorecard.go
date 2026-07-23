@@ -55,10 +55,6 @@ type TechnicalScorecardCoin struct {
 	Why            []string     `json:"why,omitempty"`
 }
 
-func writeTechnicalScorecardReport(snapshot BotRuntimeSnapshot) error {
-	return writeTechnicalScorecardReportFile(buildTechnicalScorecardReport(snapshot))
-}
-
 func writeTechnicalScorecardReportFile(report TechnicalScorecardReport) error {
 	if err := reportio.WriteJSON("reports", "technical_scorecard_latest.json", report); err != nil {
 		return err

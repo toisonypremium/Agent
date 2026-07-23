@@ -91,8 +91,7 @@ immutable runtime verifier: PASS
 ```
 
 The `admin` user has `Linger=yes`; the SSH tunnel and immutable runtime are user
-units. The legacy WebUI tunnel and scheduler units are removed and must not be
-recreated.
+units. Legacy tunnel and scheduler units are removed and must not be recreated.
 
 ## Access service ownership
 

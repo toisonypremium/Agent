@@ -40,10 +40,6 @@ type CapitalPlanResearchCoin struct {
 	Reason                      string       `json:"reason"`
 }
 
-func writeCapitalPlanResearchReport(cfg config.Config, snapshot BotRuntimeSnapshot) error {
-	return writeCapitalPlanResearchReportFile(buildCapitalPlanResearchReport(cfg, snapshot))
-}
-
 func writeCapitalPlanResearchReportFile(report CapitalPlanResearchReport) error {
 	if err := reportio.WriteJSON("reports", "capital_plan_research_latest.json", report); err != nil {
 		return err

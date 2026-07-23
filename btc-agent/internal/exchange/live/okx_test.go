@@ -383,3 +383,23 @@ func TestParseOrderBookRejectsNonFiniteOrMalformedLevels(t *testing.T) {
 		})
 	}
 }
+
+func TestParseInstrumentFiltersRejectsMalformedTradingConstraints(t *testing.T) {
+	cases := []struct {
+		name string
+		item string
+	}{
+		{"missing instrument", `{"instId":"","tickSz":"0.01","lotSz":"0.001","minSz":"0.001","minNotional":"1"}`},
+		{"nonfinite tick", `{"instId":"ETH-USDT","tickSz":"NaN","lotSz":"0.001","minSz":"0.001","minNotional":"1"}`},
+		{"zero lot", `{"instId":"ETH-USDT","tickSz":"0.01","lotSz":"0","minSz":"0.001","minNotional":"1"}`},
+		{"negative minimum", `{"instId":"ETH-USDT","tickSz":"0.01","lotSz":"0.001","minSz":"-0.001","minNotional":"1"}`},
+		{"nonfinite notional", `{"instId":"ETH-USDT","tickSz":"0.01","lotSz":"0.001","minSz":"0.001","minNotional":"Inf"}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseInstrumentFilters([]byte(`{"code":"0","data":[` + tc.item + `]}`)); err == nil {
+				t.Fatal("malformed instrument constraint must fail closed")
+			}
+		})
+	}
+}

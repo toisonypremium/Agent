@@ -510,16 +510,33 @@ func parseInstrumentFilters(data []byte) ([]InstrumentFilter, error) {
 	}
 	out := []InstrumentFilter{}
 	for _, item := range raw.Data {
-		if item.InstID == "" {
-			continue
+		instID := strings.TrimSpace(item.InstID)
+		if instID == "" {
+			return nil, fmt.Errorf("okx instruments missing instId")
+		}
+		tickSize, err := parsePositiveFiniteValue(item.TickSize, "tick size")
+		if err != nil {
+			return nil, fmt.Errorf("okx instruments %s: %w", instID, err)
+		}
+		stepSize, err := parsePositiveFiniteValue(item.LotSize, "lot size")
+		if err != nil {
+			return nil, fmt.Errorf("okx instruments %s: %w", instID, err)
+		}
+		minSize, err := parsePositiveFiniteValue(item.MinSize, "minimum size")
+		if err != nil {
+			return nil, fmt.Errorf("okx instruments %s: %w", instID, err)
+		}
+		minNotional, err := parsePositiveFiniteValue(item.MinNotional, "minimum notional")
+		if err != nil {
+			return nil, fmt.Errorf("okx instruments %s: %w", instID, err)
 		}
 		out = append(out, InstrumentFilter{
-			Symbol:      InternalSymbol(item.InstID),
-			InstID:      item.InstID,
-			MinNotional: firstParseFloat(item.MinNotional),
-			MinSize:     firstParseFloat(item.MinSize),
-			TickSize:    firstParseFloat(item.TickSize),
-			StepSize:    firstParseFloat(item.LotSize),
+			Symbol:      InternalSymbol(instID),
+			InstID:      instID,
+			MinNotional: minNotional,
+			MinSize:     minSize,
+			TickSize:    tickSize,
+			StepSize:    stepSize,
 		})
 	}
 	return out, nil

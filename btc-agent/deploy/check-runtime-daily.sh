@@ -14,7 +14,10 @@ readiness=UNKNOWN
 if [[ -f "$scorecard" ]]; then readiness="$(awk -F': ' '/^Readiness:/{print $2; exit}' "$scorecard")"; else status=FAIL; reason+=("paper scorecard missing"); fi
 latest="$(find "$runtime/backups" -maxdepth 1 -type f -name 'snapshot-*.tar.gz' -printf '%T@ %p\n' | sort -nr | head -1 || true)"
 backup_age=unknown
-if [[ -n "$latest" ]]; then backup_age="$(( $(date +%s) - ${latest%% *} ))s"; else status=FAIL; reason+=("backup missing"); fi
+if [[ -n "$latest" ]]; then
+  backup_epoch="${latest%%.*}"
+  backup_age="$(( $(date +%s) - backup_epoch ))s"
+else status=FAIL; reason+=("backup missing"); fi
 available_kb="$(df -Pk "$runtime" | awk 'NR==2{print $4}')"
 if (( available_kb < 1048576 )); then status=FAIL; reason+=("available disk below 1GiB"); fi
 printf 'runtime_daily_digest time=%s status=%s paper_readiness=%s backup_age=%s available_kb=%s reason=%s\n' "$now" "$status" "$readiness" "$backup_age" "$available_kb" "${reason[*]:-}"

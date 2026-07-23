@@ -1,0 +1,7 @@
+[Unit]
+Description=BTC Agent SQLite-safe immutable runtime backup
+After=btc-agent-immutable.service
+
+[Service]
+Type=oneshot
+ExecStart=%h/btc-agent/immutable/backup.sh

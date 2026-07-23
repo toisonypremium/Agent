@@ -4,4 +4,4 @@ After=btc-agent-immutable.service
 
 [Service]
 Type=oneshot
-ExecStart=%h/btc-agent/bin-runtime-observe.sh
+ExecStart=%h/btc-agent/immutable/immutable-observe.sh

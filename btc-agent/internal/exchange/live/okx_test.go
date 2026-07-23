@@ -165,6 +165,22 @@ func TestOrderBookFetchesPublicBooks(t *testing.T) {
 	}
 }
 
+func TestOrderBookHonorsCanceledContextWithoutNetwork(t *testing.T) {
+	called := false
+	server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true }))
+	defer server.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	client := &OKXClient{baseURL: server.URL, key: "key", secret: "secret", passphrase: "pass", http: server.Client()}
+	_, err := client.OrderBook(ctx, "ETH-USDT")
+	if err == nil || !strings.Contains(err.Error(), "context canceled") {
+		t.Fatalf("expected canceled context error, got %v", err)
+	}
+	if called {
+		t.Fatal("canceled request reached exchange server")
+	}
+}
+
 func TestOrderBookHTTPErrorDoesNotLeakSecrets(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad secret", http.StatusBadGateway)
@@ -346,5 +362,24 @@ func TestSanitizeClientOrderID(t *testing.T) {
 		if got != c.want {
 			t.Errorf("sanitizeClientOrderID(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+func TestParseOrderBookRejectsNonFiniteOrMalformedLevels(t *testing.T) {
+	cases := []struct {
+		name string
+		data string
+	}{
+		{"nonfinite best bid", `{"code":"0","data":[{"asks":[["100","2"]],"bids":[["NaN","3"]]}]}`},
+		{"nonfinite depth", `{"code":"0","data":[{"asks":[["100","+Inf"]],"bids":[["99.9","3"]]}]}`},
+		{"missing depth size", `{"code":"0","data":[{"asks":[["100"]],"bids":[["99.9","3"]]}]}`},
+		{"negative depth", `{"code":"0","data":[{"asks":[["100","2"]],"bids":[["99.9","-3"]]}]}`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := parseOrderBook([]byte(tc.data)); err == nil {
+				t.Fatal("invalid order-book level must fail closed")
+			}
+		})
 	}
 }

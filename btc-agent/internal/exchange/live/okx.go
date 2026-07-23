@@ -234,9 +234,15 @@ func parseOrderBook(data []byte) (liquidity.OrderBookSnapshot, error) {
 	if len(raw.Data) == 0 || len(raw.Data[0].Bids) == 0 || len(raw.Data[0].Asks) == 0 {
 		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book returned no bid/ask data")
 	}
-	bestBid := firstParseFloat(raw.Data[0].Bids[0]...)
-	bestAsk := firstParseFloat(raw.Data[0].Asks[0]...)
-	if bestBid <= 0 || bestAsk <= 0 || bestAsk < bestBid {
+	bestBid, _, err := parseOrderBookLevel(raw.Data[0].Bids[0], "best bid")
+	if err != nil {
+		return liquidity.OrderBookSnapshot{}, err
+	}
+	bestAsk, _, err := parseOrderBookLevel(raw.Data[0].Asks[0], "best ask")
+	if err != nil {
+		return liquidity.OrderBookSnapshot{}, err
+	}
+	if bestAsk < bestBid {
 		return liquidity.OrderBookSnapshot{}, fmt.Errorf("okx order book invalid best bid/ask")
 	}
 	mid := (bestBid + bestAsk) / 2
@@ -244,21 +250,19 @@ func parseOrderBook(data []byte) (liquidity.OrderBookSnapshot, error) {
 	askCeil := mid * 1.01
 	book := liquidity.OrderBookSnapshot{BestBid: bestBid, BestAsk: bestAsk}
 	for _, bid := range raw.Data[0].Bids {
-		if len(bid) < 2 {
-			continue
+		price, size, err := parseOrderBookLevel(bid, "bid")
+		if err != nil {
+			return liquidity.OrderBookSnapshot{}, err
 		}
-		price := firstParseFloat(bid[0])
-		size := firstParseFloat(bid[1])
 		if price >= bidFloor {
 			book.BidDepth1PctUSDT += price * size
 		}
 	}
 	for _, ask := range raw.Data[0].Asks {
-		if len(ask) < 2 {
-			continue
+		price, size, err := parseOrderBookLevel(ask, "ask")
+		if err != nil {
+			return liquidity.OrderBookSnapshot{}, err
 		}
-		price := firstParseFloat(ask[0])
-		size := firstParseFloat(ask[1])
 		if price <= askCeil {
 			book.AskDepth1PctUSDT += price * size
 		}
@@ -509,6 +513,29 @@ func OKXInstID(symbol string) string {
 
 func InternalSymbol(instID string) string {
 	return strings.ToUpper(strings.ReplaceAll(instID, "-", ""))
+}
+
+func parseOrderBookLevel(level []string, side string) (float64, float64, error) {
+	if len(level) < 2 {
+		return 0, 0, fmt.Errorf("okx order book malformed %s level", side)
+	}
+	price, err := parsePositiveFiniteOrderBookValue(level[0], side+" price")
+	if err != nil {
+		return 0, 0, err
+	}
+	size, err := parsePositiveFiniteOrderBookValue(level[1], side+" size")
+	if err != nil {
+		return 0, 0, err
+	}
+	return price, size, nil
+}
+
+func parsePositiveFiniteOrderBookValue(raw, field string) (float64, error) {
+	value, err := strconv.ParseFloat(raw, 64)
+	if err != nil || value <= 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+		return 0, fmt.Errorf("okx order book invalid %s", field)
+	}
+	return value, nil
 }
 
 func firstParseFloat(values ...string) float64 {

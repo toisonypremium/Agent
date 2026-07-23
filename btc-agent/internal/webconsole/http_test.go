@@ -111,3 +111,12 @@ func TestEventsNeverExposeRuntimePayload(t *testing.T) {
 		t.Fatalf("unsafe event data exposed: %s", r.Body.String())
 	}
 }
+
+func TestAppDoesNotServeStaticFilesWithoutExplicitDirectory(t *testing.T) {
+	api := testAPI(t)
+	r := httptest.NewRecorder()
+	api.App("").ServeHTTP(r, httptest.NewRequest(http.MethodGet, "/", nil))
+	if r.Code != http.StatusNotFound {
+		t.Fatalf("root status=%d", r.Code)
+	}
+}

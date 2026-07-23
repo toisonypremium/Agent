@@ -33,7 +33,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	server := &http.Server{Addr: addr, Handler: webconsole.NewAPI(service, time.Now).Handler(), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, BaseContext: func(net.Listener) context.Context { return context.Background() }}
+	staticDir := os.Getenv("BTC_AGENT_WEB_STATIC_DIR")
+	server := &http.Server{Addr: addr, Handler: webconsole.NewAPI(service, time.Now).App(staticDir), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, BaseContext: func(net.Listener) context.Context { return context.Background() }}
 	fmt.Printf("web-console read-only listening on %s\n", addr)
 	log.Fatal(server.ListenAndServe())
 }

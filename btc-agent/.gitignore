@@ -27,3 +27,9 @@ logs/
 *.sqlite-*
 *.bak
 *.bak_exit
+
+# Web Console local build artifacts
+web/node_modules/
+web/dist/
+web/.vite/
+web/coverage/

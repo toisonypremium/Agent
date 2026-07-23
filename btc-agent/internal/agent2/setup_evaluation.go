@@ -2,7 +2,6 @@ package agent2
 
 import (
 	"fmt"
-	"strings"
 
 	"btc-agent/internal/config"
 	"btc-agent/internal/indicators"
@@ -270,23 +269,4 @@ func boolScore(pass bool, passScore, failScore float64) float64 {
 		return passScore
 	}
 	return failScore
-}
-
-func containsAny(s string, needles ...string) bool {
-	for _, needle := range needles {
-		if strings.Contains(s, strings.ToLower(needle)) {
-			return true
-		}
-	}
-	return false
-}
-
-func entryScore(entry AssetFlowEntrySignal) float64 {
-	if entry.Pass {
-		return 1
-	}
-	if entry.HardBlock {
-		return 0
-	}
-	return 0.5
 }

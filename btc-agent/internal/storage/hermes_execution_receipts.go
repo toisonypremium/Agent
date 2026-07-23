@@ -42,7 +42,7 @@ func HermesDecisionPayloadHash(value any) (string, error) {
 func (d *DB) ReserveHermesExecution(decisionID, payloadHash string, now time.Time) error {
 	decisionID, payloadHash = strings.TrimSpace(decisionID), strings.TrimSpace(payloadHash)
 	if decisionID == "" || payloadHash == "" {
-		return fmt.Errorf("Hermes execution receipt requires decision ID and payload hash")
+		return fmt.Errorf("hermes execution receipt requires decision ID and payload hash")
 	}
 	_, err := d.Exec(`INSERT INTO hermes_execution_receipts(decision_id,payload_hash,status,reserved_at,updated_at,detail) VALUES(?,?,?,?,?,?)`, decisionID, payloadHash, HermesReceiptReserved, now.Unix(), now.Unix(), "execution authority reserved")
 	if err == nil {
@@ -54,9 +54,9 @@ func (d *DB) ReserveHermesExecution(decisionID, payloadHash string, now time.Tim
 		return fmt.Errorf("reserve Hermes execution receipt: %w", err)
 	}
 	if existingHash != "" && existingHash != payloadHash {
-		return fmt.Errorf("Hermes decision ID payload mismatch: decision_id=%s", decisionID)
+		return fmt.Errorf("hermes decision ID payload mismatch: decision_id=%s", decisionID)
 	}
-	return fmt.Errorf("Hermes decision replay blocked: decision_id=%s status=%s", decisionID, status)
+	return fmt.Errorf("hermes decision replay blocked: decision_id=%s status=%s", decisionID, status)
 }
 
 func (d *DB) CompleteHermesExecution(decisionID, status, detail string, now time.Time) error {
@@ -74,7 +74,7 @@ func (d *DB) CompleteHermesExecution(decisionID, status, detail string, now time
 		return err
 	}
 	if rows != 1 {
-		return fmt.Errorf("Hermes execution receipt not found: %s", decisionID)
+		return fmt.Errorf("hermes execution receipt not found: %s", decisionID)
 	}
 	return nil
 }

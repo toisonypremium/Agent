@@ -534,7 +534,7 @@ func (c Config) Validate() error {
 			return errors.New("hermes_operator effective portfolio cap must be <= live total cap")
 		}
 		if c.HermesOperator.CanExecute() && (!c.Live.Enabled || !c.Live.AutoExecute || !c.Execution.RealTradingEnabled) {
-			return errors.New("Hermes canary/autonomous requires live enabled, auto_execute, and real trading enabled")
+			return errors.New("hermes canary/autonomous requires live enabled, auto_execute, and real trading enabled")
 		}
 	}
 	if c.Live.HeartbeatIntervalMinutes < 0 {

@@ -234,16 +234,6 @@ func humanPlanStateEmoji(state agent2.State) string {
 		return string(state)
 	}
 }
-
-func readinessBar(score float64) string {
-	filled := int(score * 5)
-	if filled > 5 {
-		filled = 5
-	}
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", 5-filled)
-	return "[" + bar + "]"
-}
-
 func shortReason(reason string) string {
 	if len(reason) > 80 {
 		return reason[:77] + "..."
@@ -953,23 +943,6 @@ func humanList(items []string, limit int) string {
 	}
 	return strings.Join(out, "; ")
 }
-
-func humanFlow(bias any) string {
-	s := fmt.Sprint(bias)
-	switch s {
-	case "ACCUMULATION":
-		return "có dấu hiệu tích lũy, nhưng vẫn cần các khóa khác xác nhận."
-	case "BEAR_TRAP":
-		return "có dấu hiệu bear trap/reclaim."
-	case "DISTRIBUTION", "BULL_TRAP":
-		return "cảnh báo phân phối/bull trap, không nên đuổi giá."
-	case "NEUTRAL":
-		return "flow chưa rõ, chưa đủ làm tín hiệu vào lệnh."
-	default:
-		return "flow cần được xác nhận thêm."
-	}
-}
-
 func credentialSummary(m map[string]bool) string {
 	if len(m) == 0 {
 		return "chưa kiểm tra"

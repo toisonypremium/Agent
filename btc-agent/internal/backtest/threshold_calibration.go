@@ -226,17 +226,3 @@ func thresholdProfileVerdict(row, strict ThresholdProfileRow) string {
 	}
 	return ThresholdKeepCurrent
 }
-
-func summarizeThresholdCalibration(rows []ThresholdProfileRow) string {
-	if len(rows) == 0 {
-		return "Threshold calibration produced no rows."
-	}
-	candidate := "none"
-	for _, row := range rows {
-		if row.Verdict == ThresholdCandidateReview {
-			candidate = row.Profile.Name
-			break
-		}
-	}
-	return fmt.Sprintf("Threshold calibration profiles=%d candidate=%s; research-only, no production thresholds changed", len(rows), candidate)
-}

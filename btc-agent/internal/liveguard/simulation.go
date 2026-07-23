@@ -171,11 +171,6 @@ func placedSymbol(r ManagedCycleResult, symbol string) bool {
 	}
 	return false
 }
-
-func placedOrBlockedByLiveQuality(r ManagedCycleResult, symbol string) bool {
-	return placedSymbol(r, symbol) || blockedByLiveQuality(r, symbol)
-}
-
 func blockedByLiveQuality(r ManagedCycleResult, symbol string) bool {
 	return blockedSymbolReason(r, symbol, "live quality filter blocked D-grade coin") || blockedSymbolReason(r, symbol, "live quality filter blocked NO_SAMPLE coin")
 }

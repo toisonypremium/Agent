@@ -82,7 +82,7 @@ func buildCapitalPlanResearchReport(cfg config.Config, snapshot BotRuntimeSnapsh
 			current = cfg.Portfolio.Allocation[configured]
 		}
 		suggested := 0.0
-		reason := composite.Reason
+		var reason string
 		if totalWeight > 0 && weights[symbol] > 0 {
 			suggested = allocatable * weights[symbol] / totalWeight
 			reason = fmt.Sprintf("score-weighted research allocation %.1f%% từ opportunity %.1f", suggested*100, composite.Score)

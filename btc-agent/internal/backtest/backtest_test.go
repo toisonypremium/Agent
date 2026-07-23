@@ -70,13 +70,12 @@ func TestMarkdownContainsAuditSections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	md := Markdown(got)
 	got.Agent2Simulation = Agent2Simulation{Enabled: true, Assets: map[string]AssetSimStats{"ETHUSDT": {Symbol: "ETHUSDT", PlansCreated: 1, OrdersPlaced: 3, OrdersFilled: 1}}, Summary: "Agent 2 simulation test", Diagnostics: Agent2Diagnostics{WindowsTested: 2, Agent1PermissionCount: map[agent1.Permission]int{agent1.Allowed: 1, agent1.Watch: 1}, Agent1RegimeCounts: map[string]int{"RANGE": 1}, Agent1RiskCounts: map[string]int{"risk=LOW falling=LOW fomo=LOW": 1}, AssetReasonCounts: map[string]map[string]int{"ETHUSDT": {"giá chưa vào discount zone": 1}}}}
 	got.LayerAudit = LayerAuditResult{Enabled: true, Summary: "layer audit test", Rows: []LayerAuditRow{{Symbol: "ETHUSDT", InvalidationBuffer: 0.015, LayerDepthMultiplier: 1, PlansCreated: 1, OrdersFilled: 1, Verdict: "WATCH"}}}
 	got.ExitAudit = ExitAuditResult{Enabled: true, Summary: "exit audit test", Rows: []ExitAuditRow{{Symbol: "ETHUSDT", TakeProfitPct: 0.03, TimeStopDays: 3, PlansCreated: 1, OrdersFilled: 1, TakeProfits: 1, Verdict: "WATCH"}}}
 	got.WalkForwardVerdict = WalkForwardVerdict{Status: "INSUFFICIENT_DATA", EvaluationSamples: 10, Reason: "low sample"}
 	got.AccumulationWalkForward = AccumulationWalkForwardReport{Status: "INSUFFICIENT_DATA", Summary: "low accumulation sample"}
-	md = Markdown(got)
+	md := Markdown(got)
 	for _, want := range []string{"BTC FLOW BACKTEST / AUDIT", "Detector params", "Flow bias counts", "Forward returns", "Drawdown audit", "Agent 2 Layer Simulation", "Diagnostics", "Agent 1 permissions", "Top asset block reasons", "Agent 2 Asset Flow Entry Forward Audit", "Agent 2 Near-Miss Forced Layer Mechanics Audit", "Agent 2 Invalidation/Layer Audit", "Agent 2 Exit / Take-Profit Audit", "Milestone C verdict: low accumulation sample", "Strategy Intelligence Summary", "Research only; no live config changed; no order authority changed"} {
 		if !strings.Contains(md, want) {
 			t.Fatalf("markdown missing %q:\n%s", want, md)

@@ -218,17 +218,6 @@ func dominantBlockerVI(analysis agent1.MarketAnalysis, plan agent2.Plan) string 
 	}
 	return "ACTIVE_LIMIT chỉ được thực thi nếu safety gate sạch"
 }
-
-func marketScenarioVI(analysis agent1.MarketAnalysis) string {
-	base := firstNonEmptyScheduler(analysis.ScenarioMain, "Bảo toàn vốn; chỉ quan sát cho tới khi BTC có reclaim/flow rõ.")
-	unlock := firstNonEmptyScheduler(analysis.ScenarioBullish, "BTC cần thoát WATCH, reclaim support/kháng cự gần, flow chuyển ACCUMULATION/BEAR_TRAP và volume bán cạn.")
-	invalid := firstNonEmptyScheduler(analysis.ScenarioBearish, "Mất invalidation/support với volume bán tăng thì giữ NO_TRADE, không bắt dao rơi.")
-	if analysis.ActionPermission == agent1.Watch || analysis.MarketRegime == "DOWNTREND" {
-		base = "Bảo toàn vốn là chính: BTC còn WATCH/DOWNTREND nên bot không săn entry, chỉ ghi nhận vùng value. " + base
-	}
-	return fmt.Sprintf("Kịch bản chính: %s\nKịch bản mở khóa: %s\nKịch bản vô hiệu: %s\n", base, unlock, invalid)
-}
-
 func btcTriggerChecklistVI(analysis agent1.MarketAnalysis) []string {
 	items := []string{}
 	if analysis.TrendScore < 45 {
@@ -252,24 +241,6 @@ func btcTriggerChecklistVI(analysis agent1.MarketAnalysis) []string {
 	}
 	return limitStrings(items, 4)
 }
-
-func watchCandidateLineVI(c agent2.WatchCandidate) string {
-	mmReason := firstNonEmptyScheduler(firstSchedulerString(c.MMMissing), firstSchedulerString(c.MMReasons), "chưa có footprint rõ")
-	liqReason := firstNonEmptyScheduler(firstSchedulerString(c.LiquidityQuality.Reasons), "liquidity chưa có lý do chi tiết")
-	trigger := firstNonEmptyScheduler(c.NextTrigger, "chờ trigger rõ")
-	return fmt.Sprintf("- %s: readiness %.0f%% tier=%s | MM=%s %.0f/100 (%s) | Liq=%s %.0f/100 (%s) | Discount %.2f%% | RR %.2f | trigger: %s", c.Symbol, c.ReadinessScore*100, c.Tier, emptyMMCase(c.MMCase), c.MMScore, mmReason, emptyScheduler(c.LiquidityQuality.Grade, "n/a"), c.LiquidityQuality.Score, liqReason, c.DiscountGap*100, c.RewardRisk, trigger)
-}
-
-func assetPlanLineVI(a agent2.AssetPlan) string {
-	blocker := firstNonEmptyScheduler(a.Reason, firstSchedulerString(a.HardBlockers), firstSchedulerString(a.SoftBlockers), "chưa đủ điều kiện")
-	liqReason := firstSchedulerString(a.LiquidityQuality.Reasons)
-	if liqReason == "" {
-		liqReason = "liquidity chưa có blocker"
-	}
-	trigger := firstNonEmptyScheduler(a.NextTrigger, "chờ trigger rõ")
-	return fmt.Sprintf("- %s [%s]: MM=%s %.0f/100 | Liq=%s %.0f/100 (%s) | Discount %.2f%% | RR %.2f | thiếu: %s | trigger: %s", a.Symbol, a.State, emptyMMCase(a.MMCase), a.MMScore, emptyScheduler(a.LiquidityQuality.Grade, "n/a"), a.LiquidityQuality.Score, liqReason, a.DiscountGapPct*100, a.RewardRisk, blocker, trigger)
-}
-
 func researchSummaryVI(summary string) string {
 	trimmed := strings.TrimSpace(summary)
 	if trimmed == "" {
@@ -321,48 +292,6 @@ func actionConclusionVI(analysis agent1.MarketAnalysis, plan agent2.Plan) string
 		return "Giữ an toàn, chờ Agent 1/2 xác nhận thêm."
 	}
 }
-
-func flowDetailVI(analysis agent1.MarketAnalysis) string {
-	parts := []string{}
-	for _, c := range analysis.Flow.Daily.Components {
-		if !c.Pass {
-			continue
-		}
-		if c.Bull > 0 {
-			parts = append(parts, fmt.Sprintf("%s +%.2f", c.Name, c.Bull))
-		} else if c.Bear > 0 {
-			parts = append(parts, fmt.Sprintf("%s -%.2f", c.Name, c.Bear))
-		}
-		if len(parts) >= 3 {
-			break
-		}
-	}
-	if len(parts) == 0 && analysis.Flow.Daily.Diagnostics.NextBullTrigger != "" {
-		return analysis.Flow.Daily.Diagnostics.NextBullTrigger
-	}
-	if analysis.Flow.Daily.Diagnostics.NeedBullScore > 0 {
-		parts = append(parts, fmt.Sprintf("thiếu %.2f bull score", analysis.Flow.Daily.Diagnostics.NeedBullScore))
-	}
-	return strings.Join(parts, "; ")
-}
-
-func vietnameseRegime(regime string) string {
-	switch regime {
-	case "UPTREND":
-		return "xu hướng tăng"
-	case "DOWNTREND":
-		return "xu hướng giảm"
-	case "RANGING":
-		return "đi ngang"
-	case "PANIC_SELLING":
-		return "bán tháo"
-	case "RECOVERY":
-		return "phục hồi"
-	default:
-		return emptyScheduler(regime, "chưa rõ")
-	}
-}
-
 func vietnameseBias(bias string) string {
 	switch strings.ToUpper(bias) {
 	case "BULLISH":
@@ -383,24 +312,6 @@ func vietnameseBias(bias string) string {
 		return emptyScheduler(bias, "chưa rõ")
 	}
 }
-
-func vietnameseFlowNote(flow string) string {
-	switch flow {
-	case "ACCUMULATION":
-		return "có lực gom, nhưng vẫn cần xác nhận từ vùng giá và risk gate."
-	case "BEAR_TRAP":
-		return "có tín hiệu rũ bỏ rồi reclaim; tốt nếu giữ được support."
-	case "DISTRIBUTION":
-		return "có dấu hiệu phân phối; không nên mua đuổi."
-	case "BULL_TRAP":
-		return "cẩn thận bẫy tăng; chờ retest."
-	case "NEUTRAL":
-		return "dòng tiền chưa rõ, chưa đủ làm trigger."
-	default:
-		return "cần thêm xác nhận."
-	}
-}
-
 func vietnameseRisk(r agent1.Risk) string {
 	switch r {
 	case agent1.Low:
@@ -413,43 +324,6 @@ func vietnameseRisk(r agent1.Risk) string {
 		return string(r)
 	}
 }
-
-func vietnamesePermission(p agent1.Permission) string {
-	switch p {
-	case agent1.Allowed:
-		return "được phép tìm setup"
-	case agent1.Armed:
-		return "gần đủ điều kiện"
-	case agent1.Watch:
-		return "chỉ theo dõi"
-	case agent1.NoTrade:
-		return "không giao dịch"
-	default:
-		return string(p)
-	}
-}
-
-func vietnamesePlanState(state agent2.State) string {
-	switch state {
-	case agent2.StateActiveLimit:
-		return "ACTIVE_LIMIT — có layer hợp lệ"
-	case agent2.StateArmed:
-		return "ARMED — chờ trigger"
-	case agent2.StateWatch:
-		return "WATCH — chưa đặt lệnh"
-	case agent2.StateNoTrade:
-		return "NO_TRADE — đứng ngoài"
-	default:
-		return string(state)
-	}
-}
-
-func writeZoneVI(b *strings.Builder, label string, low, high float64) {
-	if low > 0 || high > 0 {
-		b.WriteString(fmt.Sprintf("- %s: %.0f – %.0f\n", label, low, high))
-	}
-}
-
 func activeAssetsVI(plan agent2.Plan) []agent2.AssetPlan {
 	out := []agent2.AssetPlan{}
 	for _, asset := range plan.Assets {

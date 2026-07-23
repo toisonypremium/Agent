@@ -13,10 +13,6 @@ import (
 	"btc-agent/internal/exchange/live"
 )
 
-func firstOrderQuarantineApplies(openOrders []live.OrderStatus, positions []live.LivePosition) bool {
-	return firstOrderQuarantineAppliesWithContext(openOrders, positions, ManagedExecutionContext{})
-}
-
 func firstOrderQuarantineAppliesWithContext(openOrders []live.OrderStatus, positions []live.LivePosition, execCtx ManagedExecutionContext) bool {
 	if execCtx.ManagedOrderHistoryKnown {
 		return !execCtx.HasManagedRealOrderHistory
@@ -124,17 +120,6 @@ func matchBySymbolPrice(order live.OrderStatus, desired []ManagedDesiredOrder) (
 	}
 	return ManagedDesiredOrder{}, false
 }
-
-func countOpenForSymbol(open map[string]live.OrderStatus, symbol string) int {
-	count := 0
-	for _, o := range open {
-		if orderSymbol(o) == strings.ToUpper(symbol) {
-			count++
-		}
-	}
-	return count
-}
-
 func managedSummary(r ManagedCycleResult) string {
 	if len(r.Reasons) > 0 {
 		return r.Status + ": " + strings.Join(r.Reasons, "; ")

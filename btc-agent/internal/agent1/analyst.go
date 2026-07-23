@@ -3,7 +3,6 @@ package agent1
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"btc-agent/internal/accumulation"
@@ -226,26 +225,6 @@ func fomoRisk(w, d, h4 market.FrameSignal, price float64, r market.Zone, fg exch
 	}
 	return Low
 }
-func permission(regime string, risk Risk, falling Risk, fomo Risk, support, resistance market.Zone, trend float64) Permission {
-	if regime == "PANIC_SELLING" || falling == High || fomo == High || risk == High {
-		return NoTrade
-	}
-	if !support.Valid() || !resistance.Valid() {
-		return NoTrade
-	}
-	rr := permissionRewardRisk(support, resistance)
-	if rr < 2 {
-		return Watch
-	}
-	if trend >= 60 && (regime == "ACCUMULATION" || regime == "WEAK_UPTREND" || regime == "RANGE") {
-		return Allowed
-	}
-	if trend >= 45 {
-		return Armed
-	}
-	return Watch
-}
-
 func permissionRewardRisk(support, resistance market.Zone) float64 {
 	if !support.Valid() || !resistance.Valid() {
 		return 0
@@ -258,28 +237,6 @@ func permissionRewardRisk(support, resistance market.Zone) float64 {
 	}
 	return (resistance.High - entry) / risk
 }
-
-func permissionReason(regime string, risk Risk, falling Risk, fomo Risk, support, resistance market.Zone, trend float64, perm Permission) string {
-	blockers := riskBlockers(regime, risk, falling, fomo, support, resistance)
-	if len(blockers) > 0 {
-		return "blocked: " + strings.Join(blockers, "; ")
-	}
-	rr := permissionRewardRisk(support, resistance)
-	if rr < 2 {
-		return fmt.Sprintf("reward/risk proxy %.2f dưới 2.00", rr)
-	}
-	switch perm {
-	case Allowed:
-		return fmt.Sprintf("trend %.1f và regime %s đủ cho ALLOWED", trend, regime)
-	case Armed:
-		return fmt.Sprintf("trend %.1f chỉ đủ ARMED", trend)
-	case Watch:
-		return fmt.Sprintf("trend %.1f chưa đủ ARMED", trend)
-	default:
-		return string(perm)
-	}
-}
-
 func riskBlockers(regime string, risk Risk, falling Risk, fomo Risk, support, resistance market.Zone) []string {
 	out := []string{}
 	if regime == "PANIC_SELLING" {

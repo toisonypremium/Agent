@@ -72,7 +72,7 @@ func (d *DB) ReserveManagedLiveOrderWithThesis(clientOrderID string, desired liv
 	if err := ValidateThesisCapitalLedger(ledger); err != nil {
 		return err
 	}
-	if strings.ToUpper(ledger.Symbol) != strings.ToUpper(strings.TrimSpace(desired.Symbol)) {
+	if !strings.EqualFold(ledger.Symbol, strings.TrimSpace(desired.Symbol)) {
 		return fmt.Errorf("thesis symbol mismatch: ledger=%s order=%s", ledger.Symbol, desired.Symbol)
 	}
 	switch strings.ToUpper(strings.TrimSpace(ledger.Status)) {

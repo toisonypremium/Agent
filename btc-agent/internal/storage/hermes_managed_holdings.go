@@ -38,7 +38,7 @@ func (d *DB) SaveHermesManagedHolding(h HermesManagedHolding) error {
 		return err
 	}
 	if existingThesis != "" && h.ThesisID != "" && existingThesis != h.ThesisID {
-		return fmt.Errorf("Hermes managed holding thesis conflict: existing=%s incoming=%s", existingThesis, h.ThesisID)
+		return fmt.Errorf("hermes managed holding thesis conflict: existing=%s incoming=%s", existingThesis, h.ThesisID)
 	}
 	if h.ThesisID == "" {
 		h.ThesisID = existingThesis

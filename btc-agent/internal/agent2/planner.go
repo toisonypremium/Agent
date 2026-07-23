@@ -134,11 +134,6 @@ func BuildPlanWithBenchmarks(cfg config.Config, a agent1.MarketAnalysis, candles
 	}
 	return p
 }
-
-func btcHardBlocks(a agent1.MarketAnalysis) bool {
-	return a.MarketRegime == "PANIC_SELLING" || a.FallingKnifeRisk == agent1.High
-}
-
 func btcGateReasons(a agent1.MarketAnalysis) []DecisionReason {
 	reasons := []DecisionReason{}
 	if a.MarketRegime == "PANIC_SELLING" {
@@ -239,42 +234,6 @@ func nearActionableSetup(cfg config.Config, ap AssetPlan) bool {
 	}
 	return ap.SetupScore >= minNear
 }
-
-func planProbeAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
-	ap := planAsset(cfg, sym, c, benchmark, rotation, useAssetFlowEntry)
-	if ap.State != StateActiveLimit || len(ap.Layers) == 0 {
-		if ap.Symbol == "" {
-			ap.Symbol = sym
-		}
-		return ap
-	}
-	ap.State = StateArmed
-	ap.Reason = "BTC ARMED và coin setup đủ gate; tạo 1 probe layer nhỏ"
-	ap.SoftBlockers = uniqueStrings(append(ap.SoftBlockers, "BTC mới ARMED nên chỉ sizing probe"))
-	ap.NextTrigger = "Probe post-only nhỏ; chỉ mở rộng ladder khi BTC chuyển ALLOWED."
-	ap.Layers = ap.Layers[:1]
-	notional := probeNotional(cfg)
-	ap.Layers[0].Fraction = 1
-	ap.Layers[0].Notional = notional
-	if ap.Layers[0].Price > 0 {
-		ap.Layers[0].Quantity = notional / ap.Layers[0].Price
-	}
-	return ap
-}
-
-func probeNotional(cfg config.Config) float64 {
-	if cfg.Live.MaxLiveNotionalPerOrderUSDT > 0 {
-		return cfg.Live.MaxLiveNotionalPerOrderUSDT
-	}
-	if config.LiveAutoMaxNotionalUSDT(cfg) > 0 {
-		return config.LiveAutoMaxNotionalUSDT(cfg)
-	}
-	if cfg.Live.MaxOrderNotionalUSDT > 0 {
-		return cfg.Live.MaxOrderNotionalUSDT
-	}
-	return 1
-}
-
 func planAsset(cfg config.Config, sym string, c []market.Candle, benchmark []market.Candle, rotation AssetRotationScore, useAssetFlowEntry bool) AssetPlan {
 	ap, eval := evaluateAssetSetup(cfg, sym, c, benchmark, rotation, useAssetFlowEntry)
 	if len(eval.HardBlockers) > 0 {

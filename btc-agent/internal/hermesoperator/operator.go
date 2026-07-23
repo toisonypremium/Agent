@@ -23,11 +23,11 @@ type Snapshot struct {
 
 func Generate(ctx context.Context, caller JSONCaller, snapshot Snapshot, policy ValidationPolicy) (ValidationResult, error) {
 	if caller == nil {
-		return ValidationResult{Reasons: []string{"Hermes caller unavailable; no new exposure"}}, fmt.Errorf("Hermes caller unavailable")
+		return ValidationResult{Reasons: []string{"hermes caller unavailable; no new exposure"}}, fmt.Errorf("hermes caller unavailable")
 	}
 	var decision Decision
 	if err := caller.ChatJSON(ctx, PromptWithTTL(snapshot, policyTTLSeconds(policy)), &decision); err != nil {
-		return ValidationResult{Reasons: []string{"Hermes request failed; no new exposure"}}, err
+		return ValidationResult{Reasons: []string{"hermes request failed; no new exposure"}}, err
 	}
 	return Validate(decision, policy), nil
 }

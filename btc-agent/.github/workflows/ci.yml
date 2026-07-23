@@ -16,6 +16,7 @@ jobs:
       - run: go vet ./...
       - run: go test -race -count=1 ./...
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/agent .
+      - run: ./bin/agent config-check --config config.yaml.example
       - run: ./scripts/check-secrets.sh
       - run: bash deploy/test-backup.sh
       - run: bash deploy/test-health-check.sh

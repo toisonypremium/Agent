@@ -1096,29 +1096,6 @@ func managementDecisionLine(d liveguard.ManagedOrderDecision) string {
 	return out
 }
 
-func liveOrderAttemptText(proof liveguard.Proof) string {
-	return fmt.Sprintf("MANUAL LIVE ORDER ATTEMPT\nproof=%s symbol=%s inst_id=%s notional=%.2f\nNo order yet; hard gates still apply.", proof.Status, proof.Candidate.Symbol, proof.Preflight.InstID, proof.Candidate.Notional)
-}
-
-func autoLiveOrderMarkdown(result liveguard.ExecutionResult) string {
-	md := fmt.Sprintf("AUTO LIVE ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
-	if result.Candidate.Symbol != "" {
-		md += fmt.Sprintf("Candidate: %s %s limit %.8f qty %.8f notional %.2f post_only=%v\n", result.Candidate.Side, result.Candidate.Symbol, result.Candidate.Price, result.Candidate.Quantity, result.Candidate.Notional, result.Candidate.PostOnly)
-	}
-	if result.Preflight.Enabled {
-		md += fmt.Sprintf("Preflight: pass=%v inst_id=%s notional=%.2f\n", result.Preflight.Pass, result.Preflight.InstID, result.Preflight.Notional)
-	}
-	if result.Order.Submitted {
-		md += fmt.Sprintf("Order: submitted=true inst_id=%s order_id=%s client_order_id=%s\n", result.Order.InstID, result.Order.OrderID, result.Order.ClientOrderID)
-	} else {
-		md += "Order: submitted=false\n"
-	}
-	if len(result.Reasons) > 0 {
-		md += "Reasons: " + fmt.Sprint(result.Reasons) + "\n"
-	}
-	return md
-}
-
 func liveOrderMarkdown(result liveguard.ExecutionResult) string {
 	md := fmt.Sprintf("MANUAL LIVE PROOF ORDER\n\nStatus: %s\nSummary: %s\nProof status: %s\n", result.Status, result.Summary, result.ProofStatus)
 	if result.Candidate.Symbol != "" {

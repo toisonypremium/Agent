@@ -77,19 +77,6 @@ func parseTelegramHermesRequest(text string) (hermesagent.HermesTrigger, bool) {
 	return hermesagent.HermesTrigger{}, false
 }
 
-func telegramCommandHermesFromLatest() string {
-	report, ok := loadHermesReportFile()
-	if !ok {
-		return "Chưa có bản phân tích của Hermes. Hãy dùng /hermes để tạo bản mới."
-	}
-	return telegramCommandHermes(report)
-}
-
-// buildHermesSnapshotFromReports builds a minimal snapshot from report files only.
-func buildHermesSnapshotFromReports() hermesagent.HermesSnapshot {
-	return buildHermesSnapshot(config.Config{})
-}
-
 // runHermesTelegramReply runs a Hermes cycle for an interactive Telegram trigger and returns the reply text.
 func runHermesTelegramReply(ctx context.Context, cfg config.Config, db *storage.DB, trigger hermesagent.HermesTrigger) string {
 	if err := runHermesCycleWithTrigger(ctx, cfg, db, trigger); err != nil {

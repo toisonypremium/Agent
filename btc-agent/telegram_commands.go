@@ -212,10 +212,6 @@ func normalizeTelegramCommand(text string) string {
 	}
 }
 
-func buildReadOnlyTelegramCommandReply(cmd string) (string, bool) {
-	return buildReadOnlyTelegramCommandReplyWithConfig(config.Config{}, cmd)
-}
-
 func buildReadOnlyTelegramCommandReplyWithConfig(cfg config.Config, cmd string) (string, bool) {
 	snapshot, snapshotOK := loadBotRuntimeSnapshotReport()
 	scenario, scenarioOK := loadScenarioReportFile()
@@ -355,31 +351,6 @@ func telegramCommandsHelp() string {
 /dieukien — điều kiện hành động tiếp theo
 
 Telegram chỉ dùng để xem. Hermes không nhận lệnh mua hoặc bán tại đây.`) + "\n"
-}
-
-func telegramCommandStatus(s BotRuntimeSnapshot, r ScenarioReport) string {
-	return fmt.Sprintf("BTC Agent — Status\nMode: %s | dry_run=%v | scheduler=%v | supervisor=%s\nPlan: %s | BTC: %s | can_submit_now=%v\nDoctor: %s\nKết luận: %s\nAn toàn: chỉ mua spot bằng limit post-only; không futures; không leverage; không market order.\n", s.Mode, s.DryRun, s.SchedulerAlive, emptyStringDefault(s.SupervisorStatus, "unknown"), s.PlanState, s.BTCPermission, r.CanSubmitOrder, emptyStringDefault(s.DoctorStatus, "unknown"), r.Conclusion)
-}
-
-func telegramCommandWhy(r ScenarioReport) string {
-	var b strings.Builder
-	b.WriteString("BTC Agent — Vì sao chưa đặt lệnh\n")
-	if len(r.Blockers) > 0 {
-		b.WriteString("Blockers chính:\n")
-		for _, item := range firstStrings(r.Blockers, 6) {
-			b.WriteString("- " + item + "\n")
-		}
-	}
-	for _, coin := range firstCoinScenarios(r.Coins, 3) {
-		b.WriteString(fmt.Sprintf("\n%s %s:\n", coin.Symbol, coin.State))
-		for _, reason := range firstStrings(coin.WhyNoOrder, 4) {
-			b.WriteString("- " + reason + "\n")
-		}
-		if coin.NextTrigger != "" {
-			b.WriteString("Next: " + coin.NextTrigger + "\n")
-		}
-	}
-	return b.String()
 }
 
 func telegramCommandCoins(r ScenarioReport) string {

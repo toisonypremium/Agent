@@ -54,3 +54,12 @@ func TestSchedulerHeartbeatAlertTextIsSafe(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluateSchedulerHeartbeatFutureTimestampIsStale(t *testing.T) {
+	now := time.Date(2026, 7, 10, 10, 0, 0, 0, time.UTC)
+	h := SchedulerHeartbeat{GeneratedAt: now.Add(time.Second).Format(time.RFC3339), Status: "running", Mode: "paper"}
+	check := evaluateSchedulerHeartbeat(h, true, 10*time.Minute, now)
+	if !check.Stale || check.State != "stale" || !strings.Contains(check.Reason, "future") {
+		t.Fatalf("future heartbeat must fail closed: %+v", check)
+	}
+}

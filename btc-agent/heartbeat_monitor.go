@@ -82,7 +82,10 @@ func evaluateSchedulerHeartbeat(h SchedulerHeartbeat, ok bool, maxAge time.Durat
 	check.HeartbeatAt = heartbeatText
 	age := now.Sub(heartbeatAt)
 	if age < 0 {
-		age = 0
+		check.Stale = true
+		check.State = "stale"
+		check.Reason = fmt.Sprintf("scheduler heartbeat timestamp %s is in the future", heartbeatText)
+		return check
 	}
 	check.AgeSeconds = int64(age.Seconds())
 	if h.Status != "running" && h.Status != "starting" {

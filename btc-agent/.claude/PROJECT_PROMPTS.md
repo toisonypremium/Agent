@@ -90,7 +90,7 @@ Load `.claude/MASTER_PROMPT.md` first. Each prompt below is bound to real reposi
 
 **Mục tiêu:** Assess production readiness and service health with rollback-first operations.
 
-**File/module liên quan:** `scripts/btc-agent-scheduler.sh`, `scripts/restart-scheduler.sh`, `scheduler.go`, `scheduler_lock.go`, `scheduler_heartbeat.go`, `cmd_live.go`, `cmd_supervisor.go`, `reports/live_doctor_latest.json`.
+**File/module liên quan:** `deploy/systemd/btc-agent-immutable.service`, `systemctl --user restart btc-agent-immutable.service`, `scheduler.go`, `scheduler_lock.go`, `scheduler_heartbeat.go`, `cmd_live.go`, `cmd_supervisor.go`, `reports/live_doctor_latest.json`.
 
 **Quy tắc cấm:** No deployment without passing checks and explicit task authority; no live enablement; no automatic resume from halt; no test order.
 

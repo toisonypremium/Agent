@@ -72,8 +72,11 @@ systemctl --failed --no-pager
 systemctl status ssh --no-pager
 systemctl is-active tailscaled
 systemctl --user is-active btc-agent-vps-ssh-tunnel.service
-systemctl --user is-active removed WebUI tunnel
-systemctl --user is-active btc-agent-scheduler.service
+systemctl --user is-active btc-agent-immutable.service
+systemctl --user is-active btc-agent-immutable-observe.timer
+systemctl --user is-active btc-agent-immutable-backup.timer
+systemctl --user is-active btc-agent-immutable-daily-check.timer
+/home/admin/btc-agent/immutable/verify-runtime.sh
 ```
 
 Expected:
@@ -83,13 +86,13 @@ ssh: active
 failed units: 0
 tailscaled: active
 btc-agent-vps-ssh-tunnel: active
-removed WebUI tunnel
-btc-agent-scheduler: active
+btc-agent-immutable: active
+immutable runtime verifier: PASS
 ```
 
-The `admin` user has `Linger=yes`, and both user tunnel units are enabled with
-`Restart=always`. They registered four Cloudflare QUIC connectors after the
-2026-07-18 reboot.
+The `admin` user has `Linger=yes`; the SSH tunnel and immutable runtime are user
+units. The legacy WebUI tunnel and scheduler units are removed and must not be
+recreated.
 
 ## Access service ownership
 
@@ -99,15 +102,13 @@ The `admin` user has `Linger=yes`, and both user tunnel units are enabled with
   origin: ssh://127.0.0.1:22
   enabled, Restart=always
 
-~/.config/systemd/user/removed WebUI tunnel
-  enabled, Restart=always
-
-/etc/systemd/system/removed WebUI tunnel
-  obsolete/alternate quick-tunnel unit
-  disabled and inactive; do not enable without ownership review
+~/.config/systemd/user/btc-agent-immutable.service
+  Sole scheduler authority
+  immutable/current/agent scheduler
+  runtime/config.yaml
 ```
 
-Do not restart `btc-agent-scheduler.service` while repairing access unless a
+Do not restart `btc-agent-immutable.service` while repairing access unless a
 separate trading-operations incident explicitly requires it.
 
 ## Reboot recovery sequence
@@ -129,28 +130,28 @@ separate trading-operations incident explicitly requires it.
    tailscale ip -4
    ```
 
-5. Check user manager and tunnels:
+5. Check user manager, SSH tunnel, and immutable runtime:
 
    ```bash
    loginctl show-user admin -p Linger -p State -p RuntimePath
    systemctl status user@1000.service --no-pager
    systemctl --user status btc-agent-vps-ssh-tunnel.service --no-pager
-   systemctl --user status removed WebUI tunnel --no-pager
+   systemctl --user status btc-agent-immutable.service --no-pager
+   /home/admin/btc-agent/immutable/verify-runtime.sh
    ```
 
 6. Read current-boot logs before restarting anything:
 
    ```bash
    journalctl -b --user -u btc-agent-vps-ssh-tunnel.service -n 120 --no-pager
-   journalctl -b --user -u removed WebUI tunnel -n 120 --no-pager
+   journalctl -b --user -u btc-agent-immutable.service -n 120 --no-pager
    ```
 
-7. If a tunnel is failed and logs identify it as the access failure, restart
+7. If the SSH tunnel is failed and logs identify it as the access failure, restart
    only that tunnel:
 
    ```bash
    systemctl --user restart btc-agent-vps-ssh-tunnel.service
-   systemctl --user restart removed WebUI tunnel
    ```
 
 8. Re-test from Termux:

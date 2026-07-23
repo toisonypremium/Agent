@@ -15,7 +15,7 @@ func acquireSchedulerProcessLock() (func(), error) {
 		if err != nil {
 			return nil, fmt.Errorf("scheduler lock home: %w", err)
 		}
-		path = filepath.Join(home, ".btc-agent-scheduler.lock")
+		path = filepath.Join(home, ".btc-agent-immutable-scheduler.lock")
 	}
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0600)
 	if err != nil {

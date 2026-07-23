@@ -17,15 +17,10 @@ Record without secret values:
 
 ## Preflight
 
-1. Build and test outside production, including `deploy/test-backup.sh`, `deploy/test-health-check.sh` and `deploy/test-service-unit.sh`.
-2. Run `deploy/backup.sh`, then `deploy/verify-backup.sh <archive>`; verify the backup checksum, manifest and every SQLite `PRAGMA quick_check` pass.
+1. Build and test outside production, including `deploy/test-immutable-backup.sh`, `deploy/test-immutable-health-check.sh`, `deploy/test-immutable-runtime.sh`, and `deploy/test-immutable-user-release.sh`.
+2. Run `$HOME/btc-agent/immutable/backup.sh`, then `$HOME/btc-agent/immutable/verify-backup.sh <archive>`; verify the backup checksum, manifest and SQLite `PRAGMA quick_check`.
 3. Confirm the rollback release and `deploy/rollback.sh` target exist.
-4. Run the verifier for the selected production profile on the Linux host:
-   - root-managed: `deploy/verify-runtime.sh`;
-   - unprivileged immutable user service: `deploy/systemd/verify-immutable-user-service.sh`.
-   It must show exactly one immutable scheduler; no V1 cron/service, PM2 entry,
-   legacy user service, or Termux boot loop may execute. Do not remove V1 rollback
-   files yet.
+4. Run `deploy/verify-immutable-runtime.sh` on the immutable user runtime. It must show exactly one scheduler and zero failed user units. No cron/service, PM2 entry, legacy user service, or Termux boot loop may execute.
 5. Confirm config and environment files are owner-only. Never print their contents.
 
 Stop on missing backup, ambiguous service ownership, unexpected process, secret
@@ -55,8 +50,7 @@ Record:
 Required result before shadow observation:
 
 - exactly one fresh execution owner;
-- the selected runtime verifier passes (`deploy/verify-runtime.sh` or
-  `deploy/systemd/verify-immutable-user-service.sh`);
+- the immutable runtime verifier passes (`deploy/verify-immutable-runtime.sh`);
 - monotonic fencing token after restart;
 - clean reconciliation with no remote-only/unknown/identity conflict;
 - no stale data or unavailable protection snapshot;
@@ -82,10 +76,7 @@ all final execution assertions.
 
 ## Cutover and V1 retention
 
-Merge/cut over only after the reviewed SHA, halted verification, shadow window and
-operator approval all pass. Retain V1 backup/service artifacts through the rollback
-window. Run `deploy/cleanup-v1.sh --execute` only after health, reconciliation, backup
-and `AGENT_CLEANUP_APPROVED` checks pass.
+Promote only after the reviewed SHA, halted verification, shadow window and operator approval all pass. Retain the previous immutable release and a verified backup for rollback.
 
 ## Final audit statement
 

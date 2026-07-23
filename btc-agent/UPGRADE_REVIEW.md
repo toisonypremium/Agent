@@ -7,7 +7,7 @@ This file replaces old upgrade notes. Historical plan content was removed becaus
 Production runtime is one path:
 
 ```text
-scripts/btc-agent-scheduler.sh
+deploy/systemd/btc-agent-immutable.service
 -> btc-agent scheduler --run-now
 -> live-supervisor
 -> managed order engine

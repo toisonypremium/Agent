@@ -9,7 +9,7 @@ description: Deploy btc-agent with preflight, rollback, health, and order-delta 
 - Đã chỉnh lại thế nào cho phù hợp dự án này: bound to btc-agent files, Go tests, SQLite state, OKX/Telegram authority, and production fail-closed rules.
 
 # Project Evidence
-- File/thư mục liên quan: `scripts/btc-agent-scheduler.sh`, `scripts/restart-scheduler.sh`, `scheduler.go`, `cmd_live.go`, `reports/live_doctor_latest.json`.
+- File/thư mục liên quan: `deploy/systemd/btc-agent-immutable.service`, `systemctl --user restart btc-agent-immutable.service`, `scheduler.go`, `cmd_live.go`, `reports/live_doctor_latest.json`.
 - Hàm/class/module liên quan: symbols in the listed Go packages and their adjacent tests.
 - Vì sao skill này cần cho dự án này: Rollback-first production operator.
 

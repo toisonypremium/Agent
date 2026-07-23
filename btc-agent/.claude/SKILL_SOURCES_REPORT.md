@@ -33,7 +33,7 @@
 | Exchange | `internal/exchange/live/okx.go` | `NewOKXFromEnv`, signed spot API |
 | State | `internal/storage/sqlite.go` and storage tests | SQLite order/ledger/runtime/evidence source |
 | Telegram | `internal/notify/telegram.go`, `telegram_commands.go`, `internal/telegramreport` | read-only commands and notifications |
-| Runtime | `scheduler.go`, lock/heartbeat/backoff files, `scripts/btc-agent-scheduler.sh` | periodic production orchestration |
+| Runtime | `scheduler.go`, lock/heartbeat/backoff files, `deploy/systemd/btc-agent-immutable.service` | periodic production orchestration |
 
 ### E. Config, env, secrets
 

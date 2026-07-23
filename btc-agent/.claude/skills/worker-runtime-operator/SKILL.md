@@ -9,7 +9,7 @@ description: Operate btc-agent scheduler and background cycles with locks, heart
 - Đã chỉnh lại thế nào cho phù hợp dự án này: bound to btc-agent files, Go tests, SQLite state, OKX/Telegram authority, and production fail-closed rules.
 
 # Project Evidence
-- File/thư mục liên quan: `scheduler.go`, `scheduler_lock.go`, `scheduler_heartbeat.go`, `scheduler_backoff.go`, `scripts/btc-agent-scheduler.sh`, `cmd_supervisor.go`.
+- File/thư mục liên quan: `scheduler.go`, `scheduler_lock.go`, `scheduler_heartbeat.go`, `scheduler_backoff.go`, `deploy/systemd/btc-agent-immutable.service`, `cmd_supervisor.go`.
 - Hàm/class/module liên quan: symbols in the listed Go packages and their adjacent tests.
 - Vì sao skill này cần cho dự án này: Scheduler and worker reliability guardian.
 

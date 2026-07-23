@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
-heartbeat="${AGENT_HEARTBEAT_FILE:-/var/lib/agent/runtime/scheduler_heartbeat_latest.json}"
+root="${BTC_AGENT_ROOT:-${HOME}/btc-agent}"
+heartbeat="${AGENT_HEARTBEAT_FILE:-$root/runtime/reports/scheduler_heartbeat_latest.json}"
 max_age="${AGENT_HEARTBEAT_MAX_AGE_SECONDS:-300}"
 [[ -s "$heartbeat" ]] || { echo "heartbeat missing: $heartbeat" >&2; exit 1; }
 python3 - "$heartbeat" "$max_age" <<'PY'

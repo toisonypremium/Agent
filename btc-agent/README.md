@@ -155,7 +155,8 @@ export BTC_AGENT_MODE=live-auto
 export BTC_AGENT_ALLOW_AUTO_LIVE=true
 ./bin/btc-agent live-doctor --config config.yaml
 ./bin/btc-agent live-auto-audit --config config.yaml
-./scripts/btc-agent-scheduler.sh --dry-run
+systemctl --user restart btc-agent-immutable.service
+/home/admin/btc-agent/immutable/verify-runtime.sh
 ```
 
 Gates live-auto cần bật rõ:

@@ -4,6 +4,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
 for file in \
   deploy/immutable-observe.sh \
+  deploy/immutable-health-check.sh \
   deploy/immutable-backup.sh \
   deploy/verify-immutable-backup.sh \
   deploy/systemd/btc-agent-immutable.service \

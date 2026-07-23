@@ -43,7 +43,7 @@ Read this file before work. Select the smallest applicable skill under `.claude/
 - Execution safety: `internal/liveguard`, `hermes_production.go`, `cmd_supervisor.go`, `cmd_live.go`, `cmd_reconcile.go`.
 - State: `internal/storage`, `data/`, `reports/`.
 - Integrations: `internal/exchange/live`, `internal/exchange`, `internal/notify`, `internal/telegramreport`, `internal/llm`.
-- Runtime: `scheduler.go`, `scheduler_lock.go`, `scheduler_heartbeat.go`, `scripts/btc-agent-scheduler.sh`.
+- Runtime: `scheduler.go`, `scheduler_lock.go`, `scheduler_heartbeat.go`, `deploy/systemd/btc-agent-immutable.service`.
 
 Do not modify modules outside the task. Explain risk before changing an execution gate, domain state, schema, scheduler cadence, external API behavior, or notification authority.
 

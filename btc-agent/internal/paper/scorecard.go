@@ -20,6 +20,8 @@ type Scorecard struct {
 	FillRate          float64           `json:"fill_rate"`
 	InvalidationRate  float64           `json:"invalidation_rate"`
 	AverageOpenAge    time.Duration     `json:"average_open_age"`
+	MaximumOpenAge    time.Duration     `json:"maximum_open_age"`
+	UnknownStatuses   int               `json:"unknown_statuses"`
 	BySymbol          []SymbolScorecard `json:"by_symbol"`
 	Readiness         string            `json:"readiness"`
 	Blockers          []string          `json:"blockers"`
@@ -56,7 +58,11 @@ func BuildScorecard(now time.Time, orders []agent2.PaperOrder) Scorecard {
 			r.OpenOrders++
 			row.Open++
 			if !o.Timestamp.IsZero() && now.After(o.Timestamp) {
-				age += now.Sub(o.Timestamp)
+				openAge := now.Sub(o.Timestamp)
+				age += openAge
+				if openAge > r.MaximumOpenAge {
+					r.MaximumOpenAge = openAge
+				}
 			}
 		case StatusFilled:
 			r.FilledOrders++
@@ -75,6 +81,7 @@ func BuildScorecard(now time.Time, orders []agent2.PaperOrder) Scorecard {
 			r.TerminalOrders++
 			row.Cancelled++
 		default:
+			r.UnknownStatuses++
 			r.Blockers = append(r.Blockers, fmt.Sprintf("unknown paper status %q", o.Status))
 		}
 	}
@@ -89,7 +96,10 @@ func BuildScorecard(now time.Time, orders []agent2.PaperOrder) Scorecard {
 		r.BySymbol = append(r.BySymbol, *row)
 	}
 	sort.Slice(r.BySymbol, func(i, j int) bool { return r.BySymbol[i].Symbol < r.BySymbol[j].Symbol })
-	if r.TotalOrders == 0 {
+	if r.UnknownStatuses > 0 {
+		r.Readiness = "INSUFFICIENT_EVIDENCE"
+		r.Blockers = append(r.Blockers, "unknown paper status prevents lifecycle review")
+	} else if r.TotalOrders == 0 {
 		r.Readiness = "INSUFFICIENT_EVIDENCE"
 		r.Blockers = append(r.Blockers, "no paper orders recorded")
 	} else if r.TerminalOrders == 0 {
@@ -103,7 +113,7 @@ func BuildScorecard(now time.Time, orders []agent2.PaperOrder) Scorecard {
 }
 func ScorecardMarkdown(r Scorecard) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "PAPER PERFORMANCE SCORECARD\n\nGenerated: %s\nReadiness: %s\nOrders: total=%d terminal=%d open=%d filled=%d invalidated=%d expired=%d cancelled=%d\nLifecycle: fill_rate=%.1f%% invalidation_rate=%.1f%% avg_open_age=%s\n", r.GeneratedAt.UTC().Format(time.RFC3339), r.Readiness, r.TotalOrders, r.TerminalOrders, r.OpenOrders, r.FilledOrders, r.InvalidatedOrders, r.ExpiredOrders, r.CancelledOrders, r.FillRate*100, r.InvalidationRate*100, r.AverageOpenAge.Round(time.Second))
+	fmt.Fprintf(&b, "PAPER PERFORMANCE SCORECARD\n\nGenerated: %s\nReadiness: %s\nOrders: total=%d terminal=%d open=%d filled=%d invalidated=%d expired=%d cancelled=%d\nLifecycle: fill_rate=%.1f%% invalidation_rate=%.1f%% avg_open_age=%s max_open_age=%s unknown_statuses=%d\n", r.GeneratedAt.UTC().Format(time.RFC3339), r.Readiness, r.TotalOrders, r.TerminalOrders, r.OpenOrders, r.FilledOrders, r.InvalidatedOrders, r.ExpiredOrders, r.CancelledOrders, r.FillRate*100, r.InvalidationRate*100, r.AverageOpenAge.Round(time.Second), r.MaximumOpenAge.Round(time.Second), r.UnknownStatuses)
 	for _, x := range r.BySymbol {
 		fmt.Fprintf(&b, "- %s total=%d open=%d filled=%d invalidated=%d expired=%d cancelled=%d\n", x.Symbol, x.Total, x.Open, x.Filled, x.Invalidated, x.Expired, x.Cancelled)
 	}

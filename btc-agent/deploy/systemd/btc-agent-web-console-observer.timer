@@ -1,0 +1,12 @@
+[Unit]
+Description=Refresh BTC Agent Web Console health artifact
+
+[Timer]
+OnBootSec=20s
+OnUnitActiveSec=60s
+AccuracySec=5s
+Persistent=true
+Unit=btc-agent-web-console-observer.service
+
+[Install]
+WantedBy=timers.target

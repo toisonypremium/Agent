@@ -1,0 +1,17 @@
+[Unit]
+Description=BTC Agent Web Console health observer
+After=network-online.target btc-agent-immutable.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=BTC_AGENT_WEB_OBSERVER_DB_PATH=%h/btc-agent/runtime/data/btc_agent.db
+Environment=BTC_AGENT_WEB_OBSERVER_HEARTBEAT_PATH=%h/btc-agent/runtime/reports/scheduler_heartbeat_latest.json
+Environment=BTC_AGENT_WEB_OBSERVER_OUTPUT_DIR=%h/btc-agent/runtime/observer
+ExecStart=%h/btc-agent/web-console-observer/current/web-console-observer
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/btc-agent/runtime/observer

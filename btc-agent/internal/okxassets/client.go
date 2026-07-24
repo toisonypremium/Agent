@@ -34,7 +34,7 @@ func NewReadOnlyClient(baseURL, key, secret, passphrase string, httpClient *http
 }
 func (c *ReadOnlyClient) SpotBalance(ctx context.Context) (Snapshot, error) {
 	u, err := url.Parse(c.baseURL)
-	if err != nil || u.Scheme != "https" || u.Host == "" {
+	if err != nil || u.Scheme != "https" || (u.Host != "www.okx.com" && u.Host != "okx.com") {
 		return Snapshot{}, fmt.Errorf("OKX read-only base URL must be https")
 	}
 	if strings.TrimSpace(c.key) == "" || strings.TrimSpace(c.secret) == "" || strings.TrimSpace(c.passphrase) == "" {

@@ -1,0 +1,10 @@
+[Unit]
+Description=Run BTC Agent read-only OKX Spot assets observer every minute
+
+[Timer]
+OnBootSec=35s
+OnUnitActiveSec=60s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+[Unit]
+Description=BTC Agent read-only OKX Spot assets observer
+
+[Service]
+Type=oneshot
+EnvironmentFile=%h/.config/btc-agent/okx-assets-readonly.env
+Environment=BTC_AGENT_OKX_ASSETS_OUTPUT_DIR=%h/btc-agent/runtime/observer
+Environment=BTC_AGENT_OKX_READONLY_BASE_URL=https://www.okx.com
+ExecStart=%h/btc-agent/web-console-okx-assets-observer/current/web-console-okx-assets-observer
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/btc-agent/runtime/observer

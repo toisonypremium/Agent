@@ -28,5 +28,6 @@ immutable-drills:
 	bash deploy/test-immutable-runtime-verify.sh
 	bash deploy/test-immutable-user-release.sh
 	bash deploy/test-immutable-web-console-observer-release.sh
+	bash deploy/test-immutable-web-console-okx-assets-observer-release.sh
 
 verify: fmt-check test vet config-check secrets-check immutable-drills

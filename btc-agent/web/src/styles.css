@@ -10,3 +10,5 @@
 .reports-panel{margin:16px 0;padding:22px 25px;border:1px dashed #a3cae233;border-radius:18px;background:#09172799}.reports-panel h2{margin:0;font-size:17px;letter-spacing:-.04em}.reports-panel p:last-child{margin:8px 0 0;color:#8299ad;font-size:11px}
 
 .paper-filter{display:flex;align-items:center;gap:7px;color:#8299ad;font-size:10px}.paper-filter select{padding:6px 8px;border:1px solid #a3cae230;border-radius:7px;background:#081727;color:#d9edf0;font:10px ui-monospace,monospace}
+
+.okx-assets{margin:16px 0;padding:24px;border:1px solid #7ac0db22;border-radius:18px;background:linear-gradient(135deg,#071827cc,#10203899)}.asset-observed{margin:0 0 15px;color:#91a8b9;font-size:11px}.asset-table{overflow:auto}.asset-row{min-width:620px;display:grid;grid-template-columns:1.1fr repeat(3,1fr) 1.4fr;gap:12px;align-items:center;padding:10px 3px;border-top:1px solid #92d3ea13;font-size:12px}.asset-row span,.asset-row small{color:#9eb3c2}.asset-head{color:#75b7ce;font-size:10px;text-transform:uppercase;letter-spacing:.08em}

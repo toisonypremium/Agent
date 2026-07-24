@@ -7,11 +7,17 @@ export type Overview = {
   lease: { available: boolean; instance_id?: string; fencing_token?: number; expires_at?: string; fresh: boolean }
   paper: { total_orders: number; terminal_orders: number; readiness: string; unknown_statuses: number; missing_terminal_timestamps: number }
 }
+export type Scorecard = { total_orders: number; open_orders: number; terminal_orders: number; filled_orders: number; invalidated_orders: number; expired_orders: number; cancelled_orders: number; readiness: string; blockers: string[]; unknown_statuses: number; missing_terminal_timestamps: number }
+export type PaperOrder = { id: string; timestamp: string; symbol: string; side: string; layer: number; price: number; quantity: number; notional: number; status: string; expires_at: string; closed_at?: string; reason?: string }
+export type Event = { id: number; timestamp: string; source: string; type: string; severity: string }
 
 const apiBase = import.meta.env.VITE_WEB_CONSOLE_API_BASE ?? ''
-
-export async function readOverview(signal?: AbortSignal): Promise<Envelope<Overview>> {
-  const response = await fetch(`${apiBase}/api/v1/overview`, { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal })
-  if (!response.ok) throw new Error(`overview request failed: ${response.status}`)
-  return response.json() as Promise<Envelope<Overview>>
+async function read<T>(path: string, signal?: AbortSignal): Promise<Envelope<T>> {
+  const response = await fetch(`${apiBase}${path}`, { credentials: 'same-origin', headers: { Accept: 'application/json' }, signal })
+  if (!response.ok) throw new Error(`${path} request failed: ${response.status}`)
+  return response.json() as Promise<Envelope<T>>
 }
+export const readOverview = (signal?: AbortSignal) => read<Overview>('/api/v1/overview', signal)
+export const readScorecard = (signal?: AbortSignal) => read<Scorecard>('/api/v1/paper/scorecard', signal)
+export const readPaperOrders = (signal?: AbortSignal) => read<{ orders: PaperOrder[]; limit: number }>('/api/v1/paper/orders?limit=10', signal)
+export const readEvents = (signal?: AbortSignal) => read<{ events: Event[]; limit: number }>('/api/v1/events?limit=6', signal)

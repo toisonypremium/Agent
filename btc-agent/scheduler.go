@@ -85,6 +85,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	}
 	log.Printf("[Scheduler] Live supervisor interval: %v (enabled: %v)", managementInterval, cfg.Live.SupervisorEnabled)
 
+	dcaAllocationInterval := time.Minute
+	log.Printf("[Scheduler] DCA allocation interval: %v (enabled: %v)", dcaAllocationInterval, dcaAllocator != nil)
+
 	auditInterval := 60 * time.Minute
 	if cfg.Live.AuditIntervalMinutes > 0 {
 		auditInterval = time.Duration(cfg.Live.AuditIntervalMinutes) * time.Minute
@@ -124,6 +127,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 	var nextExpert time.Time
 	var nextMarketWatch time.Time
 	var nextReconcile time.Time
+	var nextDCAAllocation time.Time
 	var nextSupervisor time.Time
 	var nextAudit time.Time
 	var nextHermes time.Time
@@ -363,6 +367,11 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		nextReconcile = time.Now().Add(reconcileInterval)
 	}
 
+	if dcaAllocator != nil {
+		nextDCAAllocation = time.Now()
+		log.Printf("[Scheduler] DCA allocation coordinator scheduled now then every %v", dcaAllocationInterval)
+	}
+
 	liveSupervisor := liveSupervisorState{}
 	if cfg.Live.SupervisorEnabled {
 		writeStartupPhase("live_doctor")
@@ -443,6 +452,9 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		waitUntil := nextDaily
 		if cfg.Live.Enabled && nextReconcile.Before(waitUntil) {
 			waitUntil = nextReconcile
+		}
+		if dcaAllocator != nil && nextDCAAllocation.Before(waitUntil) {
+			waitUntil = nextDCAAllocation
 		}
 		if cfg.Live.SupervisorEnabled && nextSupervisor.Before(waitUntil) {
 			waitUntil = nextSupervisor
@@ -616,7 +628,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 
 		}
 
-		if dcaAllocator != nil && !time.Now().Before(nextSupervisor) {
+		if dcaAllocator != nil && !time.Now().Before(nextDCAAllocation) {
 			if allocation, err := dcaAllocator.ObserveAndMaybeAllocate(); err != nil {
 				log.Printf("[Scheduler] DCA allocation coordinator error: %v", err)
 				if _, autoHalted, safetyErr := db.RecordDCASafetyCycle(true, false, "dca_coordinator_error", time.Now()); safetyErr != nil {
@@ -636,6 +648,7 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 				}
 				log.Printf("[Scheduler] DCA allocation not applied: %s", allocation.Reason)
 			}
+			nextDCAAllocation = time.Now().Add(dcaAllocationInterval)
 		}
 
 		if cfg.Live.SupervisorEnabled && !time.Now().Before(nextSupervisor) {

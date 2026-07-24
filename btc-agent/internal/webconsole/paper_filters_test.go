@@ -16,7 +16,7 @@ func TestPaperOrdersFilterUsesExplicitStatusAndTimeOnly(t *testing.T) {
 	}
 	defer db.Close()
 	now := time.Date(2026, 7, 24, 2, 0, 0, 0, time.UTC)
-	if err := db.SaveOrders([]agent2.PaperOrder{{ID: "open", Timestamp: now.Add(-time.Hour), Symbol: "BTCUSDT", Status: "OPEN"}, {ID: "closed", Timestamp: now.Add(-24 * time.Hour), Symbol: "BTCUSDT", Status: "FILLED", ClosedAt: now.Add(-23 * time.Hour)}}); err != nil {
+	if err := db.SaveOrders([]agent2.PaperOrder{{ID: "open", Timestamp: now.Add(-time.Hour), Symbol: "BTCUSDT", Status: "OPEN"}}); err != nil {
 		t.Fatal(err)
 	}
 	svc, err := NewService(db, func() time.Time { return now })

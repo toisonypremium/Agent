@@ -49,6 +49,12 @@ func BuildManagedDesiredOrdersWithContext(cfg config.Config, plan agent2.Plan, f
 			layers = layers[:allocation.MaxLayers]
 		}
 		for _, layer := range layers {
+			// DCA funding can only become a BUY through an explicit thesis binding.
+			// A symbol-only planner candidate never receives DCA execution authority.
+			if cfg.DCA.AllocationEnabled && strings.TrimSpace(firstNonEmptyString(layer.ThesisID, asset.ThesisID)) == "" {
+				blocked = append(blocked, ManagedOrderDecision{Action: "block", Symbol: symbol, LayerIndex: layer.Index, Reason: "DCA thesis binding required"})
+				continue
+			}
 			if assetRemaining <= 0 || totalDesired >= normalizedMaxLiveNotionalTotal(cfg) {
 				break
 			}

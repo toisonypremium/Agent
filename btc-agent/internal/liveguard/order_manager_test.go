@@ -842,3 +842,20 @@ func TestShouldNotCancelOpenOrderWithinTimeout(t *testing.T) {
 		t.Fatal("expected order within timeout to be kept")
 	}
 }
+
+func TestBuildManagedDesiredOrdersBlocksUnboundDCAPlannerBuy(t *testing.T) {
+	cfg := managedConfig()
+	cfg.DCA.AllocationEnabled = true
+	plan := managedPlan()
+	plan.Assets = plan.Assets[:1]
+	writeHistoryQualityReportForTest(t, map[string]historyQualityScore{"ETHUSDT": {Score: 80, Grade: "A"}})
+	desired, blocked := BuildManagedDesiredOrders(cfg, plan, nil, nil, nil)
+	if len(desired) != 0 || len(blocked) != 2 {
+		t.Fatalf("desired=%+v blocked=%+v", desired, blocked)
+	}
+	for _, b := range blocked {
+		if b.Reason != "DCA thesis binding required" {
+			t.Fatalf("blocked=%+v", blocked)
+		}
+	}
+}

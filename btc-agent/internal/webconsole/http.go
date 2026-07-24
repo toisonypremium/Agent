@@ -1,9 +1,12 @@
 package webconsole
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -14,10 +17,11 @@ type Envelope[T any] struct {
 	Data          T         `json:"data"`
 	Warnings      []string  `json:"warnings"`
 }
-
 type API struct {
-	service *Service
-	now     Clock
+	service      *Service
+	now          Clock
+	access       *accessVerifier
+	publicOrigin string
 }
 
 func NewAPI(service *Service, now Clock) *API {
@@ -26,24 +30,38 @@ func NewAPI(service *Service, now Clock) *API {
 	}
 	return &API{service: service, now: now}
 }
-
+func (a *API) ConfigureAccess(teamDomain, audience, publicOrigin string) error {
+	v, err := newAccessVerifier(AccessConfig{TeamDomain: teamDomain, Audience: audience})
+	if err != nil {
+		return err
+	}
+	a.access = v
+	a.publicOrigin = strings.TrimRight(publicOrigin, "/")
+	return nil
+}
 func (a *API) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", a.health)
+	mux.HandleFunc("GET /api/v1/csrf", a.csrf)
 	mux.HandleFunc("GET /api/v1/overview", a.overview)
 	mux.HandleFunc("GET /api/v1/paper/scorecard", a.scorecard)
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
 	mux.HandleFunc("GET /api/v1/events", a.events)
+	mux.HandleFunc("POST /api/v1/halt", a.halt)
 	return secureHeaders(mux)
 }
-
 func (a *API) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+func (a *API) csrf(w http.ResponseWriter, _ *http.Request) {
+	token := randomToken()
+	http.SetCookie(w, &http.Cookie{Name: "btc_agent_csrf", Value: token, Path: "/", Secure: true, HttpOnly: false, SameSite: http.SameSiteStrictMode, MaxAge: 900})
+	writeJSON(w, http.StatusOK, map[string]string{"csrf_token": token})
 }
 func (a *API) overview(w http.ResponseWriter, r *http.Request) {
 	out, err := a.service.Overview(r.Context())
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "overview_unavailable")
+		writeProblem(w, 503, "overview_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)
@@ -51,7 +69,7 @@ func (a *API) overview(w http.ResponseWriter, r *http.Request) {
 func (a *API) scorecard(w http.ResponseWriter, _ *http.Request) {
 	out, err := a.service.Scorecard()
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "paper_scorecard_unavailable")
+		writeProblem(w, 503, "paper_scorecard_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)
@@ -63,43 +81,81 @@ func (a *API) events(w http.ResponseWriter, r *http.Request) {
 	}
 	out, err := a.service.Events(limit)
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "events_unavailable")
+		writeProblem(w, 503, "events_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)
 }
 func (a *API) paperOrders(w http.ResponseWriter, r *http.Request) {
-	limit := 50
-	if raw := r.URL.Query().Get("limit"); raw != "" {
-		parsed, err := strconv.Atoi(raw)
-		if err != nil || parsed < 1 {
-			writeProblem(w, http.StatusBadRequest, "invalid_limit")
-			return
-		}
-		limit = parsed
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
 	}
 	out, err := a.service.PaperOrders(limit)
 	if err != nil {
-		writeProblem(w, http.StatusServiceUnavailable, "paper_orders_unavailable")
+		writeProblem(w, 503, "paper_orders_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)
 }
 
+type haltRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (a *API) halt(w http.ResponseWriter, r *http.Request) {
+	if a.access == nil || a.publicOrigin == "" {
+		writeProblem(w, 503, "halt_unavailable")
+		return
+	}
+	if r.Header.Get("Origin") != a.publicOrigin {
+		writeProblem(w, 403, "origin_forbidden")
+		return
+	}
+	c, e := r.Cookie("btc_agent_csrf")
+	if e != nil || c.Value == "" || r.Header.Get("X-CSRF-Token") != c.Value {
+		writeProblem(w, 403, "csrf_forbidden")
+		return
+	}
+	identity, e := a.access.identity(r)
+	if e != nil {
+		writeProblem(w, 401, "access_identity_required")
+		return
+	}
+	key := r.Header.Get("Idempotency-Key")
+	var body haltRequest
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body) != nil {
+		writeProblem(w, 400, "invalid_halt_request")
+		return
+	}
+	receipt, e := a.service.RequestHalt(identity, body.Reason, key)
+	if e != nil {
+		writeProblem(w, 400, "halt_request_rejected")
+		return
+	}
+	writeEnvelope(w, a.now, receipt)
+}
 func queryLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 	limit := 50
 	if raw := r.URL.Query().Get("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed < 1 {
-			writeProblem(w, http.StatusBadRequest, "invalid_limit")
+			writeProblem(w, 400, "invalid_limit")
 			return 0, false
 		}
 		limit = parsed
 	}
 	return limit, true
 }
+func randomToken() string {
+	b := make([]byte, 32)
+	if _, e := rand.Read(b); e != nil {
+		return ""
+	}
+	return hex.EncodeToString(b)
+}
 func writeEnvelope[T any](w http.ResponseWriter, now Clock, data T) {
-	writeJSON(w, http.StatusOK, Envelope[T]{SchemaVersion: SchemaVersion, GeneratedAt: now().UTC(), Freshness: Freshness{State: "fresh", AgeSeconds: 0}, Data: data, Warnings: []string{}})
+	writeJSON(w, 200, Envelope[T]{SchemaVersion: SchemaVersion, GeneratedAt: now().UTC(), Freshness: Freshness{State: "fresh", AgeSeconds: 0}, Data: data, Warnings: []string{}})
 }
 func writeProblem(w http.ResponseWriter, status int, code string) {
 	writeJSON(w, status, map[string]string{"code": code})

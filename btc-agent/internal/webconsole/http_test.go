@@ -148,3 +148,15 @@ func TestStaticBundleOnlyExposesBuiltFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestHaltIsUnavailableWithoutConfiguredAccess(t *testing.T) {
+	api := testAPI(t)
+	r := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/halt", strings.NewReader(`{"reason":"unsafe exchange state"}`))
+	req.Header.Set("Origin", "https://console.example.test")
+	req.Header.Set("Idempotency-Key", "0123456789abcdef")
+	api.Handler().ServeHTTP(r, req)
+	if r.Code != http.StatusServiceUnavailable {
+		t.Fatalf("halt status=%d body=%s", r.Code, r.Body.String())
+	}
+}

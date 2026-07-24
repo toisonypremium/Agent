@@ -33,12 +33,22 @@ func main() {
 		log.Fatal(err)
 	}
 	defer db.Close()
+	haltDB, err := storage.OpenWritableExisting(path)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer haltDB.Close()
 	service, err := webconsole.NewService(db, time.Now)
 	if err != nil {
 		log.Fatal(err)
 	}
+	service.SetHaltDB(haltDB)
+	api := webconsole.NewAPI(service, time.Now)
+	if err := api.ConfigureAccess(os.Getenv("BTC_AGENT_CF_ACCESS_TEAM_DOMAIN"), os.Getenv("BTC_AGENT_CF_ACCESS_AUD"), os.Getenv("BTC_AGENT_WEB_PUBLIC_ORIGIN")); err != nil {
+		log.Fatal(err)
+	}
 	staticDir := os.Getenv("BTC_AGENT_WEB_STATIC_DIR")
-	server := &http.Server{Addr: addr, Handler: webconsole.NewAPI(service, time.Now).App(staticDir), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, BaseContext: func(net.Listener) context.Context { return context.Background() }}
+	server := &http.Server{Addr: addr, Handler: api.App(staticDir), ReadHeaderTimeout: 5 * time.Second, IdleTimeout: 60 * time.Second, BaseContext: func(net.Listener) context.Context { return context.Background() }}
 	fmt.Printf("web-console read-only listening on %s\n", addr)
 	log.Fatal(server.ListenAndServe())
 }

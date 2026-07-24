@@ -20,9 +20,10 @@ const SchemaVersion = 1
 type Clock func() time.Time
 
 type Service struct {
-	db    *storage.DB
-	now   Clock
-	lease string
+	db     *storage.DB
+	now    Clock
+	lease  string
+	haltDB *storage.DB
 }
 
 func NewService(db *storage.DB, now Clock) (*Service, error) {
@@ -32,7 +33,7 @@ func NewService(db *storage.DB, now Clock) (*Service, error) {
 	if now == nil {
 		now = time.Now
 	}
-	return &Service{db: db, now: now, lease: "okx-live"}, nil
+	return &Service{db: db, haltDB: db, now: now, lease: "okx-live"}, nil
 }
 
 type Freshness struct {
@@ -200,4 +201,13 @@ func (s *Service) Events(limit int) (EventsPage, error) {
 		out.Events = append(out.Events, Event{ID: row.ID, Timestamp: row.Timestamp.UTC().Format(time.RFC3339), Source: row.Source, Type: row.Type, Severity: row.Severity})
 	}
 	return out, nil
+}
+
+// SetHaltDB installs the write-only, narrow halt authority. A nil value disables halt.
+func (s *Service) SetHaltDB(db *storage.DB) { s.haltDB = db }
+func (s *Service) RequestHalt(identity, reason, key string) (storage.WebHaltReceipt, error) {
+	if s.haltDB == nil {
+		return storage.WebHaltReceipt{}, fmt.Errorf("halt authority unavailable")
+	}
+	return s.haltDB.RequestWebHalt(identity, reason, key, s.now().UTC())
 }

@@ -21,3 +21,13 @@ export const readOverview = (signal?: AbortSignal) => read<Overview>('/api/v1/ov
 export const readScorecard = (signal?: AbortSignal) => read<Scorecard>('/api/v1/paper/scorecard', signal)
 export const readPaperOrders = (signal?: AbortSignal) => read<{ orders: PaperOrder[]; limit: number }>('/api/v1/paper/orders?limit=10', signal)
 export const readEvents = (signal?: AbortSignal) => read<{ events: Event[]; limit: number }>('/api/v1/events?limit=6', signal)
+
+export async function requestHalt(reason: string, signal?: AbortSignal): Promise<void> {
+  const csrf = await read<{ csrf_token: string }>('/api/v1/csrf', signal)
+  const response = await fetch(`${apiBase}/api/v1/halt`, {
+    method: 'POST', credentials: 'same-origin', signal,
+    headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf.data.csrf_token, 'Idempotency-Key': crypto.randomUUID() },
+    body: JSON.stringify({ reason }),
+  })
+  if (!response.ok) throw new Error(`halt request failed: ${response.status}`)
+}

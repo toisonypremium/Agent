@@ -67,6 +67,7 @@ func (d *DB) Migrate() error {
 		`CREATE TABLE IF NOT EXISTS operator_audit_events(id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp INTEGER NOT NULL, identity TEXT NOT NULL, action TEXT NOT NULL, result TEXT NOT NULL, request_id TEXT NOT NULL DEFAULT '', payload_json TEXT NOT NULL DEFAULT '{}');`,
 		`CREATE INDEX IF NOT EXISTS idx_operator_audit_timestamp ON operator_audit_events(timestamp DESC);`,
 		`CREATE TABLE IF NOT EXISTS operator_settings(key TEXT PRIMARY KEY, value TEXT);`,
+		`CREATE TABLE IF NOT EXISTS web_halt_requests(idempotency_hash TEXT PRIMARY KEY, identity TEXT NOT NULL, reason TEXT NOT NULL, created_at INTEGER NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS execution_leases(name TEXT PRIMARY KEY, instance_id TEXT NOT NULL, fencing_token INTEGER NOT NULL, acquired_at INTEGER NOT NULL, expires_at INTEGER NOT NULL);`,
 		`CREATE TABLE IF NOT EXISTS llm_usage_events(request_id TEXT PRIMARY KEY, timestamp INTEGER NOT NULL, purpose TEXT NOT NULL, trigger_source TEXT NOT NULL DEFAULT '', trigger_reason TEXT NOT NULL DEFAULT '', model TEXT NOT NULL, prompt_tokens INTEGER, completion_tokens INTEGER, total_tokens INTEGER, usage_available INTEGER NOT NULL, latency_ms INTEGER NOT NULL, status TEXT NOT NULL, error_class TEXT NOT NULL DEFAULT '', state_hash TEXT NOT NULL DEFAULT '');`,
 		`CREATE INDEX IF NOT EXISTS idx_llm_usage_timestamp ON llm_usage_events(timestamp DESC);`,
@@ -171,6 +172,28 @@ func OpenReadOnly(path string) (*DB, error) {
 		return nil, fmt.Errorf("sqlite read-only path is not a regular file: %s", path)
 	}
 	dsn := "file:" + path + "?mode=ro&_pragma=busy_timeout(5000)&_pragma=query_only(ON)&_pragma=mmap_size(0)"
+	db, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, err
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	db.SetConnMaxLifetime(0)
+	return &DB{db}, nil
+}
+
+// OpenWritableExisting opens an existing runtime database without migrations.
+// It is reserved for the narrow audited halt bridge; callers must not use it
+// for general execution, configuration, or scheduler writes.
+func OpenWritableExisting(path string) (*DB, error) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return nil, err
+	}
+	if !info.Mode().IsRegular() {
+		return nil, fmt.Errorf("sqlite writable path is not a regular file: %s", path)
+	}
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

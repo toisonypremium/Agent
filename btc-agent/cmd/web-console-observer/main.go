@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"path/filepath"
@@ -17,6 +18,7 @@ import (
 type heartbeat struct {
 	GeneratedAt string `json:"generated_at"`
 	Status      string `json:"status"`
+	PID         int    `json:"pid"`
 }
 
 func main() {
@@ -32,6 +34,11 @@ func main() {
 			if at, e := time.Parse(time.RFC3339, h.GeneratedAt); e == nil {
 				snapshot.HeartbeatAgeSeconds = int64(now.Sub(at.UTC()).Seconds())
 				snapshot.HeartbeatState = h.Status
+				if h.Status == "running" && h.PID > 0 {
+					if _, statErr := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", h.PID))); statErr == nil {
+						snapshot.SchedulerCount = 1
+					}
+				}
 			}
 		}
 	}

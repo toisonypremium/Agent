@@ -52,9 +52,9 @@ func (d *DB) ApplyReconciledLiveFill(event live.LivePositionEvent, snapshot live
 		return live.LivePosition{}, false, fmt.Errorf("fill delta does not match cumulative snapshot")
 	}
 
-	var thesisID, orderSide, orderSymbol string
+	var thesisID, orderSide, orderSymbol, orderSource string
 	var orderNotional float64
-	err = tx.QueryRow(`SELECT COALESCE(thesis_id,''),side,symbol,notional FROM live_orders WHERE client_order_id=?`, snapshot.ClientOrderID).Scan(&thesisID, &orderSide, &orderSymbol, &orderNotional)
+	err = tx.QueryRow(`SELECT COALESCE(thesis_id,''),side,symbol,source,notional FROM live_orders WHERE client_order_id=?`, snapshot.ClientOrderID).Scan(&thesisID, &orderSide, &orderSymbol, &orderSource, &orderNotional)
 	if err != nil && err != sql.ErrNoRows {
 		return live.LivePosition{}, false, err
 	}
@@ -114,6 +114,11 @@ func (d *DB) ApplyReconciledLiveFill(event live.LivePositionEvent, snapshot live
 			return live.LivePosition{}, false, err
 		}
 		if live.NormalizeOrderStatus(event.Status) == live.StatusFilled {
+			if isDCAOrderSource(orderSource) {
+				if err := advanceDCAExposureCapTx(tx, snapshot.ClientOrderID, now); err != nil {
+					return live.LivePosition{}, false, err
+				}
+			}
 			var consumed float64
 			if err := tx.QueryRow(`SELECT COALESCE(SUM(notional_usdt),0) FROM thesis_capital_events WHERE client_order_id=? AND event_type=?`, snapshot.ClientOrderID, ThesisCapitalEventBuyFill).Scan(&consumed); err != nil {
 				return live.LivePosition{}, false, err

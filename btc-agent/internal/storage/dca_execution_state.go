@@ -33,6 +33,34 @@ func (d *DB) DCAExecutionState() (DCAExecutionState, error) {
 	return DCAExecutionState{GlobalCapPercent: pct, UpdatedAt: time.Unix(updated, 0).UTC()}, nil
 }
 
+func isDCAOrderSource(source string) bool {
+	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "dca_")
+}
+
+func advanceDCAExposureCapTx(tx *sql.Tx, clientOrderID string, now time.Time) error {
+	var pct float64
+	err := tx.QueryRow(`SELECT global_cap_percent FROM dca_execution_state WHERE singleton=1`).Scan(&pct)
+	if err == sql.ErrNoRows {
+		pct = dcaGlobalCapInitial
+	} else if err != nil {
+		return err
+	}
+	var existing string
+	err = tx.QueryRow(`SELECT client_order_id FROM dca_global_cap_events WHERE client_order_id=?`, clientOrderID).Scan(&existing)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+	next := math.Min(100, pct+20)
+	if _, err = tx.Exec(`INSERT INTO dca_global_cap_events(client_order_id,previous_cap_percent,next_cap_percent,created_at) VALUES(?,?,?,?)`, clientOrderID, pct, next, now.Unix()); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`INSERT INTO dca_execution_state(singleton,global_cap_percent,updated_at) VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET global_cap_percent=excluded.global_cap_percent,updated_at=excluded.updated_at`, next, now.Unix())
+	return err
+}
+
 // AdvanceDCAExposureCapAfterReconciledFill advances by one 20% rung only for
 // a unique confirmed FILLED order lifecycle. EXPIRED/CANCELLED/REJECTED cannot
 // call this method. Callers must reconcile exchange state before invoking it.
@@ -69,12 +97,10 @@ func (d *DB) AdvanceDCAExposureCapAfterReconciledFill(clientOrderID string, now 
 		return DCAExecutionState{}, false, err
 	}
 	next := math.Min(100, pct+20)
-	if _, err = tx.Exec(`INSERT INTO dca_global_cap_events(client_order_id,previous_cap_percent,next_cap_percent,created_at) VALUES(?,?,?,?)`, clientOrderID, pct, next, now.Unix()); err != nil {
+	if err = advanceDCAExposureCapTx(tx, clientOrderID, now); err != nil {
 		return DCAExecutionState{}, false, err
 	}
-	if _, err = tx.Exec(`INSERT INTO dca_execution_state(singleton,global_cap_percent,updated_at) VALUES(1,?,?) ON CONFLICT(singleton) DO UPDATE SET global_cap_percent=excluded.global_cap_percent,updated_at=excluded.updated_at`, next, now.Unix()); err != nil {
-		return DCAExecutionState{}, false, err
-	}
+	next = math.Min(100, pct+20)
 	if err = tx.Commit(); err != nil {
 		return DCAExecutionState{}, false, err
 	}

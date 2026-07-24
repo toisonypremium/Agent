@@ -128,3 +128,31 @@ func TestApplyReconciledLiveFillReleasesFilledPriceImprovementResidual(t *testin
 		t.Fatalf("ledger=%+v err=%v", ledger, err)
 	}
 }
+
+func TestApplyReconciledDCAFillRampsCapOnlyOnce(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "dca-cap.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	seedThesisReservedBuy(t, db, "thesis-eth", "dca-order", 40)
+	if _, err := db.Exec(`UPDATE live_orders SET source='dca_canary_layer_1' WHERE client_order_id='dca-order'`); err != nil {
+		t.Fatal(err)
+	}
+	e := live.LivePositionEvent{Timestamp: 100, ClientOrderID: "dca-order", OrderID: "remote", InstID: "ETH-USDT", Symbol: "ETHUSDT", Side: "BUY", DeltaQuantity: .2, FillPrice: 200, NotionalDelta: 40, Status: live.StatusFilled}
+	s := live.LiveFillSnapshot{ClientOrderID: "dca-order", OrderID: "remote", InstID: "ETH-USDT", Symbol: "ETHUSDT", Side: "BUY", FilledQuantity: .2, AvgPrice: 200, UpdatedAt: 100}
+	if _, applied, err := db.ApplyReconciledLiveFill(e, s, "dca-fill"); err != nil || !applied {
+		t.Fatalf("applied=%v err=%v", applied, err)
+	}
+	state, err := db.DCAExecutionState()
+	if err != nil || state.GlobalCapPercent != 40 {
+		t.Fatalf("state=%+v err=%v", state, err)
+	}
+	if _, applied, err := db.ApplyReconciledLiveFill(e, s, "dca-fill"); err != nil || applied {
+		t.Fatalf("replay applied=%v err=%v", applied, err)
+	}
+	state, err = db.DCAExecutionState()
+	if err != nil || state.GlobalCapPercent != 40 {
+		t.Fatalf("replay state=%+v err=%v", state, err)
+	}
+}

@@ -40,7 +40,7 @@ func testAPI(t *testing.T) *API {
 }
 func TestReadOnlyRoutesAndSecurityHeaders(t *testing.T) {
 	api := testAPI(t)
-	for _, path := range []string{"/healthz", "/api/v1/overview", "/api/v1/paper/scorecard", "/api/v1/paper/orders?limit=1", "/api/v1/events?limit=1", "/api/v1/operations/health", "/api/v1/capital/overview", "/api/v1/capital/theses?limit=1"} {
+	for _, path := range []string{"/healthz", "/api/v1/overview", "/api/v1/paper/scorecard", "/api/v1/paper/orders?limit=1", "/api/v1/events?limit=1", "/api/v1/operations/health", "/api/v1/capital/overview", "/api/v1/market-planner", "/api/v1/capital/theses?limit=1"} {
 		r := httptest.NewRecorder()
 		api.Handler().ServeHTTP(r, httptest.NewRequest(http.MethodGet, path, nil))
 		if r.Code != http.StatusOK {

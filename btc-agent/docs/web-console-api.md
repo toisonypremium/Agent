@@ -45,3 +45,24 @@ This contract is local development only. The process is not installed on the
 VPS and is not reachable through any gateway. OIDC/identity proxy and the
 future halt-only workflow remain deferred until their dedicated authorization
 and staging tests exist.
+
+## Public Access and one-way halt
+
+Production access terminates at Cloudflare Access before the loopback-only
+Cloudflare Tunnel origin. The console validates the `Cf-Access-Jwt-Assertion`
+using the Cloudflare team JWKS, RS256 signature, expiry/not-before, and the
+configured application audience. The origin remains `127.0.0.1:8787`.
+
+`POST /api/v1/halt` is the sole mutation route. It requires all of:
+
+- authenticated Cloudflare Access JWT identity;
+- exact configured `Origin`;
+- Secure, SameSite=Strict CSRF cookie plus matching `X-CSRF-Token`;
+- 16–128 character `Idempotency-Key`;
+- 8–500 character safety reason.
+
+A successful request only writes `halted=true`. Its key is SHA-256 hashed
+before persistence, then a runtime event and operator audit event are written
+in the same transaction. Replaying the same key for the same identity returns
+the original receipt; a different identity is rejected. There is no browser
+resume, cancel, order, reconcile, configuration, report-write, or shell route.

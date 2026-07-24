@@ -54,3 +54,13 @@ Before any non-loopback staging exposure, require a separate approval and:
    static allowlist check, backup and scheduler isolation verification.
 6. A rollback that removes only the Web Console process and leaves the
    immutable scheduler release, database, halted state and evidence untouched.
+
+## Public Access production checks
+
+The Cloudflare Tunnel process uses a mode-`0600` `EnvironmentFile`; never pass
+tunnel tokens on a command line or commit them. Confirm the public hostname
+returns a Cloudflare Access login redirect when unauthenticated, then sign in
+and verify a successful console read. Before any browser halt test, confirm the
+operator halt is already active and record paper/runtime evidence. Exercise
+only a negative request (missing CSRF or Access JWT) until the operator
+explicitly elects to submit a real one-way halt request.

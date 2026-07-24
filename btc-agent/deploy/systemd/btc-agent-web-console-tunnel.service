@@ -1,0 +1,18 @@
+[Unit]
+Description=Cloudflare tunnel for BTC Agent Web Console
+After=network-online.target btc-agent-web-console.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/btc-agent/web-console-tunnel.env
+ExecStart=/usr/bin/cloudflared tunnel --no-autoupdate run
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+[Install]
+WantedBy=default.target

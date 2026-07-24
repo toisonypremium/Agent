@@ -97,8 +97,7 @@ func (a *API) marketPlanner(w http.ResponseWriter, _ *http.Request) {
 func (a *API) dcaAllocation(w http.ResponseWriter, _ *http.Request) {
 	out, err := a.service.DCAAllocationStatus()
 	if err != nil {
-		http.Error(w, "read DCA allocation", http.StatusInternalServerError)
-		return
+		out = DCAAllocationStatus{State: "khong_kha_dung", BufferPercent: 20, Allocations: []DCAAllocation{}, Warnings: []string{"Dữ liệu allocation epoch chưa khả dụng trong runtime; không có quyền BUY."}}
 	}
 	writeEnvelope(w, a.now, out)
 }

@@ -56,10 +56,15 @@ func ParseSpotBalance(body []byte) (Snapshot, error) {
 	assets := make([]Asset, 0, len(raw.Data[0].Details))
 	for _, d := range raw.Data[0].Details {
 		ccy := strings.ToUpper(strings.TrimSpace(d.Currency))
-		total, err := decimal(d.Total)
+		available, err := decimal(d.Available)
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("%s total: %w", ccy, err)
+			return Snapshot{}, fmt.Errorf("%s available: %w", ccy, err)
 		}
+		frozen, err := decimal(d.Frozen)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("%s frozen: %w", ccy, err)
+		}
+		total := new(big.Rat).Add(available, frozen)
 		if total.Sign() == 0 {
 			continue
 		}
@@ -67,7 +72,9 @@ func ParseSpotBalance(body []byte) (Snapshot, error) {
 		if ccy == "USDT" {
 			link = ThesisNotApplicable
 		}
-		assets = append(assets, Asset{Currency: ccy, Available: d.Available, Frozen: d.Frozen, Total: d.Total, ThesisLink: link})
+		// OKX cashBal has account-mode semantics. The observer's displayed total
+		// is deliberately derived from the two displayed Spot components.
+		assets = append(assets, Asset{Currency: ccy, Available: d.Available, Frozen: d.Frozen, Total: formatDecimal(total), ThesisLink: link})
 	}
 	snapshot := Snapshot{Source: SourceOKXSpotReadOnly, Assets: assets}
 	if err := ValidateSnapshot(snapshot); err != nil {
@@ -114,6 +121,15 @@ func ValidateSnapshot(snapshot Snapshot) error {
 	}
 	sort.Slice(snapshot.Assets, func(i, j int) bool { return snapshot.Assets[i].Currency < snapshot.Assets[j].Currency })
 	return nil
+}
+
+func formatDecimal(value *big.Rat) string {
+	out := value.FloatString(18)
+	out = strings.TrimRight(strings.TrimRight(out, "0"), ".")
+	if out == "" || out == "-0" {
+		return "0"
+	}
+	return out
 }
 
 func decimal(value string) (*big.Rat, error) {

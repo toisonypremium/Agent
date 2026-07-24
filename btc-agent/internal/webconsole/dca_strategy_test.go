@@ -8,7 +8,7 @@ func TestDCAStrategyIsReadOnlyAndThesisFirst(t *testing.T) {
 		t.Fatalf("out=%+v", out)
 	}
 	for _, candidate := range out.Candidates {
-		if candidate.ThesisID != "" || candidate.AllocatedUSDT != "0" || candidate.Status != "nghien_cuu" {
+		if candidate.ThesisID != "" || candidate.AllocatedUSDT != "0" || candidate.Status != "danh_sach_dca" {
 			t.Fatalf("candidate=%+v", candidate)
 		}
 	}

@@ -12,19 +12,19 @@ Làm rõ coin đang nghiên cứu, coin được phép thành thesis DCA, vốn 
 - DCA theo tín hiệu với limit/post-only ba lớp: 25% / 35% / 40% max exposure thesis.
 - `HALTED_SHADOW` vẫn chặn toàn bộ execution.
 
-## Shortlist nghiên cứu
+## Danh sách DCA được chỉ định
 
 | Coin | Vai trò nghiên cứu | Rủi ro riêng | Trạng thái |
 |---|---|---|---|
-| ETH | Core smart-contract liquidity | Beta thị trường, cạnh tranh roadmap | Nghiên cứu; chưa cấp thesis |
-| LINK | Oracle / CCIP infrastructure | Token value capture, supply/dilution, adoption | Nghiên cứu; chưa cấp thesis |
-| VIRTUAL | AI-agent protocol narrative | Biến động cao, tokenomics/narrative risk | Nghiên cứu rủi ro cao; chưa cấp thesis |
+| ETH | Core smart-contract liquidity | Beta thị trường, cạnh tranh roadmap | Thuộc danh sách DCA; chưa cấp thesis |
+| LINK | Oracle / CCIP infrastructure | Token value capture, supply/dilution, adoption | Thuộc danh sách DCA; chưa cấp thesis |
+| VIRTUAL | AI-agent protocol narrative | Biến động cao, tokenomics/narrative risk | Thuộc danh sách DCA rủi ro cao; chưa cấp thesis |
 
-Shortlist không phải allowlist execution và không tự tạo allocation.
+Danh sách DCA là universe chiến lược đã chỉ định. Nó không phải allowlist execution, không tự tạo `thesis_id` và không tự tạo allocation.
 
 ## Cổng vào DCA
 
-Candidate chỉ chuyển `nghien_cuu` sang `cho_phe_duyet_thesis` khi tất cả đạt:
+Coin trong `danh_sach_dca` chỉ chuyển sang `cho_phe_duyet_thesis` khi tất cả đạt:
 
 - Cặp Spot `COIN-USDT` quan sát được; thanh khoản/spread đạt ngưỡng.
 - Luận điểm có ID, timeframe, điều kiện invalidation và evidence source.

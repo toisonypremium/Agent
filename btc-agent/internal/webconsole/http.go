@@ -52,6 +52,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/assets/okx", a.okxAssets)
 	mux.HandleFunc("GET /api/v1/assets/okx/reconciliation", a.okxReconciliation)
 	mux.HandleFunc("GET /api/v1/strategy/dca", a.dcaStrategy)
+	mux.HandleFunc("GET /api/v1/dca/allocation", a.dcaAllocation)
 	mux.HandleFunc("GET /api/v1/market-planner", a.marketPlanner)
 	mux.HandleFunc("GET /api/v1/capital/theses", a.thesisCapital)
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
@@ -89,6 +90,14 @@ func (a *API) marketPlanner(w http.ResponseWriter, _ *http.Request) {
 	out, err := a.service.MarketPlanner()
 	if err != nil {
 		writeProblem(w, 503, "market_planner_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
+func (a *API) dcaAllocation(w http.ResponseWriter, _ *http.Request) {
+	out, err := a.service.DCAAllocationStatus()
+	if err != nil {
+		http.Error(w, "read DCA allocation", http.StatusInternalServerError)
 		return
 	}
 	writeEnvelope(w, a.now, out)

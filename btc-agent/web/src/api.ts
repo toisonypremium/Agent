@@ -16,6 +16,7 @@ export type ThesisCapital = { thesis_id: string; symbol: string; status: string;
 export type OKXAsset = { ma_tai_san: string; kha_dung: string; dang_khoa: string; tong: string; trang_thai_gan_thesis: string; gia_usdt?: string; gia_tri_usdt?: string; trang_thai_dinh_gia?: string }
 export type OKXAssets = { nguon?: string; thoi_diem_quan_sat?: string; trang_thai: string; tai_san: OKXAsset[]; canh_bao: string[] }
 export type OKXReconciliation = { trang_thai: string; tai_san_chua_gan_thesis: string[]; canh_bao: string[] }
+export type DCAAllocation = { trang_thai: string; thoi_diem_quan_sat?: string; usdt_kha_dung: number; dca_envelope_usdt: number; von_tang_rong_usdt: number; ty_le_dem_phan_tram: number; phan_bo: { thesis_id: string; symbol: string; ty_le_phan_tram: number; amount_usdt: number }[]; canh_bao: string[] }
 export type DCAStrategy = { giai_doan: string; co_che: string; co_quyen_thuc_thi: boolean; cac_lop: { ten: string; ty_le_phan_tram: number; quy_tac: string }[]; ung_vien: { ma_tai_san: string; trang_thai: string; muc_rui_ro: string; thesis_id: string; von_duoc_cap_usdt: string; luan_diem: string; blocker: string[] }[]; blocker_toan_cuc: string[] }
 
 const apiBase = import.meta.env.VITE_WEB_CONSOLE_API_BASE ?? ''
@@ -44,6 +45,7 @@ export const readCapitalOverview = (signal?: AbortSignal) => read<CapitalOvervie
 export const readOKXAssets = (signal?: AbortSignal) => read<OKXAssets>('/api/v1/assets/okx', signal)
 export const readOKXReconciliation = (signal?: AbortSignal) => read<OKXReconciliation>('/api/v1/assets/okx/reconciliation', signal)
 export const readDCAStrategy = (signal?: AbortSignal) => read<DCAStrategy>('/api/v1/strategy/dca', signal)
+export const readDCAAllocation = (signal?: AbortSignal) => read<DCAAllocation>('/api/v1/dca/allocation', signal)
 export const readThesisCapital = (signal?: AbortSignal) => read<{ items: ThesisCapital[]; limit: number }>('/api/v1/capital/theses?limit=8', signal)
 
 export async function requestHalt(reasonCode: string, summary: string, signal?: AbortSignal): Promise<void> {

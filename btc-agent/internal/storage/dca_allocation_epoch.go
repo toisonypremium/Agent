@@ -220,3 +220,11 @@ func (d *DB) ApplyDCAAllocationEpochToTheses(epochID int64) (bool, error) {
 	}
 	return true, nil
 }
+
+func (d *DB) LatestDCAAllocationEpoch() (DCAAllocationEpoch, error) {
+	var id int64
+	if err := d.QueryRow(`SELECT id FROM dca_allocation_epochs ORDER BY id DESC LIMIT 1`).Scan(&id); err != nil {
+		return DCAAllocationEpoch{}, err
+	}
+	return loadDCAAllocationEpoch(d.DB, id)
+}

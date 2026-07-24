@@ -45,6 +45,9 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/csrf", a.csrf)
 	mux.HandleFunc("GET /api/v1/overview", a.overview)
 	mux.HandleFunc("GET /api/v1/paper/scorecard", a.scorecard)
+	mux.HandleFunc("GET /api/v1/operations/health", a.runtimeHealth)
+	mux.HandleFunc("GET /api/v1/capital/overview", a.capitalOverview)
+	mux.HandleFunc("GET /api/v1/capital/theses", a.thesisCapital)
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
 	mux.HandleFunc("GET /api/v1/events", a.events)
 	mux.HandleFunc("POST /api/v1/halt", a.halt)
@@ -62,6 +65,34 @@ func (a *API) overview(w http.ResponseWriter, r *http.Request) {
 	out, err := a.service.Overview(r.Context())
 	if err != nil {
 		writeProblem(w, 503, "overview_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
+func (a *API) runtimeHealth(w http.ResponseWriter, _ *http.Request) {
+	out, err := a.service.RuntimeHealth()
+	if err != nil {
+		writeProblem(w, 503, "runtime_health_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
+func (a *API) capitalOverview(w http.ResponseWriter, _ *http.Request) {
+	out, err := a.service.CapitalOverview()
+	if err != nil {
+		writeProblem(w, 503, "capital_overview_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
+func (a *API) thesisCapital(w http.ResponseWriter, r *http.Request) {
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	out, err := a.service.ThesisCapital(limit)
+	if err != nil {
+		writeProblem(w, 503, "thesis_capital_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)

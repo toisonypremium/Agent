@@ -24,6 +24,7 @@ type Service struct {
 	now    Clock
 	lease  string
 	haltDB *storage.DB
+	health RuntimeHealthSource
 }
 
 func NewService(db *storage.DB, now Clock) (*Service, error) {

@@ -73,3 +73,10 @@ func (d *DB) RequestWebHalt(identity, reason, idempotencyKey string, now time.Ti
 	}
 	return WebHaltReceipt{RequestID: requestID, Identity: identity, HaltedAt: now.UTC()}, nil
 }
+
+// EnsureWebHaltSchema adds only the idempotency ledger required by the narrow
+// web halt bridge. It does not run the wider runtime migration set.
+func (d *DB) EnsureWebHaltSchema() error {
+	_, err := d.Exec(`CREATE TABLE IF NOT EXISTS web_halt_requests(idempotency_hash TEXT PRIMARY KEY, identity TEXT NOT NULL, reason TEXT NOT NULL, created_at INTEGER NOT NULL)`)
+	return err
+}

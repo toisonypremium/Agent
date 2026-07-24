@@ -38,6 +38,9 @@ func main() {
 		log.Fatal(err)
 	}
 	defer haltDB.Close()
+	if err := haltDB.EnsureWebHaltSchema(); err != nil {
+		log.Fatal(err)
+	}
 	service, err := webconsole.NewService(db, time.Now)
 	if err != nil {
 		log.Fatal(err)

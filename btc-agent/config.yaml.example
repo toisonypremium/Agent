@@ -11,9 +11,9 @@ portfolio:
   base_currency: "USDT"
   total_capital: 1000
   allocation:
-    ETHUSDT: 0.35
-    SOLUSDT: 0.45
-    RENDERUSDT: 0.20
+    ETHUSDT: 0.40
+    LINKUSDT: 0.35
+    VIRTUALUSDT: 0.25
   reserve_cash_ratio: 0.05
 
 risk:

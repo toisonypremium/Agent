@@ -51,6 +51,7 @@ func main() {
 		log.Fatal("BTC_AGENT_WEB_HEALTH_DIR required")
 	}
 	service.SetRuntimeHealthSource(webconsole.NewRuntimeHealthArtifact(healthDir))
+	service.SetOKXAssetSource(webconsole.NewOKXAssetArtifact(healthDir, time.Now))
 	api := webconsole.NewAPI(service, time.Now)
 	if err := api.ConfigureAccess(os.Getenv("BTC_AGENT_CF_ACCESS_TEAM_DOMAIN"), os.Getenv("BTC_AGENT_CF_ACCESS_AUD"), os.Getenv("BTC_AGENT_WEB_PUBLIC_ORIGIN"), os.Getenv("BTC_AGENT_WEB_OPERATOR_IDENTITY")); err != nil {
 		log.Fatal(err)

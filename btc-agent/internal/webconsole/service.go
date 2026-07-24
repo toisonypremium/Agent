@@ -20,11 +20,12 @@ const SchemaVersion = 1
 type Clock func() time.Time
 
 type Service struct {
-	db     *storage.DB
-	now    Clock
-	lease  string
-	haltDB *storage.DB
-	health RuntimeHealthSource
+	db        *storage.DB
+	now       Clock
+	lease     string
+	haltDB    *storage.DB
+	health    RuntimeHealthSource
+	okxAssets OKXAssetSource
 }
 
 func NewService(db *storage.DB, now Clock) (*Service, error) {

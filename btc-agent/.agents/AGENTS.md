@@ -22,3 +22,12 @@ Use deterministic temp DB fixtures. For storage/execution changes, test success,
 replay, collision, rollback, legacy compatibility, and fail-closed outcomes.
 Before an isolated commit, run focused tests, `go test ./...`, `go vet ./...`,
 `go build`, `git diff --check`, and relevant race tests.
+
+## Long-running work controls
+
+For long-running tasks, follow the `trading-long-running` skill.
+
+- Stop immediately if repository-root `AGENT_STOP` exists; never remove it.
+- Treat non-empty repository-root `STEER.md` as operator guidance; preserve it.
+- Maintain `PROGRESS.md` only for long-running handoff state, without secrets.
+- Never auto-commit on session stop; commit only validated checkpoints.

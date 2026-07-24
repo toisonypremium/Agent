@@ -33,3 +33,10 @@ func TestApplyUSDTPricesRejectsNegativePrice(t *testing.T) {
 		t.Fatal("negative price accepted")
 	}
 }
+
+func TestValidateSnapshotRejectsTamperedValuation(t *testing.T) {
+	snapshot := Snapshot{Source: SourceOKXSpotReadOnly, Assets: []Asset{{Currency: "BTC", Available: "1", Frozen: "0", Total: "1", ThesisLink: ThesisUnlinked, PriceUSDT: "2", ValueUSDT: "3", ValuationState: ValuationVerified}}}
+	if err := ValidateSnapshot(snapshot); err == nil {
+		t.Fatal("tampered valuation accepted")
+	}
+}

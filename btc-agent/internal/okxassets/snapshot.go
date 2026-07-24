@@ -125,11 +125,16 @@ func ValidateSnapshot(snapshot Snapshot) error {
 			return fmt.Errorf("%s valuation state invalid", ccy)
 		}
 		if asset.ValuationState == ValuationVerified {
-			if _, err := decimal(asset.PriceUSDT); err != nil {
+			price, err := decimal(asset.PriceUSDT)
+			if err != nil || price.Sign() <= 0 {
 				return fmt.Errorf("%s price invalid", ccy)
 			}
-			if _, err := decimal(asset.ValueUSDT); err != nil {
+			value, err := decimal(asset.ValueUSDT)
+			if err != nil {
 				return fmt.Errorf("%s value invalid", ccy)
+			}
+			if new(big.Rat).Mul(t, price).Cmp(value) != 0 {
+				return fmt.Errorf("%s valuation mismatch", ccy)
 			}
 		}
 	}

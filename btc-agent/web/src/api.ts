@@ -23,6 +23,11 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<Envelope<T>>
 export const readOverview = (signal?: AbortSignal) => read<Overview>('/api/v1/overview', signal)
 export const readScorecard = (signal?: AbortSignal) => read<Scorecard>('/api/v1/paper/scorecard', signal)
 export const readPaperOrders = (signal?: AbortSignal) => read<{ orders: PaperOrder[]; limit: number }>('/api/v1/paper/orders?limit=10', signal)
+export const readPaperOrdersFiltered = (status: string, signal?: AbortSignal) => {
+  const query = new URLSearchParams({ limit: '10' })
+  if (status) query.set('status', status)
+  return read<{ orders: PaperOrder[]; limit: number }>(`/api/v1/paper/orders?${query}`, signal)
+}
 export type MarketPlanner = { available: boolean; generated_at?: string; price_usdt?: number; regime?: string; permission?: string; permission_reason?: string; risk_level?: string; falling_knife_risk?: string; fomo_risk?: string; market_summary?: string; plan_state?: string; plan_summary?: string; warnings: string[] }
 export const readMarketPlanner = (signal?: AbortSignal) => read<MarketPlanner>('/api/v1/market-planner', signal)
 export type AuditEvent = { id: number; timestamp: string; actor: string; action: string; result: string; request_id: string }

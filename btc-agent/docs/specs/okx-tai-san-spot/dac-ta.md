@@ -48,4 +48,6 @@ thị `Không khả dụng` hoặc `Dữ liệu cũ`; không lấy số cũ làm
 - AC-06: Không có suy luận `thesis_id` từ symbol.
 - AC-07: UI do tính năng này cung cấp dùng tiếng Việt.
 - AC-08: Stale quá ngưỡng không được làm đầu vào cho gate BUY tương lai.
-- AC-09: Tất cả test dùng fixture/temp directory/temp SQLite.
+- AC-09: Coin có ticker `*-USDT` hợp lệ hiển thị giá trị USDT và tỷ trọng; coin thiếu giá không được gán 0.
+- AC-10: Giao diện mobile hiển thị card danh mục, không dùng bảng tràn ngang.
+- AC-11: Tất cả test dùng fixture/temp directory/temp SQLite.

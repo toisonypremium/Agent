@@ -23,7 +23,10 @@ không glob, không đường dẫn từ query string.
       "kha_dung": "125.42",
       "dang_khoa": "10.00",
       "tong": "135.42",
-      "trang_thai_gan_thesis": "khong_ap_dung"
+      "trang_thai_gan_thesis": "khong_ap_dung",
+      "gia_usdt": "1",
+      "gia_tri_usdt": "135.42",
+      "trang_thai_dinh_gia": "dinh_gia"
     }
   ],
   "canh_bao": []
@@ -43,7 +46,7 @@ du_lieu_bat_thuong
 
 - `tong = kha_dung + dang_khoa` theo decimal chính xác; không float binary.
 - Mọi giá trị số phải không âm và finite.
-- `USDT` được hiển thị riêng, không tự tổng hợp giá trị coin khác.
-- Giá trị quy đổi USDT cho coin khác chỉ xuất hiện khi có nguồn giá đã allowlist,
-  timestamp tương thích và provenance rõ.
+- `USDT` được định giá cố định 1 USDT.
+- Coin khác chỉ được định giá bằng ticker Spot công khai `*-USDT` của OKX cùng lần quan sát.
+- Coin thiếu ticker hợp lệ giữ `chua_dinh_gia`; không gán giá trị 0 và không cộng vào tổng/tỷ trọng.
 - `trang_thai_gan_thesis` chỉ là quan sát đối soát; không tạo hoặc sửa thesis.

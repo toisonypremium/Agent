@@ -24,7 +24,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if err := okxassets.WriteArtifact(outDir, snapshot, time.Now().UTC()); err != nil {
+	prices, err := client.SpotUSDTPrices(context.Background())
+	if err != nil {
+		log.Fatal(err)
+	}
+	snapshot, warnings, err := okxassets.ApplyUSDTPrices(snapshot, prices)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if err := okxassets.WriteArtifact(outDir, snapshot, time.Now().UTC(), warnings); err != nil {
 		log.Fatal(err)
 	}
 }

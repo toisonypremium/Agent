@@ -36,3 +36,15 @@ func TestReadOnlyClientRejectsNonOKXBaseURL(t *testing.T) {
 		t.Fatal("insecure URL accepted")
 	}
 }
+
+func TestReadOnlyClientPricesUsePublicTickerWithoutCredentials(t *testing.T) {
+	transport := &recordingTransport{body: `{"code":"0","data":[{"instId":"BTC-USDT","last":"60000"},{"instId":"BTC-USDC","last":"1"}]}`}
+	client := NewReadOnlyClient("https://www.okx.com", "", "", "", &http.Client{Transport: transport}, time.Now)
+	prices, err := client.SpotUSDTPrices(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prices["BTC"] != "60000" || transport.request.URL.Path != "/api/v5/market/tickers" || transport.request.Header.Get("OK-ACCESS-KEY") != "" {
+		t.Fatalf("prices=%v request=%+v", prices, transport.request)
+	}
+}

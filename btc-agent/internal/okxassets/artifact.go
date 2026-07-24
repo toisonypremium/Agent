@@ -24,11 +24,11 @@ type Artifact struct {
 	Warnings      []string `json:"canh_bao"`
 }
 
-func WriteArtifact(dir string, s Snapshot, now time.Time) error {
+func WriteArtifact(dir string, s Snapshot, now time.Time, warnings []string) error {
 	if s.Source != SourceOKXSpotReadOnly {
 		return fmt.Errorf("unexpected artifact source")
 	}
-	a := Artifact{SchemaVersion: 1, Source: s.Source, ObservedAt: now.UTC().Format(time.RFC3339), State: StateVerified, Assets: s.Assets, Warnings: []string{}}
+	a := Artifact{SchemaVersion: 1, Source: s.Source, ObservedAt: now.UTC().Format(time.RFC3339), State: StateVerified, Assets: s.Assets, Warnings: warnings}
 	body, err := json.Marshal(a)
 	if err != nil {
 		return err

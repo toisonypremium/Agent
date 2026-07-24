@@ -13,7 +13,7 @@ export type Event = { id: number; timestamp: string; source: string; type: strin
 export type RuntimeHealth = { freshness: Freshness; scheduler: { state: string; count: number }; heartbeat: { state: string; age_seconds: number }; lease: { instance_id?: string; fresh: boolean }; database_state: string; observer_state: string }
 export type CapitalOverview = { currency: 'USDT'; source_at: string; available_usdt: number; reserved_usdt: number; filled_usdt: number; max_exposure_usdt: number; projection_state: string; issues: string[] }
 export type ThesisCapital = { thesis_id: string; symbol: string; status: string; max_exposure_usdt: number; reserved_usdt: number; filled_usdt: number; remaining_usdt: number; updated_at: string; blockers: string[] }
-export type OKXAsset = { ma_tai_san: string; kha_dung: string; dang_khoa: string; tong: string; trang_thai_gan_thesis: string }
+export type OKXAsset = { ma_tai_san: string; kha_dung: string; dang_khoa: string; tong: string; trang_thai_gan_thesis: string; gia_usdt?: string; gia_tri_usdt?: string; trang_thai_dinh_gia?: string }
 export type OKXAssets = { nguon?: string; thoi_diem_quan_sat?: string; trang_thai: string; tai_san: OKXAsset[]; canh_bao: string[] }
 export type OKXReconciliation = { trang_thai: string; tai_san_chua_gan_thesis: string[]; canh_bao: string[] }
 

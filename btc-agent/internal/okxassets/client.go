@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -67,4 +68,53 @@ func sign(timestamp, method, path, body, secret string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(timestamp + method + path + body))
 	return base64.StdEncoding.EncodeToString(mac.Sum(nil))
+}
+
+// SpotUSDTPrices reads public Spot tickers only. Missing pairs remain explicitly
+// unvalued; this method does not query orders, fills or account state.
+func (c *ReadOnlyClient) SpotUSDTPrices(ctx context.Context) (map[string]string, error) {
+	u, err := url.Parse(c.baseURL)
+	if err != nil || u.Scheme != "https" || (u.Host != "www.okx.com" && u.Host != "okx.com") {
+		return nil, fmt.Errorf("OKX read-only base URL must be https")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/api/v5/market/tickers?instType=SPOT", nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("OKX tickers request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	if err != nil {
+		return nil, err
+	}
+	if resp.StatusCode/100 != 2 {
+		return nil, fmt.Errorf("OKX tickers HTTP %d", resp.StatusCode)
+	}
+	var raw struct {
+		Code string `json:"code"`
+		Data []struct {
+			InstID string `json:"instId"`
+			Last   string `json:"last"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("OKX tickers decode: %w", err)
+	}
+	if raw.Code != "0" {
+		return nil, fmt.Errorf("OKX tickers unavailable")
+	}
+	out := map[string]string{}
+	for _, item := range raw.Data {
+		if !strings.HasSuffix(item.InstID, "-USDT") {
+			continue
+		}
+		ccy := strings.TrimSuffix(item.InstID, "-USDT")
+		if _, err := decimal(item.Last); err == nil {
+			out[ccy] = item.Last
+		}
+	}
+	return out, nil
 }

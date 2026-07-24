@@ -17,11 +17,14 @@ const (
 )
 
 type Asset struct {
-	Currency   string `json:"ma_tai_san"`
-	Available  string `json:"kha_dung"`
-	Frozen     string `json:"dang_khoa"`
-	Total      string `json:"tong"`
-	ThesisLink string `json:"trang_thai_gan_thesis"`
+	Currency       string `json:"ma_tai_san"`
+	Available      string `json:"kha_dung"`
+	Frozen         string `json:"dang_khoa"`
+	Total          string `json:"tong"`
+	ThesisLink     string `json:"trang_thai_gan_thesis"`
+	PriceUSDT      string `json:"gia_usdt,omitempty"`
+	ValueUSDT      string `json:"gia_tri_usdt,omitempty"`
+	ValuationState string `json:"trang_thai_dinh_gia,omitempty"`
 }
 
 type Snapshot struct {
@@ -117,6 +120,17 @@ func ValidateSnapshot(snapshot Snapshot) error {
 		}
 		if asset.ThesisLink != want {
 			return fmt.Errorf("%s thesis link invalid", ccy)
+		}
+		if asset.ValuationState != "" && asset.ValuationState != ValuationVerified && asset.ValuationState != ValuationUnavailable {
+			return fmt.Errorf("%s valuation state invalid", ccy)
+		}
+		if asset.ValuationState == ValuationVerified {
+			if _, err := decimal(asset.PriceUSDT); err != nil {
+				return fmt.Errorf("%s price invalid", ccy)
+			}
+			if _, err := decimal(asset.ValueUSDT); err != nil {
+				return fmt.Errorf("%s value invalid", ccy)
+			}
 		}
 	}
 	sort.Slice(snapshot.Assets, func(i, j int) bool { return snapshot.Assets[i].Currency < snapshot.Assets[j].Currency })

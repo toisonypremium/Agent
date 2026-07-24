@@ -10,7 +10,7 @@ import (
 func TestWriteArtifactIsAtomicAndPrivate(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 24, 3, 0, 0, 0, time.UTC)
-	if err := WriteArtifact(dir, Snapshot{Source: SourceOKXSpotReadOnly, Assets: []Asset{}}, now); err != nil {
+	if err := WriteArtifact(dir, Snapshot{Source: SourceOKXSpotReadOnly, Assets: []Asset{}}, now, nil); err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, ArtifactFilename)
@@ -32,7 +32,7 @@ func TestWriteArtifactIsAtomicAndPrivate(t *testing.T) {
 func TestLoadArtifactFailsClosedWhenStaleOrSymlink(t *testing.T) {
 	dir := t.TempDir()
 	now := time.Date(2026, 7, 24, 3, 0, 0, 0, time.UTC)
-	if err := WriteArtifact(dir, Snapshot{Source: SourceOKXSpotReadOnly}, now); err != nil {
+	if err := WriteArtifact(dir, Snapshot{Source: SourceOKXSpotReadOnly}, now, nil); err != nil {
 		t.Fatal(err)
 	}
 	if got, err := LoadArtifact(dir, now.Add(6*time.Minute), 5*time.Minute); err != nil || got.State != StateStale {

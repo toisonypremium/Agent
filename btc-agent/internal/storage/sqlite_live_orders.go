@@ -76,12 +76,15 @@ func (d *DB) ReserveManagedLiveOrderWithThesis(clientOrderID string, desired liv
 		return fmt.Errorf("thesis symbol mismatch: ledger=%s order=%s", ledger.Symbol, desired.Symbol)
 	}
 	switch strings.ToUpper(strings.TrimSpace(ledger.Status)) {
-	case "PROBE", "CONFIRMING", "ACCUMULATING":
+	case "ALLOCATED", "PROBE", "CONFIRMING", "ACCUMULATING":
 	default:
 		return fmt.Errorf("thesis status does not permit reservation: %s", ledger.Status)
 	}
 	if ledger.RemainingDCAUSDT+1e-9 < desired.Notional {
 		return fmt.Errorf("thesis remaining DCA budget insufficient: remaining=%.8f requested=%.8f", ledger.RemainingDCAUSDT, desired.Notional)
+	}
+	if err := ValidateDCALayerReservationTx(tx, desired); err != nil {
+		return err
 	}
 	now := time.Now().Unix()
 	expiresAt := int64(0)

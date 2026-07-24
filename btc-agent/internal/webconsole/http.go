@@ -150,7 +150,12 @@ func (a *API) paperOrders(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	out, err := a.service.PaperOrders(limit)
+	since, err := parseSince(r.URL.Query().Get("since"))
+	if err != nil {
+		writeProblem(w, 400, "invalid_since")
+		return
+	}
+	out, err := a.service.PaperOrdersFiltered(limit, r.URL.Query().Get("status"), since)
 	if err != nil {
 		writeProblem(w, 503, "paper_orders_unavailable")
 		return
@@ -197,6 +202,12 @@ func (a *API) halt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeEnvelope(w, a.now, receipt)
+}
+func parseSince(raw string) (time.Time, error) {
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	return time.Parse(time.RFC3339, raw)
 }
 func queryLimit(w http.ResponseWriter, r *http.Request) (int, bool) {
 	limit := 50

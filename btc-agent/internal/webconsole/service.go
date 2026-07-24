@@ -135,6 +135,10 @@ func (s *Service) Scorecard() (paper.Scorecard, error) {
 }
 
 func (s *Service) PaperOrders(limit int) (PaperOrdersPage, error) {
+	return s.PaperOrdersFiltered(limit, "", time.Time{})
+}
+
+func (s *Service) PaperOrdersFiltered(limit int, status string, since time.Time) (PaperOrdersPage, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -145,11 +149,25 @@ func (s *Service) PaperOrders(limit int) (PaperOrdersPage, error) {
 	if err != nil {
 		return PaperOrdersPage{}, fmt.Errorf("read paper orders: %w", err)
 	}
-	if len(orders) > limit {
-		orders = orders[:limit]
+	status = strings.ToUpper(strings.TrimSpace(status))
+	if status != "" && !paperOrderStatusAllowed(status) {
+		return PaperOrdersPage{}, fmt.Errorf("invalid paper order status")
 	}
-	out := PaperOrdersPage{Orders: make([]PaperOrder, 0, len(orders)), Limit: limit}
+	filtered := make([]agent2.PaperOrder, 0, len(orders))
 	for _, order := range orders {
+		if status != "" && strings.ToUpper(order.Status) != status {
+			continue
+		}
+		if !since.IsZero() && order.Timestamp.Before(since) {
+			continue
+		}
+		filtered = append(filtered, order)
+		if len(filtered) == limit {
+			break
+		}
+	}
+	out := PaperOrdersPage{Orders: make([]PaperOrder, 0, len(filtered)), Limit: limit}
+	for _, order := range filtered {
 		out.Orders = append(out.Orders, paperOrderDTO(order))
 	}
 	return out, nil
@@ -211,4 +229,12 @@ func (s *Service) RequestHalt(identity, reason, key string) (storage.WebHaltRece
 		return storage.WebHaltReceipt{}, fmt.Errorf("halt authority unavailable")
 	}
 	return s.haltDB.RequestWebHalt(identity, reason, key, s.now().UTC())
+}
+
+func paperOrderStatusAllowed(status string) bool {
+	switch status {
+	case "OPEN", "FILLED", "INVALIDATED", "EXPIRED", "CANCELLED":
+		return true
+	}
+	return false
 }

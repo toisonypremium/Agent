@@ -32,6 +32,7 @@ jobs:
       - run: bash deploy/test-immutable-runtime.sh
       - run: bash deploy/test-immutable-runtime-verify.sh
       - run: bash deploy/test-immutable-user-release.sh
+      - run: bash deploy/test-immutable-web-console-observer-release.sh
       - run: bash deploy/test-web-console-release.sh
       - run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/web-console ./cmd/web-console
   web:

@@ -46,7 +46,8 @@ func BuildCanaryIntent(in CanaryInput) (CanaryIntent, error) {
 	}
 	for _, ap := range in.Plan.Assets {
 		b, ok := bindings[strings.ToUpper(ap.Symbol)]
-		if !ok || !CanOpenLayer(1, true, b.ReconciledFilledLayers, b.ReconciledFilledLayers) {
+		plannerThesisID := strings.TrimSpace(ap.ThesisID)
+		if !ok || plannerThesisID == "" || plannerThesisID != b.ThesisID || !CanOpenLayer(1, true, b.ReconciledFilledLayers, b.ReconciledFilledLayers) {
 			continue
 		}
 		for _, layer := range ap.Layers {

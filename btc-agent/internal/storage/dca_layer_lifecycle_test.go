@@ -5,6 +5,7 @@ import (
 	"btc-agent/internal/liveguard"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestDCAReservationRequiresPriorKnownTerminalLayer(t *testing.T) {
@@ -13,6 +14,14 @@ func TestDCAReservationRequiresPriorKnownTerminalLayer(t *testing.T) {
 		t.Fatal(e)
 	}
 	defer d.Close()
+	at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	epoch, _, e := d.CreateDCAAllocationEpoch(DCAAllocationEpochRequest{IdempotencyKey: "epoch", ObservedAvailableUSDT: 1000, EnvelopeUSDT: 800, NetNewUSDT: 800, ObservedAt: at})
+	if e != nil {
+		t.Fatal(e)
+	}
+	if _, e = d.ApplyDCAAllocationEpochToTheses(epoch.ID); e != nil {
+		t.Fatal(e)
+	}
 	if e = d.SaveThesisCapitalLedger(ThesisCapitalLedger{ThesisID: "thesis-eth", Symbol: "ETHUSDT", MaxExposureUSDT: 100, RemainingDCAUSDT: 100, Status: "ALLOCATED"}); e != nil {
 		t.Fatal(e)
 	}

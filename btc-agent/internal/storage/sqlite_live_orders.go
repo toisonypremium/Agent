@@ -86,6 +86,9 @@ func (d *DB) ReserveManagedLiveOrderWithThesis(clientOrderID string, desired liv
 	if err := ValidateDCALayerReservationTx(tx, desired); err != nil {
 		return err
 	}
+	if err := ValidateDCAGlobalCapReservationTx(tx, desired); err != nil {
+		return err
+	}
 	now := time.Now().Unix()
 	expiresAt := int64(0)
 	if !desired.ExpiresAt.IsZero() {

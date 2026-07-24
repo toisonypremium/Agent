@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildCanaryIntentRequiresExplicitBindingAndCapsNotional(t *testing.T) {
-	p := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{Symbol: "ETHUSDT", Layers: []agent2.Layer{{Index: 1, Price: 2000, Quantity: 1, Notional: 2000}}}}}
+	p := agent2.Plan{State: agent2.StateActiveLimit, Assets: []agent2.AssetPlan{{ThesisID: "thesis-eth", Symbol: "ETHUSDT", Layers: []agent2.Layer{{Index: 1, Price: 2000, Quantity: 1, Notional: 2000}}}}}
 	g := GateInput{MarketAllowed: true, LiquidityPass: true, RuntimeHealthy: true, ReconciliationClean: true, ArtifactFresh: true, ThesisRemainingUSDT: 640, ThesisMaxExposureUSDT: 640, EnvelopeUSDT: 1600, GlobalCapPercent: 20}
 	if _, err := BuildCanaryIntent(CanaryInput{Plan: p, Gate: g}); err == nil {
 		t.Fatal("unbound symbol must not gain thesis")

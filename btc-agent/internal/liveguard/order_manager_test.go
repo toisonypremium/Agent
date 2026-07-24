@@ -859,3 +859,15 @@ func TestBuildManagedDesiredOrdersBlocksUnboundDCAPlannerBuy(t *testing.T) {
 		}
 	}
 }
+
+func TestManageLiveOrdersUsesPrebuiltDesiredWithoutLegacyFallback(t *testing.T) {
+	cfg := managedConfig()
+	cfg.DCA.AllocationEnabled = true
+	plan := managedPlan()
+	desired := ManagedDesiredOrder{ThesisID: "thesis-eth", Symbol: "ETHUSDT", InstID: "ETH-USDT", LayerIndex: 1, Side: "BUY", Type: "limit", Price: 100, Quantity: .1, Notional: 10, PostOnly: true, Source: "dca_canary_layer_1"}
+	ex := &fakeManagedExchange{}
+	result := ManageLiveOrdersWithRecorderAndContext(context.Background(), cfg, plan, nil, nil, nil, ex, ex, fakeHaltReader{halted: false}, ManagedExecutionContext{PrebuiltDesired: []ManagedDesiredOrder{desired}, PrebuiltBlocked: []ManagedOrderDecision{{Action: "block", Symbol: "LINKUSDT", Reason: "DCA thesis binding required"}}, FirstOrderDryRunApproved: true, ManagedOrderHistoryKnown: true, HasManagedRealOrderHistory: true}, &thesisRecorderStub{}, false)
+	if len(result.Desired) != 1 || result.Desired[0].ThesisID != "thesis-eth" || len(result.Blocked) < 1 || result.Blocked[0].Reason != "DCA thesis binding required" {
+		t.Fatalf("result=%+v", result)
+	}
+}

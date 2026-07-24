@@ -207,6 +207,14 @@ dca:
   allocation_enabled: false
   artifact_directory: "runtime/observer"
   artifact_max_age_minutes: 5
+  # Explicit strategy provenance. A symbol alone never grants DCA BUY authority.
+  thesis_bindings:
+    - thesis_id: "thesis-eth"
+      symbol: "ETHUSDT"
+    - thesis_id: "thesis-link"
+      symbol: "LINKUSDT"
+    - thesis_id: "thesis-virtual"
+      symbol: "VIRTUALUSDT"
 
 hermes_operator:
   enabled: false

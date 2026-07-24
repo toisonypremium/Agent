@@ -1,11 +1,14 @@
 package main
 
 import (
+	"btc-agent/internal/agent1"
 	"btc-agent/internal/agent2"
 	"btc-agent/internal/config"
+	"btc-agent/internal/dca"
 	"btc-agent/internal/exchange/live"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/market"
+	"btc-agent/internal/okxassets"
 	"btc-agent/internal/storage"
 	"btc-agent/internal/telegramreport"
 	"context"
@@ -881,6 +884,35 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 			return writeAutoLiveManagementResult(ctx, cfg, db, hermesResult, notifyTelegram && !dryRun)
 		}
 	}
+	if cfg.DCA.AllocationEnabled {
+		p = bindExplicitDCATheses(cfg, p)
+		artifactFresh := false
+		maxAge := time.Duration(cfg.DCA.ArtifactMaxAgeMinutes) * time.Minute
+		if maxAge <= 0 {
+			maxAge = 5 * time.Minute
+		}
+		if artifact, artifactErr := okxassets.LoadArtifact(cfg.DCA.ArtifactDirectory, time.Now(), maxAge); artifactErr == nil && artifact.State == okxassets.StateVerified {
+			artifactFresh = true
+		}
+		halted, haltErr := db.IsHalted()
+		if haltErr != nil {
+			return fmt.Errorf("read DCA operator halt: %w", haltErr)
+		}
+		dcaDesired, dcaBlocked, dcaErr := dca.BuildDesiredOrders(db, dca.DesiredOrderInput{Plan: p, Gate: dca.GateInput{
+			MarketAllowed:       p.ActionPermission == agent1.Allowed,
+			BTCRiskHigh:         analysis.RiskLevel == agent1.High || analysis.FallingKnifeRisk == agent1.High,
+			LiquidityPass:       true, // per-asset liquidity is checked by the adapter.
+			RuntimeHealthy:      dataHealth.Status != liveguard.DataHealthBlock && riskGovernor.Status != liveguard.RiskGovernorBlock,
+			ReconciliationClean: reconcileSafety.Status != liveguard.ReconcileBlock,
+			ArtifactFresh:       artifactFresh,
+			OperatorHalted:      halted,
+		}, Now: time.Now()})
+		if dcaErr != nil {
+			return fmt.Errorf("build DCA thesis-bound desired orders: %w", dcaErr)
+		}
+		execCtx.PrebuiltDesired = dcaDesired
+		execCtx.PrebuiltBlocked = dcaBlocked
+	}
 	result := liveguard.ManageLiveOrdersWithRecorderAndContext(ctx, cfg, p, open, positions, filters, placer, canceler, db, execCtx, recorder, dryRun)
 	result.DataHealth = dataHealth
 	result.ReconcileSafety = reconcileSafety
@@ -896,6 +928,24 @@ func runAutoLiveOrderWithNotify(ctx context.Context, cfg config.Config, db *stor
 		}
 	}
 	return writeAutoLiveManagementResult(ctx, cfg, db, result, notifyTelegram && !dryRun)
+}
+
+func bindExplicitDCATheses(cfg config.Config, plan agent2.Plan) agent2.Plan {
+	bindings := map[string]string{}
+	for _, b := range cfg.DCA.ThesisBindings {
+		thesisID, symbol := strings.TrimSpace(b.ThesisID), strings.ToUpper(strings.TrimSpace(b.Symbol))
+		if thesisID != "" && symbol != "" {
+			bindings[symbol] = thesisID
+		}
+	}
+	for i := range plan.Assets {
+		thesisID := bindings[strings.ToUpper(plan.Assets[i].Symbol)]
+		plan.Assets[i].ThesisID = thesisID
+		for j := range plan.Assets[i].Layers {
+			plan.Assets[i].Layers[j].ThesisID = thesisID
+		}
+	}
+	return plan
 }
 
 func refreshDeterministicPlanForLive(ctx context.Context, cfg config.Config, db *storage.DB) (agent2.Plan, error) {

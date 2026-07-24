@@ -33,10 +33,6 @@ func (d *DB) DCAExecutionState() (DCAExecutionState, error) {
 	return DCAExecutionState{GlobalCapPercent: pct, UpdatedAt: time.Unix(updated, 0).UTC()}, nil
 }
 
-func isDCAOrderSource(source string) bool {
-	return strings.HasPrefix(strings.ToLower(strings.TrimSpace(source)), "dca_")
-}
-
 func advanceDCAExposureCapTx(tx *sql.Tx, clientOrderID string, now time.Time) error {
 	var pct float64
 	err := tx.QueryRow(`SELECT global_cap_percent FROM dca_execution_state WHERE singleton=1`).Scan(&pct)

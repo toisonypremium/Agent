@@ -286,6 +286,10 @@ type Config struct {
 		AllocationEnabled     bool   `yaml:"allocation_enabled"`
 		ArtifactDirectory     string `yaml:"artifact_directory"`
 		ArtifactMaxAgeMinutes int    `yaml:"artifact_max_age_minutes"`
+		ThesisBindings        []struct {
+			ThesisID string `yaml:"thesis_id"`
+			Symbol   string `yaml:"symbol"`
+		} `yaml:"thesis_bindings"`
 	} `yaml:"dca"`
 	HermesOperator HermesOperatorConfig `yaml:"hermes_operator"`
 	Exit           ExitConfig           `yaml:"exit"`

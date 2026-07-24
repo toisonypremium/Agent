@@ -13,20 +13,22 @@ import (
 )
 
 type ManagedExecutionContext struct {
-	BTCAccumulationPhase        string    `json:"btc_accumulation_phase,omitempty"`
-	FirstOrderDryRunApproved    bool      `json:"first_order_dry_run_approved,omitempty"`
-	ManagedOrderHistoryKnown    bool      `json:"managed_order_history_known,omitempty"`
-	HasManagedRealOrderHistory  bool      `json:"has_managed_real_order_history,omitempty"`
-	HermesMode                  string    `json:"hermes_mode,omitempty"`
-	HermesDecisionID            string    `json:"hermes_decision_id,omitempty"`
-	HermesIntent                string    `json:"hermes_intent,omitempty"`
-	PortfolioLossStateKnown     bool      `json:"portfolio_loss_state_known,omitempty"`
-	PortfolioLossLockActive     bool      `json:"portfolio_loss_lock_active,omitempty"`
-	PortfolioLossDrawdownPct    float64   `json:"portfolio_loss_drawdown_pct,omitempty"`
-	PortfolioLossStateUpdatedAt time.Time `json:"portfolio_loss_state_updated_at,omitempty"`
-	DailyRealizedPnL            float64   `json:"daily_realized_pnl,omitempty"`
-	DailyLossEquityBasis        float64   `json:"daily_loss_equity_basis,omitempty"`
-	DailyRealizedLossLockActive bool      `json:"daily_realized_loss_lock_active,omitempty"`
+	PrebuiltDesired             []ManagedDesiredOrder  `json:"-"`
+	PrebuiltBlocked             []ManagedOrderDecision `json:"-"`
+	BTCAccumulationPhase        string                 `json:"btc_accumulation_phase,omitempty"`
+	FirstOrderDryRunApproved    bool                   `json:"first_order_dry_run_approved,omitempty"`
+	ManagedOrderHistoryKnown    bool                   `json:"managed_order_history_known,omitempty"`
+	HasManagedRealOrderHistory  bool                   `json:"has_managed_real_order_history,omitempty"`
+	HermesMode                  string                 `json:"hermes_mode,omitempty"`
+	HermesDecisionID            string                 `json:"hermes_decision_id,omitempty"`
+	HermesIntent                string                 `json:"hermes_intent,omitempty"`
+	PortfolioLossStateKnown     bool                   `json:"portfolio_loss_state_known,omitempty"`
+	PortfolioLossLockActive     bool                   `json:"portfolio_loss_lock_active,omitempty"`
+	PortfolioLossDrawdownPct    float64                `json:"portfolio_loss_drawdown_pct,omitempty"`
+	PortfolioLossStateUpdatedAt time.Time              `json:"portfolio_loss_state_updated_at,omitempty"`
+	DailyRealizedPnL            float64                `json:"daily_realized_pnl,omitempty"`
+	DailyLossEquityBasis        float64                `json:"daily_loss_equity_basis,omitempty"`
+	DailyRealizedLossLockActive bool                   `json:"daily_realized_loss_lock_active,omitempty"`
 }
 
 type ExecutionAssertionInput struct {

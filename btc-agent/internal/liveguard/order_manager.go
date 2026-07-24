@@ -167,7 +167,14 @@ func ManageLiveOrdersWithRecorderAndContext(ctx context.Context, cfg config.Conf
 		result.Summary = managedSummary(result)
 		return result
 	}
-	desired, blocked := BuildManagedDesiredOrdersWithContext(cfg, plan, filters, positions, openOrders, execCtx)
+	var desired []ManagedDesiredOrder
+	var blocked []ManagedOrderDecision
+	if execCtx.PrebuiltDesired != nil {
+		desired = append([]ManagedDesiredOrder{}, execCtx.PrebuiltDesired...)
+		blocked = append([]ManagedOrderDecision{}, execCtx.PrebuiltBlocked...)
+	} else {
+		desired, blocked = BuildManagedDesiredOrdersWithContext(cfg, plan, filters, positions, openOrders, execCtx)
+	}
 	result.Desired = desired
 	result.Blocked = append(result.Blocked, blocked...)
 	desiredByKey := map[string]ManagedDesiredOrder{}

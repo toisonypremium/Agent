@@ -15,6 +15,7 @@ export type CapitalOverview = { currency: 'USDT'; source_at: string; available_u
 export type ThesisCapital = { thesis_id: string; symbol: string; status: string; max_exposure_usdt: number; reserved_usdt: number; filled_usdt: number; remaining_usdt: number; updated_at: string; blockers: string[] }
 export type OKXAsset = { ma_tai_san: string; kha_dung: string; dang_khoa: string; tong: string; trang_thai_gan_thesis: string }
 export type OKXAssets = { nguon?: string; thoi_diem_quan_sat?: string; trang_thai: string; tai_san: OKXAsset[]; canh_bao: string[] }
+export type OKXReconciliation = { trang_thai: string; tai_san_chua_gan_thesis: string[]; canh_bao: string[] }
 
 const apiBase = import.meta.env.VITE_WEB_CONSOLE_API_BASE ?? ''
 async function read<T>(path: string, signal?: AbortSignal): Promise<Envelope<T>> {
@@ -40,6 +41,7 @@ export const readEvents = (signal?: AbortSignal) => read<{ events: Event[]; limi
 export const readRuntimeHealth = (signal?: AbortSignal) => read<RuntimeHealth>('/api/v1/operations/health', signal)
 export const readCapitalOverview = (signal?: AbortSignal) => read<CapitalOverview>('/api/v1/capital/overview', signal)
 export const readOKXAssets = (signal?: AbortSignal) => read<OKXAssets>('/api/v1/assets/okx', signal)
+export const readOKXReconciliation = (signal?: AbortSignal) => read<OKXReconciliation>('/api/v1/assets/okx/reconciliation', signal)
 export const readThesisCapital = (signal?: AbortSignal) => read<{ items: ThesisCapital[]; limit: number }>('/api/v1/capital/theses?limit=8', signal)
 
 export async function requestHalt(reasonCode: string, summary: string, signal?: AbortSignal): Promise<void> {

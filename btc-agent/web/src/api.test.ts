@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { readOKXAssets, readOverview, readPaperOrdersFiltered } from './api'
+import { readOKXAssets, readOKXReconciliation, readOverview, readPaperOrdersFiltered } from './api'
 
 describe('readOverview', () => {
   it('uses the read-only overview endpoint', async () => {
@@ -7,6 +7,12 @@ describe('readOverview', () => {
     vi.stubGlobal('fetch', fetchMock)
     await readOverview()
     expect(fetchMock).toHaveBeenCalledWith('/api/v1/overview', expect.objectContaining({ credentials: 'same-origin' }))
+  })
+  it('uses the read-only OKX reconciliation endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ schema_version: 1, data: {}, freshness: {}, warnings: [] }) })
+    vi.stubGlobal('fetch', fetchMock)
+    await readOKXReconciliation()
+    expect(fetchMock).toHaveBeenCalledWith('/api/v1/assets/okx/reconciliation', expect.anything())
   })
   it('uses the read-only OKX assets endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ schema_version: 1, data: {}, freshness: {}, warnings: [] }) })

@@ -619,9 +619,21 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		if dcaAllocator != nil && !time.Now().Before(nextSupervisor) {
 			if allocation, err := dcaAllocator.ObserveAndMaybeAllocate(); err != nil {
 				log.Printf("[Scheduler] DCA allocation coordinator error: %v", err)
+				if _, autoHalted, safetyErr := db.RecordDCASafetyCycle(true, false, "dca_coordinator_error", time.Now()); safetyErr != nil {
+					log.Printf("[Scheduler] DCA safety accounting error: %v", safetyErr)
+				} else if autoHalted {
+					log.Printf("[Scheduler] DCA safety auto-halt active after three coordinator errors")
+				}
 			} else if allocation.EpochID > 0 {
+				_, _, _ = db.RecordDCASafetyCycle(false, false, "", time.Now())
 				log.Printf("[Scheduler] DCA allocation epoch=%d applied=%v", allocation.EpochID, allocation.Applied)
 			} else {
+				stale := allocation.Reason == "artifact_unavailable" || allocation.Reason == "artifact_not_verified"
+				if _, autoHalted, safetyErr := db.RecordDCASafetyCycle(false, stale, allocation.Reason, time.Now()); safetyErr != nil {
+					log.Printf("[Scheduler] DCA safety accounting error: %v", safetyErr)
+				} else if autoHalted {
+					log.Printf("[Scheduler] DCA safety auto-halt active: %s", allocation.Reason)
+				}
 				log.Printf("[Scheduler] DCA allocation not applied: %s", allocation.Reason)
 			}
 		}

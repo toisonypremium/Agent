@@ -115,3 +115,29 @@ func TestDCAAllocationEvaluatorRejectsMaterialChangeDuringStableWindow(t *testin
 		t.Fatalf("proposal=%+v err=%v", p, err)
 	}
 }
+
+func TestDCAAllocationEvaluatorToleratesCentLevelDecreaseAfterEpoch(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "decrease-jitter.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	if _, _, err = db.CreateDCAAllocationEpoch(DCAAllocationEpochRequest{IdempotencyKey: "bootstrap", ObservedAvailableUSDT: 2000, EnvelopeUSDT: 1600, NetNewUSDT: 1600, ObservedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.RecordVerifiedUSDTObservation(VerifiedUSDTObservation{ObservationKey: "jitter", AvailableUSDT: 1999.996, ObservedAt: at.Add(15 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := db.EvaluateDCAAllocation(at.Add(15 * time.Minute))
+	if err != nil || p.Reason == "verified_usdt_decreased" {
+		t.Fatalf("proposal=%+v err=%v", p, err)
+	}
+	if _, err = db.RecordVerifiedUSDTObservation(VerifiedUSDTObservation{ObservationKey: "real", AvailableUSDT: 1999.98, ObservedAt: at.Add(16 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	p, err = db.EvaluateDCAAllocation(at.Add(16 * time.Minute))
+	if err != nil || p.Reason != "verified_usdt_decreased" {
+		t.Fatalf("proposal=%+v err=%v", p, err)
+	}
+}

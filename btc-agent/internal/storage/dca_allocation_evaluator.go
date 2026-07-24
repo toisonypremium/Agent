@@ -77,7 +77,7 @@ func (d *DB) EvaluateDCAAllocation(now time.Time) (DCAAllocationProposal, error)
 		return p, err
 	}
 	baseline := allocated / allocationRatio
-	if epochCount > 0 && latest < baseline-1e-9 {
+	if epochCount > 0 && latest < baseline-stableUSDTTolerance {
 		p.Reason = "verified_usdt_decreased"
 		return p, nil
 	}

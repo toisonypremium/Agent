@@ -53,10 +53,10 @@ data:
     btc: "BTCUSDT"
     assets:
       - "ETHUSDT"
-      - "SOLUSDT"
-      - "RENDERUSDT"
-    research_universe:
       - "LINKUSDT"
+      - "VIRTUALUSDT"
+    research_universe:
+      - "SOLUSDT"
       - "AVAXUSDT"
       - "NEARUSDT"
   intervals:

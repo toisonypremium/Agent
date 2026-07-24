@@ -77,3 +77,41 @@ func TestVerifiedUSDTObservationReplayAndConflict(t *testing.T) {
 		t.Fatal("expected conflict")
 	}
 }
+
+func TestDCAAllocationEvaluatorAcceptsCentStableObserverJitter(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "jitter.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	if _, err = db.RecordVerifiedUSDTObservation(VerifiedUSDTObservation{ObservationKey: "a", AvailableUSDT: 2000.0001, ObservedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.RecordVerifiedUSDTObservation(VerifiedUSDTObservation{ObservationKey: "b", AvailableUSDT: 1999.996, ObservedAt: at.Add(15 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := db.EvaluateDCAAllocation(at.Add(15 * time.Minute))
+	if err != nil || !p.Ready || p.Kind != DCAAllocationBootstrap {
+		t.Fatalf("proposal=%+v err=%v", p, err)
+	}
+}
+
+func TestDCAAllocationEvaluatorRejectsMaterialChangeDuringStableWindow(t *testing.T) {
+	db, err := Open(filepath.Join(t.TempDir(), "material.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	at := time.Date(2026, 7, 24, 8, 0, 0, 0, time.UTC)
+	if _, err = db.RecordVerifiedUSDTObservation(VerifiedUSDTObservation{ObservationKey: "a", AvailableUSDT: 2000, ObservedAt: at}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.RecordVerifiedUSDTObservation(VerifiedUSDTObservation{ObservationKey: "b", AvailableUSDT: 2000.02, ObservedAt: at.Add(15 * time.Minute)}); err != nil {
+		t.Fatal(err)
+	}
+	p, err := db.EvaluateDCAAllocation(at.Add(15 * time.Minute))
+	if err != nil || p.Ready || p.Reason != "funding_not_stable" {
+		t.Fatalf("proposal=%+v err=%v", p, err)
+	}
+}

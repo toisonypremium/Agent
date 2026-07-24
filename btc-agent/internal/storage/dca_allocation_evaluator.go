@@ -15,6 +15,7 @@ const (
 	allocationRatio        = .80
 	minimumNetFunding      = 50.0
 	stabilityWindow        = 15 * time.Minute
+	stableUSDTTolerance    = .01 // one cent; observer micro-precision is not funding movement
 )
 
 type VerifiedUSDTObservation struct {
@@ -82,7 +83,7 @@ func (d *DB) EvaluateDCAAllocation(now time.Time) (DCAAllocationProposal, error)
 	}
 	var count int
 	var first int64
-	if err := d.QueryRow(`SELECT COUNT(*),MIN(observed_at) FROM verified_usdt_observations WHERE available_usdt=? AND observed_at>=? AND observed_at<=?`, latest, p.ObservedAt.Add(-stabilityWindow).Unix(), p.ObservedAt.Unix()).Scan(&count, &first); err != nil {
+	if err := d.QueryRow(`SELECT COUNT(*),MIN(observed_at) FROM verified_usdt_observations WHERE ABS(available_usdt-?)<=? AND observed_at>=? AND observed_at<=?`, latest, stableUSDTTolerance, p.ObservedAt.Add(-stabilityWindow).Unix(), p.ObservedAt.Unix()).Scan(&count, &first); err != nil {
 		return p, err
 	}
 	if count < 2 || p.ObservedAt.Sub(time.Unix(first, 0).UTC()) < stabilityWindow {

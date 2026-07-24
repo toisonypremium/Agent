@@ -26,6 +26,8 @@ export const readPaperOrders = (signal?: AbortSignal) => read<{ orders: PaperOrd
 export type MarketPlanner = { available: boolean; generated_at?: string; price_usdt?: number; regime?: string; permission?: string; permission_reason?: string; risk_level?: string; falling_knife_risk?: string; fomo_risk?: string; market_summary?: string; plan_state?: string; plan_summary?: string; warnings: string[] }
 export const readMarketPlanner = (signal?: AbortSignal) => read<MarketPlanner>('/api/v1/market-planner', signal)
 export type AuditEvent = { id: number; timestamp: string; actor: string; action: string; result: string; request_id: string }
+export type ReportCatalog = { reports: { id: string; title: string; generated_at: string }[] }
+export const readReports = (signal?: AbortSignal) => read<ReportCatalog>('/api/v1/reports', signal)
 export const readAudit = (signal?: AbortSignal) => read<{ events: AuditEvent[]; limit: number }>('/api/v1/audit?limit=12', signal)
 export const readEvents = (signal?: AbortSignal) => read<{ events: Event[]; limit: number }>('/api/v1/events?limit=6', signal)
 export const readRuntimeHealth = (signal?: AbortSignal) => read<RuntimeHealth>('/api/v1/operations/health', signal)

@@ -54,6 +54,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
 	mux.HandleFunc("GET /api/v1/events", a.events)
 	mux.HandleFunc("GET /api/v1/audit", a.audit)
+	mux.HandleFunc("GET /api/v1/reports", a.reports)
 	mux.HandleFunc("POST /api/v1/halt", a.halt)
 	return secureHeaders(mux)
 }
@@ -116,6 +117,9 @@ func (a *API) scorecard(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 	writeEnvelope(w, a.now, out)
+}
+func (a *API) reports(w http.ResponseWriter, _ *http.Request) {
+	writeEnvelope(w, a.now, a.service.Reports())
 }
 func (a *API) audit(w http.ResponseWriter, r *http.Request) {
 	limit, ok := queryLimit(w, r)

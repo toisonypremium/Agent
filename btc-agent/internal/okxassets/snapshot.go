@@ -143,7 +143,7 @@ func ValidateSnapshot(snapshot Snapshot) error {
 }
 
 func formatDecimal(value *big.Rat) string {
-	out := value.FloatString(18)
+	out := value.FloatString(36)
 	out = strings.TrimRight(strings.TrimRight(out, "0"), ".")
 	if out == "" || out == "-0" {
 		return "0"

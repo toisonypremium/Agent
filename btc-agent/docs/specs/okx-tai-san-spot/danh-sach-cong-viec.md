@@ -8,7 +8,7 @@
 - [x] Ghi artifact atomic/0600 qua fixed allowlist.
 - [x] Thêm typed API và tests unavailable/fresh/stale.
 - [ ] Việt hóa UI liên quan tài sản/vốn/quan sát.
-- [ ] Tạo reconciliation report, không repair.
+- [x] Tạo reconciliation report, không repair.
 - [x] Thêm systemd service/timer và immutable release drill.
 - [ ] Xin approval deploy riêng.
 - [ ] Soak observer và nghiệm thu evidence.

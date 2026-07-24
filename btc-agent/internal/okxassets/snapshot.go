@@ -56,6 +56,13 @@ func ParseSpotBalance(body []byte) (Snapshot, error) {
 	assets := make([]Asset, 0, len(raw.Data[0].Details))
 	for _, d := range raw.Data[0].Details {
 		ccy := strings.ToUpper(strings.TrimSpace(d.Currency))
+		total, err := decimal(d.Total)
+		if err != nil {
+			return Snapshot{}, fmt.Errorf("%s total: %w", ccy, err)
+		}
+		if total.Sign() == 0 {
+			continue
+		}
 		link := ThesisUnlinked
 		if ccy == "USDT" {
 			link = ThesisNotApplicable

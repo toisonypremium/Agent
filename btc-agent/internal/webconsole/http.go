@@ -50,6 +50,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/operations/health", a.runtimeHealth)
 	mux.HandleFunc("GET /api/v1/capital/overview", a.capitalOverview)
 	mux.HandleFunc("GET /api/v1/assets/okx", a.okxAssets)
+	mux.HandleFunc("GET /api/v1/assets/okx/reconciliation", a.okxReconciliation)
 	mux.HandleFunc("GET /api/v1/market-planner", a.marketPlanner)
 	mux.HandleFunc("GET /api/v1/capital/theses", a.thesisCapital)
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
@@ -87,6 +88,14 @@ func (a *API) marketPlanner(w http.ResponseWriter, _ *http.Request) {
 	out, err := a.service.MarketPlanner()
 	if err != nil {
 		writeProblem(w, 503, "market_planner_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
+func (a *API) okxReconciliation(w http.ResponseWriter, _ *http.Request) {
+	out, err := a.service.OKXReconciliation()
+	if err != nil {
+		writeProblem(w, 503, "okx_reconciliation_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)

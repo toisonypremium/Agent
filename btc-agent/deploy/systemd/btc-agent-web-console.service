@@ -7,6 +7,7 @@ Wants=network-online.target
 Type=simple
 Environment=BTC_AGENT_WEB_DB_PATH=%h/btc-agent/runtime/data/btc_agent.db
 Environment=BTC_AGENT_WEB_STATIC_DIR=%h/btc-agent/web-console/current/static
+Environment=BTC_AGENT_WEB_HEALTH_DIR=%h/btc-agent/runtime/observer
 Environment=BTC_AGENT_WEB_LISTEN_ADDR=127.0.0.1:8787
 Environment=BTC_AGENT_CF_ACCESS_TEAM_DOMAIN=linhbot.cloudflareaccess.com
 Environment=BTC_AGENT_CF_ACCESS_AUD=5694969811a524830560d29e7e913a4048c0672e2afcb406f0a82e30fa38df84

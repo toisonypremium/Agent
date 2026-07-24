@@ -46,6 +46,11 @@ func main() {
 		log.Fatal(err)
 	}
 	service.SetHaltDB(haltDB)
+	healthDir := os.Getenv("BTC_AGENT_WEB_HEALTH_DIR")
+	if healthDir == "" {
+		log.Fatal("BTC_AGENT_WEB_HEALTH_DIR required")
+	}
+	service.SetRuntimeHealthSource(webconsole.NewRuntimeHealthArtifact(healthDir))
 	api := webconsole.NewAPI(service, time.Now)
 	if err := api.ConfigureAccess(os.Getenv("BTC_AGENT_CF_ACCESS_TEAM_DOMAIN"), os.Getenv("BTC_AGENT_CF_ACCESS_AUD"), os.Getenv("BTC_AGENT_WEB_PUBLIC_ORIGIN")); err != nil {
 		log.Fatal(err)

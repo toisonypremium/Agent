@@ -122,3 +122,15 @@ func TestCapitalReadModelSurfacesProjectionDriftWithoutRepair(t *testing.T) {
 		t.Fatalf("ledger=%+v err=%v", ledger, err)
 	}
 }
+
+func TestRuntimeHealthArtifactIsFixedAllowlistRegularFile(t *testing.T) {
+	now := time.Date(2026, 7, 24, 2, 0, 0, 0, time.UTC)
+	dir := t.TempDir()
+	if _, err := NewRuntimeHealthArtifact(dir).LoadRuntimeHealth(); err == nil { t.Fatal("missing fixed artifact accepted") }
+	body, _ := json.Marshal(RuntimeHealthSnapshot{ObservedAt: now, SchedulerCount: 1, HeartbeatState: "healthy", ObserverState: "pass"})
+	if err := os.WriteFile(filepath.Join(dir, runtimeHealthArtifactName), body, 0600); err != nil { t.Fatal(err) }
+	if _, err := NewRuntimeHealthArtifact(dir).LoadRuntimeHealth(); err != nil { t.Fatal(err) }
+	if err := os.Remove(filepath.Join(dir, runtimeHealthArtifactName)); err != nil { t.Fatal(err) }
+	if err := os.Symlink("/etc/passwd", filepath.Join(dir, runtimeHealthArtifactName)); err != nil { t.Fatal(err) }
+	if _, err := NewRuntimeHealthArtifact(dir).LoadRuntimeHealth(); err == nil { t.Fatal("symlink artifact accepted") }
+}

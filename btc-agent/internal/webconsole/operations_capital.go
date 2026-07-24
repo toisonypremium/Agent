@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 )
 
 const runtimeHealthFreshFor = 5 * time.Minute
+const runtimeHealthArtifactName = "web_console_runtime_health.json"
 
 type RuntimeHealthSnapshot struct {
 	ObservedAt          time.Time `json:"observed_at"`
@@ -24,6 +26,22 @@ type RuntimeHealthSource interface {
 	LoadRuntimeHealth() (RuntimeHealthSnapshot, error)
 }
 type runtimeHealthFile struct{ path string }
+
+type runtimeHealthArtifact struct{ dir string }
+
+// NewRuntimeHealthArtifact reads one fixed observer-produced JSON filename only.
+func NewRuntimeHealthArtifact(dir string) RuntimeHealthSource { return runtimeHealthArtifact{dir: dir} }
+func (a runtimeHealthArtifact) LoadRuntimeHealth() (RuntimeHealthSnapshot, error) {
+	path := filepath.Join(a.dir, runtimeHealthArtifactName)
+	info, err := os.Lstat(path)
+	if err != nil {
+		return RuntimeHealthSnapshot{}, err
+	}
+	if !info.Mode().IsRegular() {
+		return RuntimeHealthSnapshot{}, fmt.Errorf("runtime health artifact is not a regular file")
+	}
+	return runtimeHealthFile{path: path}.LoadRuntimeHealth()
+}
 
 func NewRuntimeHealthFile(path string) RuntimeHealthSource { return runtimeHealthFile{path: path} }
 func (f runtimeHealthFile) LoadRuntimeHealth() (RuntimeHealthSnapshot, error) {

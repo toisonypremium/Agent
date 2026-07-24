@@ -52,6 +52,7 @@ func (a *API) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/capital/theses", a.thesisCapital)
 	mux.HandleFunc("GET /api/v1/paper/orders", a.paperOrders)
 	mux.HandleFunc("GET /api/v1/events", a.events)
+	mux.HandleFunc("GET /api/v1/audit", a.audit)
 	mux.HandleFunc("POST /api/v1/halt", a.halt)
 	return secureHeaders(mux)
 }
@@ -103,6 +104,18 @@ func (a *API) scorecard(w http.ResponseWriter, _ *http.Request) {
 	out, err := a.service.Scorecard()
 	if err != nil {
 		writeProblem(w, 503, "paper_scorecard_unavailable")
+		return
+	}
+	writeEnvelope(w, a.now, out)
+}
+func (a *API) audit(w http.ResponseWriter, r *http.Request) {
+	limit, ok := queryLimit(w, r)
+	if !ok {
+		return
+	}
+	out, err := a.service.Audit(limit, RoleViewer)
+	if err != nil {
+		writeProblem(w, 503, "audit_unavailable")
 		return
 	}
 	writeEnvelope(w, a.now, out)

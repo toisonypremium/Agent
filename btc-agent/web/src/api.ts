@@ -23,6 +23,8 @@ async function read<T>(path: string, signal?: AbortSignal): Promise<Envelope<T>>
 export const readOverview = (signal?: AbortSignal) => read<Overview>('/api/v1/overview', signal)
 export const readScorecard = (signal?: AbortSignal) => read<Scorecard>('/api/v1/paper/scorecard', signal)
 export const readPaperOrders = (signal?: AbortSignal) => read<{ orders: PaperOrder[]; limit: number }>('/api/v1/paper/orders?limit=10', signal)
+export type AuditEvent = { id: number; timestamp: string; actor: string; action: string; result: string; request_id: string }
+export const readAudit = (signal?: AbortSignal) => read<{ events: AuditEvent[]; limit: number }>('/api/v1/audit?limit=12', signal)
 export const readEvents = (signal?: AbortSignal) => read<{ events: Event[]; limit: number }>('/api/v1/events?limit=6', signal)
 export const readRuntimeHealth = (signal?: AbortSignal) => read<RuntimeHealth>('/api/v1/operations/health', signal)
 export const readCapitalOverview = (signal?: AbortSignal) => read<CapitalOverview>('/api/v1/capital/overview', signal)

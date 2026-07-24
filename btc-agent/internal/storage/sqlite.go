@@ -193,7 +193,7 @@ func OpenWritableExisting(path string) (*DB, error) {
 	if !info.Mode().IsRegular() {
 		return nil, fmt.Errorf("sqlite writable path is not a regular file: %s", path)
 	}
-	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY"
+	dsn := "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(wal)&_pragma=synchronous(NORMAL)&_pragma=temp_store(MEMORY)"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

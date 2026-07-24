@@ -20,15 +20,19 @@ type WebHaltReceipt struct {
 // RequestWebHalt is intentionally one-way: it can only set halted=true. The
 // idempotency key is hashed before persistence and every accepted request is
 // recorded in both the runtime and operator audit ledgers in one transaction.
-func (d *DB) RequestWebHalt(identity, reason, idempotencyKey string, now time.Time) (WebHaltReceipt, error) {
+func (d *DB) RequestWebHalt(identity, reasonCode, summary, idempotencyKey string, now time.Time) (WebHaltReceipt, error) {
 	identity = strings.TrimSpace(strings.ToLower(identity))
-	reason = strings.TrimSpace(reason)
+	reasonCode, validReason := NormalizeWebHaltReason(reasonCode)
+	summary = strings.TrimSpace(summary)
 	idempotencyKey = strings.TrimSpace(idempotencyKey)
 	if identity == "" || len(identity) > 320 {
 		return WebHaltReceipt{}, fmt.Errorf("identity invalid")
 	}
-	if len(reason) < 8 || len(reason) > 500 {
-		return WebHaltReceipt{}, fmt.Errorf("reason length invalid")
+	if !validReason {
+		return WebHaltReceipt{}, fmt.Errorf("halt reason code invalid")
+	}
+	if len(summary) < 8 || len(summary) > 500 {
+		return WebHaltReceipt{}, fmt.Errorf("halt summary length invalid")
 	}
 	if len(idempotencyKey) < 16 || len(idempotencyKey) > 128 {
 		return WebHaltReceipt{}, fmt.Errorf("idempotency key invalid")
@@ -55,8 +59,8 @@ func (d *DB) RequestWebHalt(identity, reason, idempotencyKey string, now time.Ti
 	if err != sql.ErrNoRows {
 		return WebHaltReceipt{}, err
 	}
-	payload, _ := json.Marshal(map[string]string{"request_id": requestID, "reason": reason})
-	if _, err = tx.Exec(`INSERT INTO web_halt_requests(idempotency_hash,identity,reason,created_at) VALUES(?,?,?,?)`, requestID, identity, reason, now.Unix()); err != nil {
+	payload, _ := json.Marshal(map[string]string{"request_id": requestID, "reason_code": reasonCode, "summary": summary})
+	if _, err = tx.Exec(`INSERT INTO web_halt_requests(idempotency_hash,identity,reason,created_at) VALUES(?,?,?,?)`, requestID, identity, reasonCode, now.Unix()); err != nil {
 		return WebHaltReceipt{}, err
 	}
 	if _, err = tx.Exec(`INSERT INTO runtime_events(timestamp,source,type,severity,fingerprint,payload_json,handled_at) VALUES(?,?,?,?,?,?,NULL)`, now.Unix(), "web-console", "operator_halt_request", "critical", "web-halt:"+requestID, string(payload)); err != nil {

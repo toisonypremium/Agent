@@ -224,11 +224,11 @@ func (s *Service) Events(limit int) (EventsPage, error) {
 
 // SetHaltDB installs the write-only, narrow halt authority. A nil value disables halt.
 func (s *Service) SetHaltDB(db *storage.DB) { s.haltDB = db }
-func (s *Service) RequestHalt(identity, reason, key string) (storage.WebHaltReceipt, error) {
+func (s *Service) RequestHalt(identity, reasonCode, summary, key string) (storage.WebHaltReceipt, error) {
 	if s.haltDB == nil {
 		return storage.WebHaltReceipt{}, fmt.Errorf("halt authority unavailable")
 	}
-	return s.haltDB.RequestWebHalt(identity, reason, key, s.now().UTC())
+	return s.haltDB.RequestWebHalt(identity, reasonCode, summary, key, s.now().UTC())
 }
 
 func paperOrderStatusAllowed(status string) bool {

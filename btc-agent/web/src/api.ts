@@ -39,12 +39,12 @@ export const readRuntimeHealth = (signal?: AbortSignal) => read<RuntimeHealth>('
 export const readCapitalOverview = (signal?: AbortSignal) => read<CapitalOverview>('/api/v1/capital/overview', signal)
 export const readThesisCapital = (signal?: AbortSignal) => read<{ items: ThesisCapital[]; limit: number }>('/api/v1/capital/theses?limit=8', signal)
 
-export async function requestHalt(reason: string, signal?: AbortSignal): Promise<void> {
+export async function requestHalt(reasonCode: string, summary: string, signal?: AbortSignal): Promise<void> {
   const csrf = await read<{ csrf_token: string }>('/api/v1/csrf', signal)
   const response = await fetch(`${apiBase}/api/v1/halt`, {
     method: 'POST', credentials: 'same-origin', signal,
     headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-Token': csrf.data.csrf_token, 'Idempotency-Key': crypto.randomUUID() },
-    body: JSON.stringify({ reason }),
+    body: JSON.stringify({ reason_code: reasonCode, summary }),
   })
   if (!response.ok) throw new Error(`halt request failed: ${response.status}`)
 }

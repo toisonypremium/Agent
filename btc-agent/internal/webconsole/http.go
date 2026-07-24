@@ -164,7 +164,8 @@ func (a *API) paperOrders(w http.ResponseWriter, r *http.Request) {
 }
 
 type haltRequest struct {
-	Reason string `json:"reason"`
+	ReasonCode string `json:"reason_code"`
+	Summary    string `json:"summary"`
 }
 
 func (a *API) halt(w http.ResponseWriter, r *http.Request) {
@@ -196,7 +197,7 @@ func (a *API) halt(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, 400, "invalid_halt_request")
 		return
 	}
-	receipt, e := a.service.RequestHalt(identity, body.Reason, key)
+	receipt, e := a.service.RequestHalt(identity, body.ReasonCode, body.Summary, key)
 	if e != nil {
 		writeProblem(w, 400, "halt_request_rejected")
 		return

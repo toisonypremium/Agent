@@ -202,6 +202,12 @@ exit:
   min_pnl_for_time_stop: 0.0
 
 # Hermes strategy authority. Keep observe/shadow until audited.
+dca:
+  # Writable scheduler only. The read-only Web Console and observer never run this.
+  allocation_enabled: false
+  artifact_directory: "runtime/observer"
+  artifact_max_age_minutes: 5
+
 hermes_operator:
   enabled: false
   mode: "observe" # observe | shadow | canary | autonomous

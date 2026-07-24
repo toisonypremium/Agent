@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"btc-agent/internal/config"
+	"btc-agent/internal/dca"
 	"btc-agent/internal/hermesagent"
 	"btc-agent/internal/liveguard"
 	"btc-agent/internal/storage"
@@ -52,7 +53,16 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 		return fmt.Errorf("load timezone %q: %w", tz, err)
 	}
 
+	var dcaAllocator *dca.AllocationCoordinator
 	log.Printf("[Scheduler] Started. Timezone: %s", tz)
+	if cfg.DCA.AllocationEnabled {
+		maxAge := time.Duration(cfg.DCA.ArtifactMaxAgeMinutes) * time.Minute
+		if maxAge <= 0 {
+			maxAge = 5 * time.Minute
+		}
+		dcaAllocator = &dca.AllocationCoordinator{DB: db, Source: dca.FileArtifactSource{Dir: cfg.DCA.ArtifactDirectory, MaxAge: maxAge}}
+		log.Printf("[Scheduler] DCA allocation coordinator enabled; it has funding authority only, never order authority.")
+	}
 	if dryRun {
 		log.Println("[Scheduler] Dry-run mode enabled: supervisor/order management cycles will not place or cancel real orders.")
 	}
@@ -604,6 +614,16 @@ func runScheduler(ctx context.Context, cfg config.Config, db *storage.DB, runNow
 			log.Printf("[Scheduler] Next market watch: %s", nextMarketWatch.Format("2006-01-02 15:04:05 MST"))
 			writeHeartbeat("market watch completed")
 
+		}
+
+		if dcaAllocator != nil && !time.Now().Before(nextSupervisor) {
+			if allocation, err := dcaAllocator.ObserveAndMaybeAllocate(); err != nil {
+				log.Printf("[Scheduler] DCA allocation coordinator error: %v", err)
+			} else if allocation.EpochID > 0 {
+				log.Printf("[Scheduler] DCA allocation epoch=%d applied=%v", allocation.EpochID, allocation.Applied)
+			} else {
+				log.Printf("[Scheduler] DCA allocation not applied: %s", allocation.Reason)
+			}
 		}
 
 		if cfg.Live.SupervisorEnabled && !time.Now().Before(nextSupervisor) {

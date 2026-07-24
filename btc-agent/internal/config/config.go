@@ -282,6 +282,11 @@ type Config struct {
 		MMGateSamples                     int     `yaml:"mm_gate_samples"`
 		MMGateSampleDelayMs               int     `yaml:"mm_gate_sample_delay_ms"`
 	} `yaml:"live"`
+	DCA struct {
+		AllocationEnabled     bool   `yaml:"allocation_enabled"`
+		ArtifactDirectory     string `yaml:"artifact_directory"`
+		ArtifactMaxAgeMinutes int    `yaml:"artifact_max_age_minutes"`
+	} `yaml:"dca"`
 	HermesOperator HermesOperatorConfig `yaml:"hermes_operator"`
 	Exit           ExitConfig           `yaml:"exit"`
 	Execution      struct {

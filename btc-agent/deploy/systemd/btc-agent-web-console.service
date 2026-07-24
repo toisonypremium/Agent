@@ -12,6 +12,7 @@ Environment=BTC_AGENT_WEB_LISTEN_ADDR=127.0.0.1:8787
 Environment=BTC_AGENT_CF_ACCESS_TEAM_DOMAIN=linhbot.cloudflareaccess.com
 Environment=BTC_AGENT_CF_ACCESS_AUD=5694969811a524830560d29e7e913a4048c0672e2afcb406f0a82e30fa38df84
 Environment=BTC_AGENT_WEB_PUBLIC_ORIGIN=https://console.linhbot.xyz
+Environment=BTC_AGENT_WEB_OPERATOR_IDENTITY=llthtt1@gmail.com
 ExecStart=%h/btc-agent/web-console/current/web-console
 Restart=on-failure
 RestartSec=10

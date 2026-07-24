@@ -18,10 +18,11 @@ type Envelope[T any] struct {
 	Warnings      []string  `json:"warnings"`
 }
 type API struct {
-	service      *Service
-	now          Clock
-	access       *accessVerifier
-	publicOrigin string
+	service       *Service
+	now           Clock
+	access        *accessVerifier
+	publicOrigin  string
+	ownerIdentity string
 }
 
 func NewAPI(service *Service, now Clock) *API {
@@ -30,13 +31,14 @@ func NewAPI(service *Service, now Clock) *API {
 	}
 	return &API{service: service, now: now}
 }
-func (a *API) ConfigureAccess(teamDomain, audience, publicOrigin string) error {
+func (a *API) ConfigureAccess(teamDomain, audience, publicOrigin, ownerIdentity string) error {
 	v, err := newAccessVerifier(AccessConfig{TeamDomain: teamDomain, Audience: audience})
 	if err != nil {
 		return err
 	}
 	a.access = v
 	a.publicOrigin = strings.TrimRight(publicOrigin, "/")
+	a.ownerIdentity = strings.TrimSpace(strings.ToLower(ownerIdentity))
 	return nil
 }
 func (a *API) Handler() http.Handler {
@@ -151,6 +153,10 @@ func (a *API) halt(w http.ResponseWriter, r *http.Request) {
 	identity, e := a.access.identity(r)
 	if e != nil {
 		writeProblem(w, 401, "access_identity_required")
+		return
+	}
+	if roleForIdentity(a.ownerIdentity, identity) != RoleOperator {
+		writeProblem(w, 403, "operator_role_required")
 		return
 	}
 	key := r.Header.Get("Idempotency-Key")

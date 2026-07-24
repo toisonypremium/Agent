@@ -15,6 +15,62 @@ import (
 	"btc-agent/internal/webconsole"
 )
 
+type heartbeatStatus struct {
+	State          string
+	AgeSeconds     int64
+	SchedulerCount int
+}
+
+func readHeartbeat(path string, now time.Time) heartbeatStatus {
+	out := heartbeatStatus{State: "unavailable"}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return out
+	}
+	var h heartbeat
+	if json.Unmarshal(body, &h) != nil {
+		return out
+	}
+	at, err := time.Parse(time.RFC3339, h.GeneratedAt)
+	if err != nil {
+		return out
+	}
+	out.AgeSeconds = int64(now.Sub(at.UTC()).Seconds())
+	if out.AgeSeconds < 0 || out.AgeSeconds > 300 {
+		out.State = "stale"
+		return out
+	}
+	out.State = h.Status
+	if h.Status == "running" && h.PID > 0 {
+		if _, err := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", h.PID))); err == nil {
+			out.SchedulerCount = 1
+		}
+	}
+	return out
+}
+func writeArtifact(outDir string, body []byte) error {
+	if err := os.MkdirAll(outDir, 0700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(outDir, ".runtime-health-")
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err = tmp.Write(body); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Chmod(0600); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err = tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp.Name(), filepath.Join(outDir, "web_console_runtime_health.json"))
+}
+
 type heartbeat struct {
 	GeneratedAt string `json:"generated_at"`
 	Status      string `json:"status"`
@@ -28,20 +84,8 @@ func main() {
 	}
 	now := time.Now().UTC()
 	snapshot := webconsole.RuntimeHealthSnapshot{ObservedAt: now, SchedulerCount: 0, HeartbeatState: "unavailable", DatabaseState: "unavailable", ObserverState: "fail"}
-	if body, err := os.ReadFile(heartbeatPath); err == nil {
-		var h heartbeat
-		if json.Unmarshal(body, &h) == nil {
-			if at, e := time.Parse(time.RFC3339, h.GeneratedAt); e == nil {
-				snapshot.HeartbeatAgeSeconds = int64(now.Sub(at.UTC()).Seconds())
-				snapshot.HeartbeatState = h.Status
-				if h.Status == "running" && h.PID > 0 {
-					if _, statErr := os.Stat(filepath.Join("/proc", fmt.Sprintf("%d", h.PID))); statErr == nil {
-						snapshot.SchedulerCount = 1
-					}
-				}
-			}
-		}
-	}
+	h := readHeartbeat(heartbeatPath, now)
+	snapshot.HeartbeatState, snapshot.HeartbeatAgeSeconds, snapshot.SchedulerCount = h.State, h.AgeSeconds, h.SchedulerCount
 	db, err := storage.OpenReadOnly(dbPath)
 	if err == nil {
 		defer db.Close()
@@ -56,29 +100,11 @@ func main() {
 	if snapshot.HeartbeatState == "running" && snapshot.HeartbeatAgeSeconds >= 0 && snapshot.HeartbeatAgeSeconds <= 300 && snapshot.DatabaseState == "ok" && snapshot.LeaseFresh {
 		snapshot.ObserverState = "pass"
 	}
-	if err := os.MkdirAll(outDir, 0700); err != nil {
-		log.Fatal(err)
-	}
 	body, err := json.Marshal(snapshot)
 	if err != nil {
 		log.Fatal(err)
 	}
-	tmp, err := os.CreateTemp(outDir, ".runtime-health-")
-	if err != nil {
-		log.Fatal(err)
-	}
-	if _, err = tmp.Write(body); err != nil {
-		tmp.Close()
-		log.Fatal(err)
-	}
-	if err = tmp.Chmod(0600); err != nil {
-		tmp.Close()
-		log.Fatal(err)
-	}
-	if err = tmp.Close(); err != nil {
-		log.Fatal(err)
-	}
-	if err = os.Rename(tmp.Name(), filepath.Join(outDir, "web_console_runtime_health.json")); err != nil {
+	if err := writeArtifact(outDir, body); err != nil {
 		log.Fatal(err)
 	}
 }

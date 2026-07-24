@@ -43,5 +43,6 @@ jobs:
         with: {node-version: '22.16.0', cache: npm, cache-dependency-path: btc-agent/web/package-lock.json}
       - run: npm ci
       - run: npm audit --omit=dev
+      - run: npm run test
       - run: npm run lint
       - run: npm run build

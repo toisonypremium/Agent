@@ -48,3 +48,14 @@ func TestLoadArtifactFailsClosedWhenStaleOrSymlink(t *testing.T) {
 		t.Fatal("symlink accepted")
 	}
 }
+
+func TestLoadArtifactRejectsTamperedAssetBalance(t *testing.T) {
+	dir := t.TempDir()
+	body := `{"schema_version":1,"nguon":"okx_spot_read_only","thoi_diem_quan_sat":"2026-07-24T03:00:00Z","trang_thai":"da_xac_minh","tai_san":[{"ma_tai_san":"BTC","kha_dung":"1","dang_khoa":"0","tong":"2","trang_thai_gan_thesis":"chua_gan_thesis"}],"canh_bao":[]}`
+	if err := os.WriteFile(filepath.Join(dir, ArtifactFilename), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadArtifact(dir, time.Date(2026, 7, 24, 3, 1, 0, 0, time.UTC), 5*time.Minute); err == nil {
+		t.Fatal("tampered asset total accepted")
+	}
+}

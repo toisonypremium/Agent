@@ -74,6 +74,9 @@ func LoadArtifact(dir string, now time.Time, maxAge time.Duration) (Artifact, er
 	if err != nil || a.SchemaVersion != 1 || a.Source != SourceOKXSpotReadOnly {
 		return Artifact{State: StateUnavailable}, fmt.Errorf("OKX asset artifact invalid")
 	}
+	if err := ValidateSnapshot(Snapshot{Source: a.Source, Assets: a.Assets}); err != nil {
+		return Artifact{State: StateUnavailable}, fmt.Errorf("OKX asset artifact balances invalid")
+	}
 	if now.Sub(at) > maxAge {
 		a.State = StateStale
 		return a, nil

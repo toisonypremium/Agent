@@ -6,16 +6,16 @@ import (
 )
 
 type DCAAllocationStatus struct {
-	State              string          `json:"trang_thai"`
-	ObservedAt         string          `json:"thoi_diem_quan_sat,omitempty"`
-	AvailableUSDT      float64         `json:"usdt_kha_dung"`
-	EnvelopeUSDT       float64         `json:"dca_envelope_usdt"`
-	NetNewUSDT         float64         `json:"von_tang_rong_usdt"`
-	BufferPercent      int             `json:"ty_le_dem_phan_tram"`
-	GlobalCapPercent   float64         `json:"global_cap_phan_tram"`
-	AutoHaltReason     string          `json:"ly_do_auto_halt,omitempty"`
-	Allocations        []DCAAllocation `json:"phan_bo"`
-	Warnings           []string        `json:"canh_bao"`
+	State            string          `json:"trang_thai"`
+	ObservedAt       string          `json:"thoi_diem_quan_sat,omitempty"`
+	AvailableUSDT    float64         `json:"usdt_kha_dung"`
+	EnvelopeUSDT     float64         `json:"dca_envelope_usdt"`
+	NetNewUSDT       float64         `json:"von_tang_rong_usdt"`
+	BufferPercent    int             `json:"ty_le_dem_phan_tram"`
+	GlobalCapPercent float64         `json:"global_cap_phan_tram"`
+	AutoHaltReason   string          `json:"ly_do_auto_halt,omitempty"`
+	Allocations      []DCAAllocation `json:"phan_bo"`
+	Warnings         []string        `json:"canh_bao"`
 }
 type DCAAllocation struct {
 	ThesisID     string  `json:"thesis_id"`
@@ -43,10 +43,14 @@ func (s *Service) DCAAllocationStatus() (DCAAllocationStatus, error) {
 		}
 	}
 	cap, err := s.db.DCAExecutionState()
-	if err != nil { return out, err }
+	if err != nil {
+		return out, err
+	}
 	out.GlobalCapPercent = cap.GlobalCapPercent
 	safety, err := s.db.DCASafetyState()
-	if err != nil { return out, err }
+	if err != nil {
+		return out, err
+	}
 	out.AutoHaltReason = safety.AutoHaltReason
 	return out, nil
 }
